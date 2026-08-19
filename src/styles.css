@@ -1,0 +1,2898 @@
+/*
+ * Typografia i kolor.
+ *
+ * Paleta jest ACHROMATYCZNA — czern i neutralne szarosci, bez podbicia
+ * w zadna strone. Ani na niebiesko (pierwsza wersja: zimno), ani na cieplo
+ * (druga wersja: nadkorekta). "Przyjazny" charakter bierze sie z kroju pisma,
+ * poziomow kontrastu i odstepow, a nie z odcienia szarosci.
+ *
+ * Kontrast tekstu jest stopniowany, nie maksymalny: #fff na czerni meczy wzrok,
+ * wiec tekst glowny to ~97%, drugorzedny wyraznie nizej.
+ *
+ * Skala odstepow: 4 px. To gestne narzedzie pracy, nie strona marketingowa —
+ * siatka 8 px i minimum 16 px tekstu z ogolnego design-guide rozbilyby te
+ * gestosc, wiec swiadomie ich tu nie stosujemy.
+ */
+:root {
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+
+  --row-h: 36px;
+  --head-h: 32px;
+  --bar-h: 44px;
+
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  /* Domyslny kroj. Podmieniany przez [data-font] — patrz src/font.ts. */
+  --font-ui:
+    'Inter Variable', 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, sans-serif;
+  --f-features: 'cv01', 'ss03';
+  --f-variations: 'opsz' auto;
+
+  /*
+   * Wagi sa NIESTANDARDOWE i to najbardziej zmienia charakter pisma:
+   * medium 510 (nie 500), semibold 590 (nie 600), bold 680 (nie 700).
+   * Inter jest fontem zmiennym, wiec te posrednie wartosci realnie dzialaja.
+   */
+  --w-normal: 400;
+  --w-medium: 510;
+  --w-semibold: 590;
+  --w-bold: 680;
+
+  /* Skala rozmiarow: micro 11, mini 12, small 13, regular 15, large 18. */
+  --t-micro: 11px;
+  --t-mini: 12px;
+  --t-small: 13px;
+  --t-large: 18px;
+
+  /*
+   * Dwie drabinki, ktorych nie wolno odwrocic — na nich stoi cale wrazenie
+   * glebi. Tlo rosnie razem z elewacja (luminancja 9 -> 14 -> 21 -> 26 -> 37
+   * -> 52): strona, panel, hover, active, obramowanie. Tekst schodzi w druga
+   * strone (249 -> 215 -> 141 -> 102): glowny, drugorzedny, przygaszony,
+   * ledwie widoczny. Przy kazdej zmianie kolorow trzeba sprawdzic oba ciagi.
+   */
+  --bg-base: #09090c;
+  --bg-panel: #0e0e13;
+  --bg-hover: #131617;
+  --bg-active: #181a1a;
+  --border: #24252c;
+  --border-strong: #36333b;
+
+  --fg: #f9f9f7;
+  --fg-secondary:#d2d8e2;
+  --fg-muted: #8b8d99;
+  --fg-dim: #63666f;
+
+  /* jeden akcent. Reszta kolorow to wylacznie sygnal statusu. */
+  --accent: #7273ff;
+  --accent-hover: #7f90ff;
+  --accent-tint: #1a1a31;
+
+  --accent-amber: #f0bf00; /* --color-yellow */
+  --accent-green: #27a644; /* --color-green  */
+  --accent-orange: #fc7840; /* --color-orange */
+
+  --shadow-pop: 0 12px 32px #00000070;
+
+  color-scheme: dark;
+}
+
+/*
+ * Jasny motyw domyslny. Te same drabinki co w ciemnym, tylko odwrocone:
+ * tlo schodzi w dol razem z elewacja, tekst idzie w gore.
+ *
+ * Warunkiem jest atrybut, nie `prefers-color-scheme`, bo motyw da sie wymusic
+ * recznie (Motyw w panelu widoku). Wybor "Systemowy" odpytuje media query
+ * w JS i wpisuje tu wynik — patrz src/theme.ts. Nadpisujemy WYLACZNIE to,
+ * co zalezy od motywu; odstepy, wagi i kolory statusow zostaja z :root.
+ */
+:root[data-theme='light'] {
+  --bg-base: #fffeff;
+  --bg-panel: #f7f8f7;
+  --bg-hover: #f3f3f6;
+  --bg-active: #eeeef1;
+  --border: #e8eae8;
+  --border-strong: #e3e1e5;
+
+  --fg: #262c31;
+  --fg-secondary:#3b4349;
+  --fg-muted: #6d6d78;
+  --fg-dim: #84868e;
+
+  --accent: #5f68d5;
+  --accent-hover: #8b87f3;
+  --accent-tint: #f0eeff;
+
+  --shadow-pop: 0 12px 32px #08090a1f;
+
+  color-scheme: light;
+}
+
+/*
+ * ─── Motywy gotowe ──────────────────────────────────────────────────────────
+ *
+ * Kazdy nadpisuje WYLACZNIE warstwe koloru. Odstepy, wagi i rozmiary zostaja
+ * z :root, wiec zmiana motywu nie rusza ukladu ani gestosci listy.
+ *
+ * Wartosci pochodza z publikowanych palet (Tokyo Night, Catppuccin, Rose Pine,
+ * Nord, Gruvbox, Solarized), a nie z dobierania na oko — dzieki temu kazdy
+ * motyw jest spojny sam w sobie, zamiast byc przebarwionym motywem domyslnym.
+ *
+ * Dwie zasady wspolne dla wszystkich:
+ *   1. Elewacja: w ciemnych motywach panel jest JASNIEJSZY od tla, w jasnych
+ *      CIEMNIEJSZY. Odwrocenie tego natychmiast plaszczy interfejs.
+ *   2. Tekst glowny nie jest maksymalnie kontrastowy (zadnego #fff na czerni)
+ *      — kontrast jest stopniowany przez fg / fg-secondary / fg-muted / fg-dim.
+ */
+
+/* Tokyo Night — chlodny granat, najblizszy charakterem domyslnemu ciemnemu. */
+:root[data-theme='tokyo-night'] {
+  --bg-base: #1a1b26;
+  --bg-panel: #1f2131;
+  --bg-hover: #24283b;
+  --bg-active: #292e42;
+  --border: #2f334d;
+  --border-strong: #3b4261;
+
+  --fg: #c0caf5;
+  --fg-secondary: #a9b1d6;
+  --fg-muted: #787c99;
+  --fg-dim: #565f89;
+
+  --accent: #7aa2f7;
+  --accent-hover: #9eb8fa;
+  --accent-tint: #1e2740;
+
+  --accent-amber: #e0af68;
+  --accent-green: #9ece6a;
+  --accent-orange: #ff9e64;
+
+  --shadow-pop: 0 12px 32px #0b0c15b3;
+
+  color-scheme: dark;
+}
+
+/*
+ * Argonaut — kremowy tekst na granacie. Znak rozpoznawczy motywu to wlasnie ta
+ * ciepla biel (#fff8de) na chlodnym tle, wiec fg NIE jest tu przygaszany
+ * w strone szarosci; przygaszamy dopiero poziomy nizsze, i to na niebiesko.
+ */
+:root[data-theme='argonaut'] {
+  --bg-base: #212434;
+  --bg-panel: #292c3e;
+  --bg-hover: #31344a;
+  --bg-active: #393d55;
+  --border: #363a52;
+  --border-strong: #464b68;
+
+  --fg: #fff8de;
+  --fg-secondary: #ded8c4;
+  --fg-muted: #918fa3;
+  --fg-dim: #6c6a80;
+
+  --accent: #9a5feb;
+  --accent-hover: #ab7bf0;
+  --accent-tint: #2c2544;
+
+  --accent-amber: #ffb900;
+  --accent-green: #8ce10b;
+  /* Argonaut nie ma wlasnego pomaranczowego — bierzemy jego czerwien, bo ten
+     token sluzy sygnalowi "pilne", a nie dekoracji. */
+  --accent-orange: #ff2740;
+
+  --shadow-pop: 0 12px 32px #14161fb3;
+
+  color-scheme: dark;
+}
+
+/*
+ * Solarized Dark — jedyny motyw o tle w tonacji morskiej (#002b36) i celowo
+ * NISKIM kontrascie tekstu: Solarized zaklada, ze tekst glowny to base1, a nie
+ * biel. Podbicie go tutaj zniszczyloby cala idee tej palety.
+ */
+:root[data-theme='solarized-dark'] {
+  --bg-base: #002b36;
+  --bg-panel: #04313d;
+  --bg-hover: #073642;
+  --bg-active: #0d4250;
+  --border: #0e3f4b;
+  --border-strong: #17505e;
+
+  --fg: #93a1a1;
+  --fg-secondary: #839496;
+  --fg-muted: #6f8288;
+  --fg-dim: #586e75;
+
+  --accent: #268bd2;
+  --accent-hover: #4aa3e0;
+  --accent-tint: #06303f;
+
+  --accent-amber: #b58900;
+  --accent-green: #859900;
+  --accent-orange: #cb4b16;
+
+  --shadow-pop: 0 12px 32px #001820b3;
+
+  color-scheme: dark;
+}
+
+/* Everforest — szarozielone tlo i piaskowy tekst; jedyny motyw w zieleni. */
+:root[data-theme='everforest'] {
+  --bg-base: #272e33;
+  --bg-panel: #2d353b;
+  --bg-hover: #343f44;
+  --bg-active: #3d484d;
+  --border: #3d484d;
+  --border-strong: #4f585e;
+
+  --fg: #d3c6aa;
+  --fg-secondary: #bdb293;
+  --fg-muted: #9da9a0;
+  --fg-dim: #7a8478;
+
+  /* Akcentem jest morski, nie firmowa zielen Everforesta — ta jest juz zajeta
+     przez sygnal statusu i oba kolory bilyby sie w tym samym wierszu. */
+  --accent: #7fbbb3;
+  --accent-hover: #9ccfc8;
+  --accent-tint: #2f3d3e;
+
+  --accent-amber: #dbbc7f;
+  --accent-green: #a7c080;
+  --accent-orange: #e69875;
+
+  --shadow-pop: 0 12px 32px #1e2427b3;
+
+  color-scheme: dark;
+}
+
+/* Nord — chlodny blekitny szary, najbardziej stonowany. */
+:root[data-theme='nord'] {
+  --bg-base: #2e3440;
+  --bg-panel: #343b49;
+  --bg-hover: #3b4252;
+  --bg-active: #434c5e;
+  --border: #3b4252;
+  --border-strong: #4c566a;
+
+  --fg: #eceff4;
+  --fg-secondary: #d8dee9;
+  --fg-muted: #97a0b0;
+  --fg-dim: #6d778a;
+
+  --accent: #88c0d0;
+  --accent-hover: #a3d0dd;
+  --accent-tint: #33404b;
+
+  --accent-amber: #ebcb8b;
+  --accent-green: #a3be8c;
+  --accent-orange: #d08770;
+
+  --shadow-pop: 0 12px 32px #1c2029b3;
+
+  color-scheme: dark;
+}
+
+/* Gruvbox — cieply retro, jedyny naprawde "papierowy" sposrod ciemnych. */
+:root[data-theme='gruvbox'] {
+  --bg-base: #1d2021;
+  --bg-panel: #282828;
+  --bg-hover: #32302f;
+  --bg-active: #3c3836;
+  --border: #3c3836;
+  --border-strong: #504945;
+
+  --fg: #ebdbb2;
+  --fg-secondary: #d5c4a1;
+  --fg-muted: #a89984;
+  --fg-dim: #7c6f64;
+
+  --accent: #d3869b;
+  --accent-hover: #e0a1b2;
+  --accent-tint: #3b2b30;
+
+  --accent-amber: #fabd2f;
+  --accent-green: #b8bb26;
+  --accent-orange: #fe8019;
+
+  --shadow-pop: 0 12px 32px #0f1111b3;
+
+  color-scheme: dark;
+}
+
+/* Catppuccin Latte — jasny odpowiednik Mocha, ten sam fiolet akcentu. */
+:root[data-theme='catppuccin-latte'] {
+  --bg-base: #eff1f5;
+  --bg-panel: #e6e9ef;
+  --bg-hover: #dce0e8;
+  --bg-active: #ccd0da;
+  --border: #dce0e8;
+  --border-strong: #bcc0cc;
+
+  --fg: #4c4f69;
+  --fg-secondary: #5c5f77;
+  --fg-muted: #7c7f93;
+  --fg-dim: #9ca0b0;
+
+  --accent: #8839ef;
+  --accent-hover: #7a2be0;
+  --accent-tint: #f0e6fd;
+
+  --accent-amber: #df8e1d;
+  --accent-green: #40a02b;
+  --accent-orange: #fe640b;
+
+  --shadow-pop: 0 12px 32px #4c4f6924;
+
+  color-scheme: light;
+}
+
+/* Rose Pine Dawn — cieply, lekko rozowy papier; najlagodniejszy z jasnych. */
+:root[data-theme='rose-pine-dawn'] {
+  --bg-base: #faf4ed;
+  --bg-panel: #f4ede4;
+  --bg-hover: #efe6db;
+  --bg-active: #e9dfd2;
+  --border: #e5ded4;
+  --border-strong: #d8cfc4;
+
+  --fg: #575279;
+  --fg-secondary: #6a6389;
+  --fg-muted: #797593;
+  --fg-dim: #9893a5;
+
+  --accent: #907aa9;
+  --accent-hover: #7d6497;
+  --accent-tint: #efe9f4;
+
+  --accent-amber: #ea9d34;
+  --accent-green: #56949f;
+  --accent-orange: #d7827e;
+
+  --shadow-pop: 0 12px 32px #57527924;
+
+  color-scheme: light;
+}
+
+/* Solarized Light — najwyzszy kontrast tresci przy najcieplejszym tle. */
+:root[data-theme='solarized-light'] {
+  --bg-base: #fdf6e3;
+  --bg-panel: #f7f0dc;
+  --bg-hover: #eee8d5;
+  --bg-active: #e6dfc8;
+  --border: #e6dfc8;
+  --border-strong: #d3ccb5;
+
+  --fg: #586e75;
+  --fg-secondary: #657b83;
+  --fg-muted: #839496;
+  --fg-dim: #93a1a1;
+
+  --accent: #268bd2;
+  --accent-hover: #1a6ea8;
+  --accent-tint: #e3edf7;
+
+  --accent-amber: #b58900;
+  --accent-green: #859900;
+  --accent-orange: #cb4b16;
+
+  --shadow-pop: 0 12px 32px #586e7524;
+
+  color-scheme: light;
+}
+
+/*
+ * Bitrix24 — jedyny motyw, ktorego kolory nie sa dobrane, tylko WZIETE: wszystkie
+ * pochodza z `ui.design-tokens.css` portalu (nazwa tokenu w komentarzu obok).
+ * Dzieki temu aplikacja obok otwartego Bitriksa nie kloci sie z nim kolorem.
+ *
+ * Ulozenie warstw jest jednak nasze, nie jego. Bitrix trzyma szare tlo pulpitu
+ * i biale karty na wierzchu; tutaj panel musi byc CIEMNIEJSZY od tla — tak jak
+ * w kazdym jasnym motywie — bo inaczej pasek, menu i popovery przestaja
+ * odcinac sie od listy.
+ */
+:root[data-theme='bitrix'] {
+  --bg-base: #f8fafb; /* gray-02 */
+  --bg-panel: #eef2f4; /* gray-05 — tlo pulpitu Bitriksa */
+  --bg-hover: #e6e7e9; /* gray-15 */
+  --bg-active: #dfe0e3; /* gray-20 */
+  --border: #e6e7e9; /* gray-15 */
+  --border-strong: #c9ccd0; /* gray-35 */
+
+  --fg: #333333; /* palette-black-base */
+  --fg-secondary: #525c69; /* gray-90 */
+  --fg-muted: #828b95; /* gray-70 */
+  --fg-dim: #959ca4; /* gray-60 */
+
+  /* Akcentem jest kolor LINKU, nie firmowy blekit (blue-50 #2fc6f6): ten drugi
+     jest tak jasny, ze bialy tekst na przycisku bylby na nim nieczytelny. */
+  --accent: #2066b0; /* link-primary-base */
+  --accent-hover: #006484; /* blue-90 — ciemniejszy, wiec biale napisy zostaja */
+  --accent-tint: #e5f9ff; /* blue-20 */
+
+  --accent-amber: #e89b06; /* orange-60 */
+  --accent-green: #29ad49; /* accent-green */
+  --accent-orange: #f4433e; /* red-60 — u nas priorytet "Wysoki" */
+
+  --shadow-pop: 0 12px 32px #33333324;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/*
+ * Warianty znakow "cv01"/"ss03" i optyczne skalowanie robia wiekszosc roznicy
+ * w charakterze pisma. Zadnego wlasnego letter-spacingu — wczesniej bylo tu
+ * -0.006em, co walczylo z optical sizingiem Intera.
+ *
+ * Ustawienia ida przez tokeny, bo krój da sie przelaczyc (Czcionka w panelu
+ * widoku). Dla fontow bez wariantow OpenType i bez osi wagi wszystkie trzy
+ * `--f-*` schodza do `normal` — patrz blok [data-font] nizej.
+ */
+body {
+  background: var(--bg-base);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--t-small);
+  font-weight: var(--w-normal);
+  line-height: 1.5;
+  font-feature-settings: var(--f-features);
+  font-variation-settings: var(--f-variations);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Pogrubienie z tokena, nie z domyslnego 700 przegladarki — dzieki temu w krojach
+   monospace `**bold**` bierze `--w-bold` (a przy jednej wadze i tak jest dorabiane). */
+strong,
+b {
+  font-weight: var(--w-bold);
+}
+
+/*
+ * Monocraft to font pikselowy: ma jedna wage i zadnych wariantow znakow.
+ * Dlatego posrednie wagi (510/590/680) schodza do 400/700 — przy jednej wadze
+ * przegladarka i tak dorobilaby pogrubienie sztucznie, co na pikselach wyglada
+ * jak rozmazanie. Antyaliasing tez wylaczamy: siatka pikseli ma byc ostra.
+ */
+:root[data-font='monocraft'] {
+  --font-ui: 'Monocraft', 'Consolas', ui-monospace, monospace;
+  --f-features: normal;
+  --f-variations: normal;
+
+  --w-normal: 400;
+  --w-medium: 400;
+  --w-semibold: 700;
+  --w-bold: 700;
+
+  /*
+   * Cala skala schodzi o stopien. Monocraft ma duza wysokosc x i staly odstep,
+   * wiec przy tych samych pikselach zajmuje wyraznie wiecej miejsca niz Inter
+   * i lista przestaje byc gesta.
+   */
+  --t-micro: 10px;
+  --t-mini: 11px;
+  --t-small: 12px;
+  --t-large: 16px;
+}
+
+:root[data-font='monocraft'] body {
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+}
+
+/*
+ * Fira Code (monospace, nie pikselowy): zostawiamy antyaliasing, ale wagi trzymamy
+ * w dwoch wyraznych poziomach (400 i 700+), bo przy plynnej osi 500/600 daja
+ * "prawie zwykly" tekst i pogrubienie ledwie widac. Skala schodzi o stopien —
+ * monospace jest szerszy i lista rozjezdza sie na szerokosc.
+ */
+:root[data-font='fira-code'] {
+  --f-features: normal;
+  --f-variations: normal;
+
+  --w-normal: 400;
+  --w-medium: 500;
+  --w-semibold: 700;
+  --w-bold: 800;
+
+  --t-micro: 10px;
+  --t-mini: 11px;
+  --t-small: 12px;
+  --t-large: 16px;
+
+  --font-ui: 'Fira Code Variable', 'Consolas', ui-monospace, monospace;
+}
+
+/*
+ * Sora (domyslny) — proporcjonalny, hostowany lokalnie (@fontsource, main.tsx)
+ * i ZMIENNY, wiec pelen zakres wag dziala. Bez cyfr Intera (cv01/ss03), wagi
+ * standardowe; szerokosc zblizona do Intera, wiec skala rozmiarow zostaje.
+ */
+:root[data-font='sora'] {
+  --f-features: normal;
+  --f-variations: normal;
+
+  --w-normal: 400;
+  --w-medium: 500;
+  --w-semibold: 600;
+  --w-bold: 700;
+
+  --font-ui: 'Sora Variable', system-ui, sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 2px 5px;
+  font-family: inherit;
+  font-size: var(--t-micro);
+  line-height: 1.25;
+  text-align: center;
+  color: var(--fg-muted);
+  background: var(--bg-active);
+  border-radius: var(--s1);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/*
+ * Cienki, ciemny pasek przewijania we wszystkich obszarach przewijanych.
+ * Domyslny pasek Windowsa jest szeroki i jasny — rozbijal ciemny panel.
+ */
+.list,
+.detail-body,
+.col-body,
+.board,
+.palette-list,
+.picker-list,
+.md-table-wrap {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.list::-webkit-scrollbar,
+.detail-body::-webkit-scrollbar,
+.col-body::-webkit-scrollbar,
+.board::-webkit-scrollbar,
+.palette-list::-webkit-scrollbar,
+.picker-list::-webkit-scrollbar,
+.md-table-wrap::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.list::-webkit-scrollbar-thumb,
+.detail-body::-webkit-scrollbar-thumb,
+.col-body::-webkit-scrollbar-thumb,
+.board::-webkit-scrollbar-thumb,
+.palette-list::-webkit-scrollbar-thumb,
+.picker-list::-webkit-scrollbar-thumb,
+.md-table-wrap::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+
+.list::-webkit-scrollbar-thumb:hover,
+.detail-body::-webkit-scrollbar-thumb:hover,
+.col-body::-webkit-scrollbar-thumb:hover,
+.board::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-dim);
+  background-clip: padding-box;
+}
+
+.list::-webkit-scrollbar-track,
+.detail-body::-webkit-scrollbar-track,
+.col-body::-webkit-scrollbar-track,
+.board::-webkit-scrollbar-track,
+.palette-list::-webkit-scrollbar-track,
+.picker-list::-webkit-scrollbar-track,
+.md-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+
+/* Bez panelu bocznego: wszystkie kontrolki siedza w toolbarze i pasku zakresu,
+   wiec sa dostepne na kazdej szerokosci — nic nie znika przy zwezaniu okna. */
+/*
+ * `overflow: hidden` + `min-height: 0` na kolumnach: bez tego elementy gridu maja
+ * `min-height: auto` i dlugi opis rozpycha panel, przewijajac CALA strone zamiast
+ * jego wnetrza. Przewijac maja tylko .list i .detail-body.
+ */
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Nazwa projektu jest przyciskiem (przelacznik projektu), ale ma zostac
+   naglowkiem — tlo pojawia sie dopiero pod kursorem, zeby pasek nie zamienil sie
+   w dwie kontrolki obok siebie. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 0 1 auto;
+  /* Nazwy projektow w Bitriksie bywaja zdaniami — pasek nie moze przez to
+     zjesc pola wyszukiwania, wiec dluzsze sa obcinane. */
+  min-width: 0;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 var(--s2);
+  margin-left: calc(var(--s2) * -1);
+  color: var(--fg);
+  border-radius: var(--radius);
+  font-weight: var(--w-semibold);
+  transition: background 120ms ease;
+}
+
+.brand:hover {
+  background: var(--bg-hover);
+}
+
+/* Strzalka ma tylko sygnalizowac, ze da sie kliknac — nie konkurowac z nazwa. */
+.brand > .chev {
+  color: var(--fg-dim);
+}
+
+.brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-dot {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: var(--accent);
+}
+
+/* Musi czytac sie jak KONTROLKA, nie jak podpis: wlasne tlo i obrys.
+   Wczesniej byl to goly tekst obok licznika i ginal w pasku. */
+.display-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 var(--s2);
+  color: var(--fg);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--border);
+  white-space: nowrap;
+  transition: background 120ms ease;
+}
+
+.display-btn:hover {
+  background: var(--bg-hover);
+}
+
+.display-btn > svg:first-child {
+  flex: 0 0 14px;
+  color: var(--fg-muted);
+}
+
+.display-btn .chev {
+  color: var(--fg-dim);
+  transform: rotate(90deg);
+}
+
+.display-label {
+  color: var(--fg-muted);
+}
+
+/* Zastepuje caly pasek zakresu na waskich ekranach — patrz breakpoint 620 px. */
+.filters-btn {
+  display: none;
+  align-items: center;
+  gap: var(--s2);
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 var(--s2);
+  color: var(--fg);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--border);
+  white-space: nowrap;
+}
+
+.filters-btn:hover {
+  background: var(--bg-hover);
+}
+
+.filters-btn > svg {
+  flex: 0 0 14px;
+  color: var(--fg-muted);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.menu-check {
+  flex: 0 0 12px;
+  color: var(--accent);
+}
+
+/* ── Panel widoku (Display) ─────────────────────────────────────────────── */
+
+/* Bez overflow: listy select-ow rozwijaja sie absolutnie i nie moga byc przyciete. */
+.view-menu {
+  padding: var(--s2);
+  gap: 2px;
+  /* Wariant z kafelkami pokazuje wszystkie 12 motywow naraz — przy niskim oknie
+     panel musi sie przewijac, a nie uciekac pod krawedz ekranu. */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
+.ds-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--s2);
+  background: var(--bg-base);
+  border-radius: var(--s2);
+}
+
+.ds-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  flex: 1;
+  height: 28px;
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.ds-tab > svg {
+  flex: 0 0 16px;
+  opacity: 0.7;
+}
+
+.ds-tab:hover {
+  color: var(--fg);
+}
+
+.ds-tab-on {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+.ds-tab-on > svg {
+  opacity: 1;
+}
+
+.ds-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 30px;
+  padding: 0 var(--s2);
+}
+
+/* Wiersz nieaktywny — Grupowanie/Podgrupowanie na tablicy (zawsze kanban po etapach). */
+.ds-row-off {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.ds-label {
+  flex: 1;
+  color: var(--fg-muted);
+}
+
+/* Wrapper daje uklad odniesienia dla rozwijanej listy. */
+.ds-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.ds-button {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  height: 24px;
+  max-width: 150px;
+  padding: 0 var(--s1) 0 var(--s2);
+  color: var(--fg);
+  border-radius: var(--radius);
+  transition: background 120ms ease;
+}
+
+.ds-button:hover {
+  background: var(--bg-active);
+}
+
+.ds-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-button .chev {
+  color: var(--fg-dim);
+  transform: rotate(90deg);
+}
+
+.ds-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.ds-options {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 2px);
+  right: 0;
+  min-width: 172px;
+  /* Lista motywow jest dluzsza niz pozostale — nie moze wyjsc poza ekran. */
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
+  padding: var(--s1);
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+}
+
+/* Naglowek grupy w rozwijanej liscie — te same proporcje co w palecie polecen. */
+.ds-section {
+  padding: var(--s3) var(--s2) var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.ds-option {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 26px;
+  padding: 0 var(--s2);
+  text-align: left;
+  border-radius: var(--radius);
+}
+
+.ds-option:hover,
+.ds-option-on {
+  background: var(--bg-active);
+}
+
+.ds-dir {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.ds-dir:hover {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+
+.ds-check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  min-height: 28px;
+  padding: 0 var(--s2);
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ds-check:hover {
+  color: var(--fg);
+}
+
+.ds-check input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ds-check-off {
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.ds-check-off input {
+  cursor: default;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Toolbar ────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 0 0 auto;
+  height: 48px;
+  padding: 0 var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--s2);
+  color: var(--fg-dim);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  transition: box-shadow 120ms ease;
+}
+
+.search:focus-within {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.search input::placeholder {
+  color: var(--fg-dim);
+}
+
+.count {
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/* ── Pasek zakresu ──────────────────────────────────────────────────────── */
+
+.scopebar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex: 0 0 auto;
+  height: var(--bar-h);
+  padding: 0 var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+
+.segments {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-panel);
+  border-radius: var(--s2);
+}
+
+.segment {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 26px;
+  padding: 0 var(--s3);
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.segment:hover {
+  color: var(--fg);
+}
+
+.segment-active {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+.segment-count {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.sprint-dates {
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle:first-of-type {
+  margin-left: auto;
+}
+
+.toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Przelacznik bez znaczenia w biezacym ustawieniu — widoczny, ale wyciszony. */
+.toggle-off {
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.toggle-off input {
+  cursor: default;
+}
+
+/* ── Lista ──────────────────────────────────────────────────────────────── */
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--head-h);
+  padding: 0 var(--s4);
+  color: var(--fg-muted);
+  background: var(--bg-panel);
+  cursor: pointer;
+  user-select: none;
+}
+
+.group-label {
+  font-weight: var(--w-medium);
+  color: var(--fg);
+}
+
+.group-count {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.chev {
+  flex: 0 0 12px;
+  transition: transform 120ms ease;
+}
+
+.chev-open {
+  transform: rotate(90deg);
+}
+
+/* Cel upuszczenia w liscie — podswietlamy CALA grupe, bo to ona jest wartoscia
+   (etap / status / osoba), a nie konkretne miejsce miedzy wierszami. */
+.group-over {
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  border-radius: var(--radius);
+}
+
+/*
+ * Wiersz/karta w trakcie przeciagania. Oryginal zostaje na miejscu i tylko
+ * blednie — pod kursorem jedzie osobny podglad (DragOverlay). Dzieki temu widac
+ * skad zadanie wyszlo, a lista nie skacze przy podnoszeniu.
+ */
+.row-dragging,
+.card.row-dragging {
+  opacity: 0.4;
+}
+
+/*
+ * Podglad pod kursorem. Wezsze niz wiersz listy i przyciete do jednej linii,
+ * zeby nie zaslanialo celow upuszczenia.
+ */
+.drag-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  max-width: 320px;
+  padding: 0 var(--s3);
+  height: var(--row-h);
+  font-size: var(--t-small);
+  color: var(--fg);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+  cursor: grabbing;
+}
+
+.drag-preview-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Licznik pojawia sie tylko przy przeciaganiu zaznaczenia wielokrotnego. */
+.drag-preview-count {
+  flex: none;
+  min-width: 18px;
+  padding: 0 5px;
+  font-size: var(--t-micro);
+  font-weight: var(--w-semibold);
+  line-height: 18px;
+  text-align: center;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 9px;
+}
+
+/* Bez linii pod kazdym wierszem. Wiersze rozdziela hover i naglowki grup;
+   kreska co 36 px robila z listy tabele i dodawala szumu. */
+/* Naglowek podgrupy — lzejszy i wciety wzgledem naglowka grupy, zeby hierarchia
+   byla czytelna bez ramek. Nie jest sticky: dwa przyklejone paski nad soba
+   zjadalyby zbyt duzo wysokosci listy. */
+.subgroup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 28px;
+  padding: 0 var(--s4) 0 var(--s5);
+  color: var(--fg-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.subgroup-head:hover {
+  color: var(--fg-muted);
+}
+
+.subgroup-label {
+  font-weight: var(--w-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--row-h);
+  padding: 0 var(--s4);
+  cursor: pointer;
+}
+
+.row:active {
+  cursor: grabbing;
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+/* Kursor klawiatury — delikatny pasek, nie zmiana tla, zeby nie mylil sie z hoverem. */
+.row-active {
+  background: var(--bg-hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Zadanie otwarte w panelu — podbarwienie akcentem plus pasek z lewej, zeby
+   pozostawalo wyraznie podswietlone takze wtedy, gdy kursor klawiatury (row-active)
+   odjechal na inny wiersz — np. po przelaczeniu widoku Lista/Tablica i z powrotem.
+   Tlo akcentowe odroznia je od szarego hovera i od samego kursora. */
+.row-selected,
+.card-selected {
+  background: var(--accent-tint);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Zaznaczenie wielokrotne (Ctrl/Shift + klik). Musi byc odrozniane od otwartego
+   zadania i od kursora, bo wszystkie trzy stany moga wystapic naraz. */
+.row-marked {
+  background: var(--accent-tint);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.row-marked.row-active {
+  box-shadow: inset 3px 0 0 var(--accent-hover);
+}
+
+.card-marked {
+  background: var(--accent-tint);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 var(--s2);
+  color: var(--fg);
+  background: var(--accent-tint);
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.selection-bar strong {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stale szerokosci kolumn — inaczej dluzsze kody (#114937 vs IT-747)
+   przesuwaly tytuly i cala lista wygladala na krzywa. */
+.row > svg,
+.prio-spacer {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+/* Checkbox zaznaczenia: widoczny tylko pod kursorem albo gdy jest zaznaczony.
+   Lista zostaje spokojna — puste ramki w kazdym wierszu tylko dodawalyby szumu. */
+.row-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 10px;
+  color: var(--fg);
+  border-radius: var(--s1);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.row:hover .row-check,
+.row-check-on {
+  opacity: 1;
+}
+
+.row-check:hover {
+  box-shadow: inset 0 0 0 1px var(--fg-muted);
+}
+
+.row-check-on {
+  color: var(--bg-base);
+  background: var(--accent);
+  box-shadow: none;
+}
+
+@media (hover: none) {
+  .row-check {
+    opacity: 1;
+  }
+}
+
+/* Przelacznik podzadan. Gdy zadanie ich nie ma, zostaje pusty slot tej samej
+   szerokosci — inaczej ikony statusu skakalyby miedzy wierszami. */
+.row-twisty,
+.row-twisty-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--fg-dim);
+  border-radius: var(--s1);
+}
+
+/*
+ * Strefa klikniecia jest wieksza niz sam znaczek: ::before rozciaga ja na cala
+ * wysokosc wiersza i poza jego szerokosc. Ikona zostaje mala, ale trafia sie
+ * w nia bez celowania — 16 px to bylo za malo.
+ */
+.row-twisty {
+  position: relative;
+}
+
+.row-twisty::before {
+  content: '';
+  position: absolute;
+  inset: -8px -6px;
+}
+
+.row-twisty:hover {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+
+/* Na dotyku cel musi byc jeszcze wiekszy. */
+@media (hover: none) {
+  .row-twisty::before {
+    inset: -10px;
+  }
+}
+
+/* Przycisk kopiowania siedzi w slocie kodu i pojawia sie dopiero na hover,
+   zeby nie dokladac szumu do kazdego wiersza. */
+.copy-btn {
+  display: none;
+  align-items: center;
+  padding: 0;
+  color: var(--fg-dim);
+  vertical-align: middle;
+}
+
+.row:hover .copy-btn,
+.detail-head .copy-btn {
+  display: inline-flex;
+}
+
+.copy-btn:hover {
+  color: var(--fg);
+}
+
+.row-code {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  flex: 0 0 84px;
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Odnosnik do zadania nadrzednego, gdy rodzic nie stoi tuz nad wierszem. */
+.row-parent,
+.card-parent {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 1px var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  background: var(--bg-active);
+  border-radius: var(--s1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-parent:hover {
+  color: var(--fg);
+}
+
+.card-parent {
+  display: inline-block;
+  margin-bottom: var(--s1);
+}
+
+.row-sub,
+.row-meta {
+  flex: 0 0 auto;
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-meta {
+  min-width: 46px;
+  text-align: right;
+}
+
+/* "+N" — tagi, ktore nie zmiescily sie w wierszu. Neutralne, wypelnione. */
+.row-sub {
+  padding: 1px var(--s1);
+  background: var(--bg-active);
+  border-radius: var(--s1);
+}
+
+/*
+ * "⑂ N·N" — jeden znacznik na niewidoczne tutaj podzadania. Obrys zamiast
+ * wypelnienia (INNY ksztalt niz "+N" od tagow), bo to nie skrocona lista, tylko
+ * informacja, ze czegos nie widac. Dwie liczby rozroznia kolor, nie dwie plakietki:
+ *   .row-subs-elsewhere (przygaszona) — jest w innych grupach, widoczne gdzie indziej,
+ *   .row-subs-hidden    (akcent)      — uciete filtrem, nie widac nigdzie.
+ */
+.row-subs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  border-radius: var(--s1);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+.row-subs-elsewhere {
+  color: var(--fg-muted);
+}
+
+.row-subs-hidden {
+  color: var(--accent);
+}
+
+.row-subs-sep {
+  color: var(--fg-dim);
+}
+
+/*
+ * "nowe" — zadanie, ktorego nie bylo przy poprzednim uruchomieniu. Wypelniony
+ * akcent, bo to sygnal o CALYM zadaniu i ma byc widoczny na pierwszy rzut oka.
+ */
+.row-new {
+  flex: 0 0 auto;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: var(--bg-base);
+  background: var(--accent);
+  border-radius: var(--s1);
+  white-space: nowrap;
+  text-transform: lowercase;
+}
+
+/*
+ * Dymek z liczba — nieprzeczytane komentarze. Sam obrys, bo to sygnal o
+ * SRODKU zadania, ktore juz znasz; nie moze konkurowac z "nowe".
+ */
+.row-unread {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  color: var(--accent);
+  border-radius: var(--s1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+.row-unread > svg {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+}
+
+/*
+ * Story pointy — scrumowe oszacowanie wielkosci zadania. Spokojny, wypelniony
+ * zeton z tabularna cyfra: ma sie czytac jak liczba, a nie konkurowac z "nowe"
+ * (akcent) ani z dymkiem komentarzy (obrys). Tlem jest scisniety --fg, wiec
+ * zeton trzyma kontrast w kazdym motywie bez wlasnego koloru.
+ */
+.row-sp {
+  flex: 0 0 auto;
+  min-width: 1.5em;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  text-align: center;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  border-radius: var(--s1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+.row-busy {
+  opacity: 0.5;
+}
+
+/* ── Tagi (etykiety) ────────────────────────────────────────────────────── */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 140px;
+  height: 20px;
+  padding: 0 var(--s2);
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+  background: var(--bg-active);
+  border-radius: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.tag:hover {
+  color: var(--fg);
+}
+
+.tag-static {
+  cursor: default;
+}
+
+.tag-dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.tag-clear {
+  color: var(--fg);
+  background: var(--accent-tint);
+}
+
+.tag-x {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-dim);
+}
+
+.tag-x:hover {
+  color: var(--fg);
+}
+
+/* Ikona w kwadraciku listy zadan i w checkboxie zaznaczenia. */
+.check-box > svg,
+.row-check > svg,
+.menu-check > svg {
+  display: block;
+}
+
+/* Caly pasek jest strefa najechania — dymek nie zalezy od trafienia w "+N". */
+.tag-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  flex: 0 0 auto;
+}
+
+.tag-more {
+  cursor: default;
+}
+
+/* Dymek jest tylko do czytania — bez pointer-events, zeby nie znikal
+   przy przechodzeniu kursorem i nie lapal klikniec. */
+.tag-pop {
+  position: fixed;
+  z-index: 45;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  max-width: 232px;
+  padding: var(--s2);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+  pointer-events: none;
+}
+
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  margin-top: var(--s2);
+}
+
+.dd-wrap {
+  flex-wrap: wrap;
+}
+
+/* Pole drugorzedne w panelu — obecne, ale nie konkuruje wzrokiem z etapem. */
+.dd-dim {
+  color: var(--fg-dim);
+}
+
+/* ── Dialog potwierdzenia ───────────────────────────────────────────────── */
+
+.dialog {
+  position: fixed;
+  z-index: 41;
+  top: 24vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 92vw);
+  padding: var(--s5);
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+}
+
+.dialog h2 {
+  margin: 0 0 var(--s2);
+  font-size: 15px;
+  font-weight: var(--w-semibold);
+}
+
+.dialog p {
+  margin: 0 0 var(--s5);
+  color: var(--fg-secondary);
+  line-height: 1.6;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+}
+
+.btn-primary {
+  color: #fff;
+  background: var(--accent);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.row-more {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--fg-dim);
+  border-radius: var(--s1);
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.row:hover .row-more,
+.row-active .row-more {
+  opacity: 1;
+}
+
+.row-more:hover {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: var(--w-semibold);
+}
+
+.avatar-empty {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+img.avatar {
+  object-fit: cover;
+  background: var(--bg-active);
+}
+
+.empty,
+.error {
+  padding: var(--s6);
+  color: var(--fg-muted);
+}
+
+.error {
+  margin: var(--s4);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+}
+
+.error strong {
+  display: block;
+  margin-bottom: var(--s2);
+  color: var(--fg);
+}
+
+.error p {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--t-mini);
+  overflow-wrap: anywhere;
+}
+
+/* ── Tablica (kanban sprintu) ───────────────────────────────────────────── */
+
+.board {
+  flex: 1;
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s4);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/*
+ * Kolumny rozciagaja sie na cala szerokosc, zamiast stac przy lewej krawedzi
+ * ze stala szerokoscia 272 px. Ponizej progu, przy ktorym zrobilyby sie za waskie,
+ * wracaja do stalej szerokosci i tablica przewija sie poziomo.
+ */
+.col {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 232px;
+  min-height: 0;
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  transition: background 120ms ease;
+  /* Kolumna jest kontenerem zapytania: gdy jest ich mniej (np. po ukryciu
+     pustych), kazda jest szersza — karta czyta to przez `cqi` i lekko rosnie. */
+  container-type: inline-size;
+}
+
+.col-over {
+  background: var(--bg-active);
+}
+
+.col-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 40px;
+  padding: 0 var(--s3);
+}
+
+.col-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+}
+
+.col-title {
+  font-weight: var(--w-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.col-count {
+  margin-left: auto;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.col-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: 0 var(--s2) var(--s2);
+}
+
+.col-empty {
+  padding: var(--s3);
+  text-align: center;
+  color: var(--fg-dim);
+}
+
+.card {
+  padding: var(--s3);
+  background: var(--bg-base);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.card:hover {
+  background: var(--bg-hover);
+}
+
+.card-active {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.card:active {
+  cursor: grabbing;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+
+.card-top > svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.card-spacer {
+  flex: 1;
+}
+
+.card-title {
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /*
+   * Rozmiar plynie z SZEROKOSCI KOLUMNY, nie okna: wąska kolumna trzyma sie
+   * bazowego `--t-small`, szersza (mniej kolumn) dorasta o ~2 px. Dolny prog to
+   * token, wiec skalowanie szanuje tez mniejsza skale krojow monospace.
+   */
+  font-size: clamp(var(--t-small), calc(var(--t-small) - 4px) + 1cqi, calc(var(--t-small) + 2px));
+}
+
+/* ── Warstwy pływające: menu, popover, paleta ───────────────────────────── */
+
+.picker-backdrop,
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+.palette-backdrop {
+  z-index: 40;
+  background: #00000052;
+}
+
+.menu,
+.picker {
+  position: fixed;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s1);
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+}
+
+.menu-head {
+  padding: var(--s2) var(--s2) var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.menu-item,
+.picker-item,
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--s2);
+  text-align: left;
+  border-radius: var(--radius);
+}
+
+.menu-item > svg,
+.picker-item > svg,
+.palette-item > svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.menu-item:hover:not(:disabled),
+.picker-item-active,
+.palette-item-active {
+  background: var(--bg-active);
+}
+
+/* Kreska miedzy zalogowanym uzytkownikiem a reszta osob w wyborze przypisania. */
+.picker-sep {
+  height: 1px;
+  margin: var(--s1) var(--s2);
+  background: var(--border);
+}
+
+.menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.menu-label {
+  flex: 0 0 auto;
+}
+
+.menu-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--fg-dim);
+  font-size: var(--t-mini);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: var(--s1) 0;
+  background: var(--border);
+}
+
+.picker-title {
+  padding: var(--s2) var(--s2) var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.picker-input {
+  height: 28px;
+  margin-bottom: var(--s1);
+  padding: 0 var(--s2);
+  background: var(--bg-base);
+  border: 0;
+  border-radius: var(--radius);
+  outline: none;
+}
+
+/* Zakladki filtrujace w Pickerze (dzis: rodzic w sprincie / poza sprintem).
+   Wykorzystuja `.segment` z paska zakresu, tylko wezsze i rozciagniete na pol. */
+.picker-segments {
+  display: flex;
+  gap: 2px;
+  margin-bottom: var(--s1);
+  padding: 2px;
+  background: var(--bg-panel);
+  border-radius: var(--s2);
+}
+
+.picker-segments .segment {
+  flex: 1;
+  justify-content: center;
+  height: 24px;
+  padding: 0 var(--s2);
+  font-size: var(--t-micro);
+}
+
+.picker-list {
+  overflow-y: auto;
+  max-height: 248px;
+}
+
+.picker-empty {
+  padding: var(--s2);
+  color: var(--fg-dim);
+}
+
+/* Akcja w zdaniu (np. ponowienie po bledzie) — ma czytac sie jak odnosnik. */
+.link-btn {
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  text-decoration: underline;
+}
+
+/* Nazwy projektow bywaja dluzsze niz popover — obcinamy je, nie dopisek po prawej. */
+.picker-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette {
+  position: fixed;
+  z-index: 41;
+  top: 14vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(620px, 92vw);
+  display: flex;
+  flex-direction: column;
+  max-height: 62vh;
+  overflow: hidden;
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+}
+
+.palette-input {
+  flex: 0 0 auto;
+  height: 48px;
+  padding: 0 var(--s4);
+  font-size: 14px;
+  background: none;
+  border: 0;
+  box-shadow: inset 0 -1px 0 var(--border);
+  outline: none;
+}
+
+.palette-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s2);
+}
+
+.palette-section {
+  padding: var(--s3) var(--s2) var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.palette-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-hint {
+  flex: 0 0 auto;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.palette-foot {
+  flex: 0 0 auto;
+  padding: var(--s2) var(--s3);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  box-shadow: inset 0 1px 0 var(--border);
+}
+
+.shortcuts {
+  max-height: 76vh;
+}
+
+.shortcut {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 28px;
+  padding: 0 var(--s2);
+  color: var(--fg-muted);
+}
+
+.shortcut-keys {
+  display: flex;
+  gap: 3px;
+  flex: 0 0 92px;
+  justify-content: flex-end;
+}
+
+/* ── Panel szczegolow ───────────────────────────────────────────────────── */
+
+/* Szerokosc ustawiana inline ze stanu (chwyt na lewej krawedzi) i zapamietywana. */
+.detail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+
+.detail-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 2;
+  cursor: col-resize;
+}
+
+.detail-resizer:hover,
+body.resizing .detail-resizer {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* W trakcie ciagniecia nic sie nie zaznacza i kursor zostaje ten sam nad calym oknem. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  height: 48px;
+  padding: 0 var(--s3) 0 var(--s4);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.detail-head-right {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.detail-body {
+  flex: 1;
+  min-height: 0; /* inaczej `flex: 1` nie ograniczy wysokosci i scroll nie ruszy */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--s5) var(--s5) 48px;
+}
+
+.detail-body h1 {
+  margin: 0 0 var(--s5);
+  font-size: var(--t-large);
+  font-weight: var(--w-semibold);
+  line-height: 1.35;
+}
+
+/* Tytul klikalny do edycji — hover rozszerzamy box-shadowem, zeby tlo objelo tekst
+   bez dokladania paddingu (inaczej naglowek by podskakiwal). */
+.detail-title {
+  cursor: text;
+  border-radius: var(--radius);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.detail-title:hover {
+  background: var(--bg-active);
+  box-shadow: 0 0 0 4px var(--bg-active);
+}
+
+.detail-title-input {
+  display: block;
+  width: 100%;
+  margin: 0 0 var(--s5);
+  padding: var(--s2);
+  font: inherit;
+  font-size: var(--t-large);
+  font-weight: var(--w-semibold);
+  line-height: 1.35;
+  color: var(--fg);
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  resize: vertical;
+}
+
+/* Termin: przycisk widoczny, natywne pole daty schowane tuz pod nim tylko po to,
+   by `showPicker()` wiedzial, gdzie zakotwiczyc kalendarz. */
+.dd-date-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.dd-date-hidden {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.props {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  margin: 0 0 var(--s5);
+  padding-bottom: var(--s5);
+  font-size: var(--t-mini);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.props dt {
+  color: var(--fg-dim);
+}
+
+.props dd {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0;
+}
+
+.props dd > svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+/* Edytowalne pole w panelu szczegolow (status, priorytet, story points). Wyglada
+   jak zwykla wartosc, dopiero hover zdradza, ze mozna kliknac — i pokazuje strzalke. */
+.dd-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  max-width: 100%;
+  margin: -2px 0 -2px calc(-1 * var(--s1));
+  padding: 2px var(--s1);
+  color: inherit;
+  border-radius: var(--radius);
+  transition: background 120ms ease;
+}
+
+.dd-edit > svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.dd-edit:hover,
+.dd-edit:focus-visible {
+  background: var(--bg-active);
+}
+
+/* Strzalka pojawia sie tylko pod kursorem — inaczej robilaby szum przy kazdym polu. */
+.dd-edit-caret {
+  display: inline-flex;
+  color: var(--fg-dim);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.dd-edit:hover .dd-edit-caret,
+.dd-edit:focus-visible .dd-edit-caret {
+  opacity: 1;
+}
+
+/* Tekst ciagly na --fg-secondary, nie --fg-muted: to drugie to trzeci poziom
+   drabinki i do calych akapitow jest za ciemne. */
+.desc p {
+  margin: 0 0 var(--s3);
+  color: var(--fg-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.desc a,
+.comment-body a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.desc a:hover,
+.comment-body a:hover {
+  color: var(--accent-hover);
+}
+
+.desc-dim {
+  color: var(--fg-dim) !important;
+  font-style: italic;
+}
+
+/* Wzmianka [USER=id]Imie[/USER] — chip, nie zwykly link, zeby wyroznial sie w tekscie. */
+.mention {
+  padding: 0 4px;
+  color: var(--accent) !important;
+  background: var(--accent-tint);
+  border-radius: var(--s1);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+a.mention:hover {
+  color: var(--accent-hover) !important;
+}
+
+/* ── Markdown w opisach i komentarzach ──────────────────────────────────── */
+
+.desc h3,
+.desc h4,
+.comment-body h3,
+.comment-body h4 {
+  margin: var(--s5) 0 var(--s2);
+  color: var(--fg);
+  font-weight: var(--w-semibold);
+  line-height: 1.35;
+}
+
+.desc h3,
+.comment-body h3 {
+  font-size: 14px;
+}
+
+.desc h4,
+.comment-body h4 {
+  font-size: var(--t-small);
+}
+
+.desc ul,
+.desc ol,
+.comment-body ul,
+.comment-body ol {
+  margin: 0 0 var(--s3);
+  padding-left: var(--s5);
+  color: var(--fg-secondary);
+}
+
+.desc li,
+.comment-body li {
+  margin-bottom: var(--s1);
+  line-height: 1.6;
+}
+
+/* Lista "Definition of Done" — bez punktorow, z kwadracikiem stanu. */
+.md-checks {
+  list-style: none;
+  padding-left: 0 !important;
+}
+
+.md-checks li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+}
+
+.md-checks .check-box {
+  margin-top: 3px;
+}
+
+.md-check-done {
+  color: var(--fg-dim);
+}
+
+.desc code,
+.comment-body code {
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-active);
+  border-radius: var(--s1);
+}
+
+.desc pre,
+.comment-body pre {
+  margin: 0 0 var(--s3);
+  padding: var(--s3);
+  overflow-x: auto;
+  background: var(--bg-base);
+  border-radius: var(--radius);
+}
+
+.desc pre code,
+.comment-body pre code {
+  padding: 0;
+  background: none;
+  color: var(--fg-secondary);
+  white-space: pre;
+}
+
+.desc blockquote,
+.comment-body blockquote {
+  margin: 0 0 var(--s3);
+  padding-left: var(--s3);
+  color: var(--fg-muted);
+  box-shadow: inset 2px 0 0 var(--border-strong);
+}
+
+.desc hr,
+.comment-body hr {
+  height: 1px;
+  margin: var(--s5) 0;
+  border: 0;
+  background: var(--border);
+}
+
+/* Szerokie tabele przewijaja sie same, zamiast rozpychac panel. */
+.md-table-wrap {
+  margin: 0 0 var(--s3);
+  overflow-x: auto;
+}
+
+.md-table-wrap table {
+  border-collapse: collapse;
+  font-size: var(--t-mini);
+}
+
+.md-table-wrap th,
+.md-table-wrap td {
+  padding: var(--s1) var(--s2);
+  text-align: left;
+  vertical-align: top;
+  color: var(--fg-secondary);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.md-table-wrap th {
+  color: var(--fg);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+
+/* ── Relacje: zadanie nadrzedne i podzadania ────────────────────────────── */
+
+.relation {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 32px;
+  padding: 0 var(--s2);
+  margin-bottom: var(--s1);
+  text-align: left;
+  background: var(--bg-base);
+  border-radius: var(--radius);
+  transition: background 120ms ease;
+}
+
+.relation:hover {
+  background: var(--bg-hover);
+}
+
+.relation > svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.relation-kind {
+  flex: 0 0 auto;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.relation-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtasks {
+  margin-top: var(--s5);
+}
+
+/* Podzadanie, ktorego nie widac na liscie przy biezacych filtrach. */
+.relation-hidden {
+  opacity: 0.55;
+}
+
+.relation-hidden:hover {
+  opacity: 1;
+}
+
+/* Znacznik "stoi w innej grupie" — sama ikona, nazwa grupy w tooltipie. */
+.relation-group-mark {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  cursor: help;
+}
+
+.relation:hover .relation-group-mark {
+  color: var(--fg-muted);
+}
+
+/* Znacznik "odciete filtrem" — akcent, ta sama ikona co plakietka w wierszu listy. */
+.relation-hidden-mark {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--accent);
+  cursor: help;
+}
+
+.subtasks h2,
+.comments h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: var(--fg-dim);
+}
+
+/* Pozycja checklisty jest teraz klikalna (odhaczanie wprost z panelu). */
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 24px;
+  margin-left: calc(-1 * var(--s1));
+  padding: 2px var(--s1);
+  text-align: left;
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.check:hover {
+  background: var(--bg-active);
+  color: var(--fg-secondary);
+}
+
+.check:hover .check-box {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.check-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  border-radius: var(--s1);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.check-done {
+  color: var(--fg-dim);
+  text-decoration: line-through;
+}
+
+/* Nazwana checklista (sekcja) — tytul + licznik ukonczenia, nizej jej pozycje. */
+.checklist-group + .checklist-group {
+  margin-top: var(--s3);
+}
+
+.checklist-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 0 var(--s1);
+  font-weight: var(--w-medium);
+  color: var(--fg-secondary);
+}
+
+.checklist-count {
+  margin-left: auto;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+}
+
+.person {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+/* ── Komentarze ─────────────────────────────────────────────────────────── */
+
+.comments {
+  margin-top: var(--s6);
+  padding-top: var(--s5);
+  box-shadow: inset 0 1px 0 var(--border);
+}
+
+.comment {
+  margin-bottom: var(--s4);
+}
+
+.comment-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1);
+  font-size: var(--t-mini);
+}
+
+.comment-body {
+  padding-left: 28px;
+}
+
+.comment-body p {
+  margin: 0 0 var(--s2);
+  color: var(--fg-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-input {
+  width: 100%;
+  min-height: 76px;
+  margin-top: var(--s2);
+  padding: var(--s2);
+  background: var(--bg-base);
+  border: 0;
+  border-radius: var(--radius);
+  outline: none;
+  resize: vertical;
+  transition: box-shadow 120ms ease;
+}
+
+.comment-input:focus {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--s2);
+}
+
+.btn {
+  height: 28px;
+  padding: 0 var(--s3);
+  color: var(--fg);
+  background: var(--bg-active);
+  border-radius: var(--radius);
+  font-weight: var(--w-medium);
+  transition: background 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ── Toasty ─────────────────────────────────────────────────────────────── */
+
+.toasts {
+  position: fixed;
+  right: var(--s4);
+  bottom: var(--s4);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  max-width: 380px;
+}
+
+.toast {
+  padding: var(--s3);
+  color: var(--fg);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--accent-orange);
+  font-size: var(--t-mini);
+  overflow-wrap: anywhere;
+}
+
+/* ── Układ płynny ───────────────────────────────────────────────────────────
+ *
+ * Zwezanie wszystkiego po rowno konczy sie tym, ze nic nie jest uzywalne,
+ * wiec kolejno oddajemy to, co najmniej potrzebne:
+ *   1. panel szczegolow przechodzi na pelny ekran zamiast dzielic szerokosc,
+ *   2. z wiersza znikaja kolumny poboczne (data, tagi), zostaje tytul.
+ * Zadna KONTROLKA nie znika — grupowanie, zakres i widok siedza w toolbarze
+ * i pasku zakresu, ktore sa widoczne zawsze.
+ */
+
+/* Panel szczegolow nie moze zjadac listy — na wezszych ekranach dostaje mniej. */
+/* Ponizej tego progu szerokosc ustawiona chwytem jest ignorowana — panel
+   i tak nie ma z czego jej brac, a lista musi zostac uzywalna. */
+@media (max-width: 1280px) {
+  .detail {
+    width: min(440px, 46vw) !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Panel przestaje byc kolumna i staje sie warstwa na calej szerokosci. */
+  .detail {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    width: 100% !important;
+    border-left: 0;
+  }
+
+  /* Na pelnym ekranie nie ma czego przeciagac. */
+  .detail-resizer {
+    display: none;
+  }
+
+  .scopebar {
+    height: auto;
+    min-height: var(--bar-h);
+    flex-wrap: wrap;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+  }
+
+  /* Przy zawijaniu "margin-left:auto" wypychalby przelaczniki do osobnej linii. */
+  .toggle:first-of-type {
+    margin-left: 0;
+  }
+
+  .toolbar,
+  .row,
+  .group-head {
+    padding-left: var(--s3);
+    padding-right: var(--s3);
+  }
+
+  .detail-body {
+    padding: var(--s4) var(--s4) 48px;
+  }
+
+  /* Na waskim ekranie kolumny przestaja sie dzielic rowno i zaczynaja przewijac. */
+  .col {
+    flex: 0 0 min(272px, 82vw);
+  }
+}
+
+@media (max-width: 620px) {
+  /* Zostawiamy to, co identyfikuje zadanie: status, kod, tytul, osoba. */
+  .row-meta,
+  .row-sub,
+  .row .tag {
+    display: none;
+  }
+
+  .row-code {
+    flex-basis: 56px;
+  }
+
+  /* Zostaje sama kropka marki — nazwa i tak jest w tytule okna. */
+  .brand-name,
+  .display-label,
+  .count,
+  .display-btn {
+    display: none;
+  }
+
+  /*
+   * Pasek zakresu ma tu 3 segmenty + 3 segmenty + daty + 2 przelaczniki —
+   * zawijalby sie na trzy linie i zjadal ekran. Zwija sie w jeden przycisk,
+   * ktory otwiera to samo menu, co prawy przycisk myszy.
+   */
+  .scopebar {
+    display: none;
+  }
+
+  .filters-btn {
+    display: inline-flex;
+  }
+
+  .props {
+    grid-template-columns: 76px 1fr;
+  }
+
+  .palette {
+    top: 8vh;
+    width: 94vw;
+    max-height: 74vh;
+  }
+
+  .toasts {
+    right: var(--s2);
+    left: var(--s2);
+    bottom: var(--s2);
+    max-width: none;
+  }
+}
+
+/* Dotyk: hover nie istnieje, wiec akcje musza byc widoczne od razu. */
+@media (hover: none) {
+  .row-more {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
+
+

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#101114" />
+    <title>Binear</title>
+    <!--
+      Motyw i kroj ustawiamy PRZED pierwszym malowaniem — inaczej przy jasnym
+      motywie mignie ciemne tlo, a tekst przeskoczy z Intera na wybrany font,
+      zanim React zdazy sie zamontowac. Logika musi zgadzac sie z applyTheme()
+      w src/theme.ts i applyFont() w src/font.ts.
+    -->
+    <script>
+      (function () {
+        var resolved = 'dark';
+        var font = 'inter';
+        try {
+          var pref = localStorage.getItem('binear.theme.v1') || 'system';
+          var systemLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+          resolved = pref === 'system' ? (systemLight ? 'light' : 'dark') : pref;
+          font = localStorage.getItem('binear.font.v1') || 'inter';
+        } catch (e) {
+          /* tryb prywatny — zostaja domyslne */
+        }
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.setAttribute('data-font', font);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
