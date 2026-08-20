@@ -2740,6 +2740,49 @@ a.mention:hover {
   cursor: default;
 }
 
+/* ── Baner aktualizacji ─────────────────────────────────────────────────── */
+
+.update-banner {
+  position: fixed;
+  top: var(--s3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  max-width: min(720px, calc(100vw - 2 * var(--s4)));
+  padding: var(--s3) var(--s4);
+  background: var(--bg-panel, var(--bg-active));
+  border: 1px solid var(--border, var(--bg-hover));
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+}
+
+.update-banner-text {
+  font-size: 13px;
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.update-banner-text span {
+  color: var(--fg-dim);
+}
+
+.update-banner-problem {
+  margin-top: var(--s1);
+  color: var(--danger, #e5534b);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-shrink: 0;
+}
+
 /* ── Toasty ─────────────────────────────────────────────────────────────── */
 
 .toasts {

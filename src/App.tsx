@@ -48,6 +48,7 @@ import {
   setCachedDetail,
 } from './detailCache';
 import { renderDescription, setPortalBase } from './markdown';
+import { checkForUpdate, runUpdate, type UpdateInfo } from './version';
 import {
   Avatar,
   ChevronIcon,
@@ -1670,6 +1671,69 @@ function Comments({
         </button>
       </div>
     </section>
+  );
+}
+
+// ─── Baner aktualizacji ──────────────────────────────────────────────────────
+
+/**
+ * Sprawdza RAZ przy zaladowaniu, czy na GitHubie jest nowszy commit (repo publiczne,
+ * pytanie leci wprost z przegladarki). Gdy tak — pokazuje baner z jednym przyciskiem,
+ * ktory odpala `git pull` po stronie serwera; po pobraniu Vite robi HMR i strona
+ * odswieza sie sama. Brudne drzewo / brak ff konczy sie podpowiedzia recznego pulla.
+ */
+function UpdateBanner() {
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    checkForUpdate().then((r) => {
+      if (live && r?.behind) setInfo(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!info || dismissed) return null;
+
+  const update = async () => {
+    if (busy) return;
+    setBusy(true);
+    setProblem(null);
+    const res = await runUpdate();
+    if (res.ok) {
+      // Pull przeszedl — przeladowanie wciaga swiezy kod (a HMR czesto zdazy wczesniej).
+      location.reload();
+      return;
+    }
+    // Najczestszy powod: lokalne zmiany blokuja fast-forward.
+    setProblem(res.message || 'Nie udało się zaktualizować. Zrób „git pull" ręcznie.');
+    setBusy(false);
+  };
+
+  return (
+    <div className="update-banner">
+      <div className="update-banner-text">
+        <strong>Nowa wersja binear</strong>
+        {info.message && <span> — {info.message}</span>}
+        {problem && <div className="update-banner-problem">{problem}</div>}
+      </div>
+      <div className="update-banner-actions">
+        <a className="link-btn" href={info.compareUrl} target="_blank" rel="noreferrer">
+          Zobacz zmiany
+        </a>
+        <button className="btn btn-primary" disabled={busy} onClick={() => void update()}>
+          {busy ? 'Aktualizowanie…' : 'Zaktualizuj'}
+        </button>
+        <button className="btn" disabled={busy} onClick={() => setDismissed(true)}>
+          Później
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -4365,6 +4429,8 @@ export default function App() {
       )}
 
       {helpOpen && <Shortcuts onClose={() => setHelpOpen(false)} />}
+
+      <UpdateBanner />
 
       <div className="toasts">
         {toasts.map((t) => (

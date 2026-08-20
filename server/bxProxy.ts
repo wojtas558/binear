@@ -1,5 +1,9 @@
 import type { Connect, Plugin } from 'vite';
 import { loadEnv } from 'vite';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const run = promisify(execFile);
 
 /**
  * Metody REST dopuszczone przez proxy. Webhook daje pelny dostep do portalu,
@@ -85,6 +89,62 @@ export function bxProxy(mode: string): Plugin {
       server.middlewares.use('/api/config', (_req, res) => {
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify({ groupId, userId, portal, unassignedId, configured: Boolean(webhook) }));
+      });
+
+      /**
+       * Wersja lokalnej kopii czytana NA ZYWO (przy kazdym zapytaniu), nie zapamietana
+       * przy starcie — inaczej po `git pull` + HMR wartosc byłaby nieaktualna i baner
+       * „nowa wersja" wisialby w kolko. `repo`/`branch` tez z gita, bez zaszywania nazwy.
+       * Puste pola, gdy `git` niedostepny — front wtedy po prostu nie sprawdza.
+       */
+      server.middlewares.use('/api/version', async (_req, res) => {
+        const git = async (args: string[]): Promise<string> => {
+          try {
+            const { stdout } = await run('git', args, { cwd: process.cwd() });
+            return stdout.trim();
+          } catch {
+            return '';
+          }
+        };
+        const [sha, remote, branch] = await Promise.all([
+          git(['rev-parse', 'HEAD']),
+          git(['config', '--get', 'remote.origin.url']),
+          git(['rev-parse', '--abbrev-ref', 'HEAD']),
+        ]);
+        const repo = remote.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/i)?.[1] ?? '';
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ sha, repo, branch: branch || 'master' }));
+      });
+
+      /**
+       * Jednoklikowa aktualizacja: `git pull --ff-only` po stronie serwera (przegladarka
+       * nie ma dostepu do gita). Vite obserwuje pliki, wiec zaraz po pobraniu robi HMR
+       * i aplikacja odswieza sie z nowym kodem — uzytkownik tylko klika w baner.
+       *
+       * `--ff-only` swiadomie ODMAWIA, gdy sa lokalne zmiany albo trzeba merge'a — nic
+       * nie nadpisujemy; wtedy front pokazuje instrukcje recznego `git pull`. Endpoint
+       * istnieje tylko w dev-serwerze i slucha na localhoscie (maszyna uzytkownika).
+       */
+      server.middlewares.use('/api/update', async (req, res) => {
+        const send = (status: number, payload: unknown) => {
+          res.statusCode = status;
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify(payload));
+        };
+
+        if (req.method !== 'POST') return send(405, { ok: false, message: 'Tylko POST' });
+
+        try {
+          const { stdout, stderr } = await run('git', ['pull', '--ff-only'], { cwd: process.cwd() });
+          const out = `${stdout}${stderr}`.trim();
+          const upToDate = /already up[- ]to[- ]date/i.test(out);
+          send(200, { ok: true, updated: !upToDate, message: out });
+        } catch (err: any) {
+          // Nie-zerowy git (brudne drzewo / brak ff / brak sieci / brak gita) — obsluzone,
+          // nie 500: front ma pokazac powod i podpowiedziec reczny pull.
+          const message = String(err?.stderr || err?.stdout || err?.message || err).trim();
+          send(200, { ok: false, message });
+        }
       });
 
       server.middlewares.use('/api/bx/', async (req, res) => {
