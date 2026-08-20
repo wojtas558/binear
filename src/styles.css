@@ -2718,7 +2718,27 @@ a.mention:hover {
 .comment-actions {
   display: flex;
   justify-content: flex-end;
+  gap: var(--s2);
   margin-top: var(--s2);
+}
+
+.worktime-ask {
+  margin-top: var(--s2);
+  padding: var(--s3);
+  background: var(--bg-active);
+  border-radius: var(--radius);
+}
+
+.worktime-ask p {
+  margin: 0 0 var(--s2);
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+.worktime-ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
 }
 
 .btn {

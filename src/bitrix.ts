@@ -765,6 +765,172 @@ export async function addComment(taskId: number, text: string, authorId: number)
   });
 }
 
+// ─── Historia / czas w toku ──────────────────────────────────────────────────
+
+/**
+ * Jeden wpis z dziennika zmian zadania (`tasks.task.history.list`). Interesuje nas
+ * tylko zmiana statusu, ale metoda loguje kazde pole (tytul, opis, komentarz…),
+ * wiec filtrujemy po `field` dopiero po stronie klienta.
+ */
+export interface HistoryEntry {
+  createdDate: string | null;
+  /** Nazwa zmienionego pola: STATUS / REAL_STATUS / STAGE_ID / TITLE… */
+  field: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * Pelny dziennik zmian zadania. Metoda stronicuje po `next` (jak `sonet_group`),
+ * a wpisow bywa duzo (kazda edycja to osobny rekord), wiec licznik obrotow jest
+ * bezpiecznikiem. To metoda TYLKO DO ODCZYTU — nic nie zmienia w zadaniu.
+ */
+export async function fetchTaskHistory(taskId: number): Promise<HistoryEntry[]> {
+  const all: any[] = [];
+
+  for (let start = 0, page = 0; page < 20; page++) {
+    const json = await post('tasks.task.history.list', {
+      taskId,
+      order: { createdDate: 'ASC' },
+      start,
+    });
+    // Odpowiedz bywa `{ result: { list: [...] } }` albo samą tablicą — bierzemy oba.
+    const res = json.result;
+    const list: any[] = Array.isArray(res) ? res : (res?.list ?? []);
+    all.push(...list);
+
+    const next = Number(json.next);
+    if (!list.length || !Number.isFinite(next) || next <= start) break;
+    start = next;
+  }
+
+  return all.map((h) => ({
+    createdDate: str(h.createdDate ?? h.CREATED_DATE) || null,
+    field: str(h.field ?? h.FIELD),
+    from: str(h.value?.from ?? h.value?.FROM ?? h.FROM_VALUE ?? ''),
+    to: str(h.value?.to ?? h.value?.TO ?? h.TO_VALUE ?? ''),
+  }));
+}
+
+/** Godziny robocze do "przycinania" bardzo dlugich odcinkow — patrz `clampWorkingMs`. */
+export const WORK_START_HOUR = 8;
+export const WORK_END_HOUR = 16;
+
+/** Odcinek czasu (ms epoch) — jedno wejscie zadania w dany status i wyjscie z niego. */
+export interface Interval {
+  start: number;
+  end: number;
+}
+
+/**
+ * Odcinki, w ktorych zadanie bylo w statusie `target` (domyslnie "3" = W toku).
+ * Wejscie w status to wpis `to === target`, wyjscie to najblizszy kolejny wpis zmiany
+ * statusu. Gdy zadanie WCIAZ jest w tym statusie, odcinek konczy sie w `nowMs`.
+ *
+ * Bounce (W toku → kontrola → znowu W toku) daje kilka odcinkow — nic nie gubimy.
+ *
+ * Bitrix loguje zmiane statusu raz jako `STATUS`, raz jako `REAL_STATUS` (ta druga to
+ * status "prawdziwy", bez pseudo-stanow typu "po terminie"). Gdyby liczyc oba, kazdy
+ * odcinek policzylby sie podwojnie — dlatego bierzemy REAL_STATUS, a STATUS tylko gdy
+ * REAL_STATUS w ogole nie ma.
+ */
+export function inProgressIntervals(history: HistoryEntry[], nowMs: number, target = '3'): Interval[] {
+  const real = history.filter((h) => h.field === 'REAL_STATUS');
+  const source = real.length ? real : history.filter((h) => h.field === 'STATUS');
+
+  const rows = source
+    .map((h) => ({ t: h.createdDate ? Date.parse(h.createdDate) : NaN, to: h.to }))
+    .filter((r) => Number.isFinite(r.t))
+    .sort((a, b) => a.t - b.t);
+
+  const out: Interval[] = [];
+  let openStart: number | null = null;
+  for (const r of rows) {
+    if (openStart !== null) {
+      out.push({ start: openStart, end: r.t });
+      openStart = null;
+    }
+    if (r.to === target) openStart = r.t;
+  }
+  if (openStart !== null) out.push({ start: openStart, end: Math.max(openStart, nowMs) });
+
+  return out;
+}
+
+/** Prosta suma odcinkow (czas zegarowy, bez przycinania). */
+export function sumIntervalsMs(intervals: Interval[]): number {
+  return intervals.reduce((acc, i) => acc + Math.max(0, i.end - i.start), 0);
+}
+
+/**
+ * To samo, ale liczone TYLKO w godzinach pracy (domyslnie 8:00–16:00) i TYLKO w dni
+ * robocze. Zadanie zostawione "w toku" na noc, weekend czy kilka dni nie ma naliczac
+ * dob zegarowych — z kazdego odcinka bierzemy jedynie minuty w dziennym oknie pracy,
+ * a soboty i niedziele pomijamy w calosci.
+ *
+ * Przyklad: 15:00 → 09:00 nastepnego dnia = 1 h (15→16) + 1 h (8→9) = 2 h.
+ *
+ * Iterujemy dzien po dniu przez `setDate` (odporne na zmiane czasu), a granice okna
+ * liczymy w LOKALNEJ strefie przegladarki.
+ */
+export function clampWorkingMs(
+  intervals: Interval[],
+  startHour = WORK_START_HOUR,
+  endHour = WORK_END_HOUR,
+): number {
+  let sum = 0;
+  for (const { start, end } of intervals) {
+    if (end <= start) continue;
+    const day = new Date(start);
+    day.setHours(0, 0, 0, 0);
+    while (day.getTime() <= end) {
+      const dow = day.getDay(); // 0 = niedziela, 6 = sobota
+      if (dow !== 0 && dow !== 6) {
+        const winStart = new Date(day);
+        winStart.setHours(startHour, 0, 0, 0);
+        const winEnd = new Date(day);
+        winEnd.setHours(endHour, 0, 0, 0);
+
+        const lo = Math.max(start, winStart.getTime());
+        const hi = Math.min(end, winEnd.getTime());
+        if (hi > lo) sum += hi - lo;
+      }
+      day.setDate(day.getDate() + 1);
+    }
+  }
+  return sum;
+}
+
+/**
+ * Czy ktorykolwiek odcinek "w toku" przechodzi przez wiecej niz jeden dzien kalendarzowy
+ * (inna data startu i konca). To sygnal, ze czas zegarowy lapie noce/weekendy i warto
+ * spytac o przyciecie — inaczej niz prog "ponad 24 h", bo 16 h potrafi rozlac sie na dwa dni.
+ */
+export function spansMultipleDays(intervals: Interval[]): boolean {
+  return intervals.some(({ start, end }) => {
+    if (end <= start) return false;
+    const a = new Date(start);
+    a.setHours(0, 0, 0, 0);
+    const b = new Date(end);
+    b.setHours(0, 0, 0, 0);
+    return b.getTime() > a.getTime();
+  });
+}
+
+/** Czas jako "3 dni 4 godz. 12 min" — puste jednostki znikaja, zero to "0 min". */
+export function formatDurationPl(ms: number): string {
+  const totalMin = Math.round(ms / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+
+  const parts: string[] = [];
+  if (days) parts.push(`${days} ${days === 1 ? 'dzień' : 'dni'}`);
+  if (hours) parts.push(`${hours} godz.`);
+  if (mins) parts.push(`${mins} min`);
+  return parts.length ? parts.join(' ') : '0 min';
+}
+
 // ─── Mutacje ─────────────────────────────────────────────────────────────────
 
 export async function updateTask(

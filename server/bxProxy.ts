@@ -21,6 +21,7 @@ const ALLOWED = new Set([
   'tasks.api.scrum.sprint.list',
   'tasks.api.scrum.backlog.get', // id backlogu — bez niego nie ma jak wyjac zadania ze sprintu
   'tasks.api.scrum.task.get', // scrumowa czesc zadania: entityId, storyPoints, kod nadany przez Bitrix
+  'tasks.task.history.list', // dziennik zmian zadania — z niego liczymy czas w statusie "W toku"
   'task.commentitem.getlist',
   'im.dialog.messages.get', // komentarze zadan zyja dzis w czacie, nie na forum
   'sonet_group.user.groups', // projekty uzytkownika — lista w przelaczniku

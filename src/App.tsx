@@ -25,7 +25,15 @@ import {
   fetchStages,
   fetchStoryPoints,
   fetchTaskDetail,
+  fetchTaskHistory,
   fetchTasks,
+  formatDurationPl,
+  inProgressIntervals,
+  sumIntervalsMs,
+  clampWorkingMs,
+  spansMultipleDays,
+  WORK_START_HOUR,
+  WORK_END_HOUR,
   latestChange,
   moveToSprint,
   moveToStage,
@@ -1585,6 +1593,18 @@ function Comments({
   const [failed, setFailed] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [computing, setComputing] = useState(false);
+  /**
+   * Gdy czas przekracza 24 h, nie wstawiamy od razu — pytamy, czy przyciac do godzin
+   * pracy. Trzymamy oba warianty (pelny i przyciety), zeby wybor byl natychmiastowy.
+   */
+  const [bigTime, setBigTime] = useState<{ rawMs: number; workMs: number } | null>(null);
+  // Pytanie pojawia sie pod polem komentarza, czesto pod krawedzia panelu —
+  // przewijamy je w pole widzenia, zeby nie trzeba bylo szukac go recznie.
+  const askRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (bigTime) askRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [bigTime]);
 
   const load = useCallback(() => {
     if (!ready) return; // bez chatId pytanie byloby niepelne
@@ -1606,6 +1626,41 @@ function Comments({
   }, [ready, taskId, chatId]);
 
   useEffect(load, [load]);
+
+  /** Dokleja gotowa linijke z czasem do pola komentarza (nie wysyla). */
+  const insertLine = (ms: number) =>
+    setDraft((prev) => {
+      const line = `Czas pracy nad zadaniem: ${formatDurationPl(ms)}`;
+      return prev.trim() ? `${prev.replace(/\s+$/, '')}\n${line}` : line;
+    });
+
+  /**
+   * Liczy czas w statusie "W toku" z dziennika zmian (read-only) i WSTAWIA go do
+   * pola komentarza — nie wysyla, nie zmienia zadania. Uzytkownik sam decyduje,
+   * czy komentarz doda. Wersja poltestowa, przed przeniesieniem do skryptu.
+   *
+   * Gdy odcinek przechodzi przez wiecej niz jeden dzien, czas zegarowy lapie noce
+   * i weekendy — wtedy nie wstawiamy od razu, tylko pytamy, czy przyciac do godzin
+   * pracy (8–16, bez weekendow).
+   */
+  const insertWorkTime = async () => {
+    if (computing) return;
+    setComputing(true);
+    try {
+      const history = await fetchTaskHistory(taskId);
+      const intervals = inProgressIntervals(history, Date.now());
+      const rawMs = sumIntervalsMs(intervals);
+      if (spansMultipleDays(intervals)) {
+        setBigTime({ rawMs, workMs: clampWorkingMs(intervals) });
+      } else {
+        insertLine(rawMs);
+      }
+    } catch (e) {
+      onError(`Nie udało się policzyć czasu pracy: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setComputing(false);
+    }
+  };
 
   const send = async () => {
     const text = draft.trim();
@@ -1665,7 +1720,46 @@ function Comments({
           }
         }}
       />
+      {bigTime && (
+        <div className="worktime-ask" ref={askRef}>
+          <p>
+            Zadanie było „w toku" przez kilka dni. Przyciąć do godzin pracy (
+            {WORK_START_HOUR}:00–{WORK_END_HOUR}:00, bez weekendów)?
+          </p>
+          <div className="worktime-ask-actions">
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                insertLine(bigTime.workMs);
+                setBigTime(null);
+              }}
+            >
+              Przytnij → {formatDurationPl(bigTime.workMs)}
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                insertLine(bigTime.rawMs);
+                setBigTime(null);
+              }}
+            >
+              Pełny → {formatDurationPl(bigTime.rawMs)}
+            </button>
+            <button className="btn" onClick={() => setBigTime(null)}>
+              Anuluj
+            </button>
+          </div>
+        </div>
+      )}
       <div className="comment-actions">
+        <button
+          className="btn"
+          disabled={computing || sending}
+          title="Policz czas w statusie „W toku” i wstaw go do komentarza (nie wysyła)"
+          onClick={() => void insertWorkTime()}
+        >
+          {computing ? 'Liczenie…' : 'Wstaw czas pracy'}
+        </button>
         <button className="btn" disabled={!draft.trim() || !me || sending} onClick={() => void send()}>
           {sending ? 'Wysyłanie…' : 'Dodaj komentarz'}
         </button>
