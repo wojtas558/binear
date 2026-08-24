@@ -452,3 +452,18 @@ export function Avatar({ name, photo }: { name: string | null; photo?: string | 
     </span>
   );
 }
+
+/** Zakladka — ikona zapisanych widokow w pasku. */
+export function ViewsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+      <path
+        d="M4 2.5h8a1 1 0 0 1 1 1V13l-5-3-5 3V3.5a1 1 0 0 1 1-1Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

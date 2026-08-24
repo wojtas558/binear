@@ -1101,6 +1101,165 @@ kbd {
   transition: background 120ms ease, color 120ms ease;
 }
 
+/* ── Selektor zakresu (zwiniety + dropdown-karuzela) ──────────────────────── */
+.scope-picker-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  /* Stala szerokosc — przycisk i obaj sasiedzi (100%) sa dokladnie tak samo szerocy.
+     Zwiezly zakres dat (sprintRange) + naturalna (nie 4ch) szerokosc licznika ponizej
+     pozwalaja zmiescic „Sprint NN + daty + licznik" w wezszym pasku. */
+  width: 198px;
+}
+
+/* Wewnatrz selektora licznik ma NATURALNA szerokosc (nie rezerwuje 4ch). Rezerwa
+   sluzyla dawnym segmentom, by nie skakaly przy zmianie liczby — tu pasek ma stala
+   szerokosc, wiec licznik i tak niczym nie rusza, a 4ch tylko zjadalo miejsce. */
+.scope-picker-wrap .segment-count {
+  min-width: 0;
+}
+
+.scope-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--s2) 0 var(--s3);
+  color: var(--fg);
+  background: var(--bg-panel);
+  border-radius: var(--s2);
+  white-space: nowrap;
+  transition: background 120ms ease;
+}
+
+.scope-picker:hover,
+.scope-picker-open {
+  background: var(--bg-active);
+}
+
+.scope-picker-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--w-medium);
+}
+
+/* Licznik i strzalka dosuniete do prawej; etykieta z datami po lewej. */
+.scope-picker > .segment-count {
+  margin-left: auto;
+}
+
+.scope-picker > .chev {
+  color: var(--fg-dim);
+}
+
+/* Przycisk zostaje na wierzchu tla, gdy karuzela otwarta. */
+.scope-picker-wrap.scope-open .scope-picker {
+  position: relative;
+  z-index: 31;
+}
+
+/* Sasiedzi karuzeli: poprzedni NAD przyciskiem, nastepny POD. Ta sama szerokosc co
+   przycisk (min-width:100%), przygaszeni, unosza sie z cieniem panelu. */
+.scope-flank {
+  position: absolute;
+  left: 0;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--s2) 0 var(--s3);
+  color: var(--fg-muted);
+  /* To samo wypelnienie co otwarty przycisk (--bg-active), zeby trojka czytala sie
+     jako jeden spojny slupek, a sasiedzi mieli WYRAZNE tlo (a nie ledwo widoczne). */
+  background: var(--bg-active);
+  border-radius: var(--s2);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.scope-flank:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.scope-flank .scope-picker-label {
+  font-weight: var(--w-normal);
+}
+
+.scope-flank-up {
+  bottom: calc(100% + 4px);
+}
+
+.scope-flank-down {
+  top: calc(100% + 4px);
+}
+
+.scope-flank .segment-count {
+  margin-left: auto;
+}
+
+/* Zwykla lista rozwijana (karuzela wylaczona) — pod przyciskiem. */
+.scope-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 100%;
+  width: max-content;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s1);
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+}
+
+.scope-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 32px;
+  padding: 0 var(--s2);
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.scope-opt:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.scope-opt-on {
+  color: var(--fg);
+}
+
+.scope-opt-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+  width: 14px;
+  color: var(--accent);
+}
+
+.scope-opt-check > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.scope-opt .segment-count {
+  margin-left: auto;
+}
+
 .segment:hover {
   color: var(--fg);
 }
@@ -3256,6 +3415,84 @@ a.mention:hover {
 .btn:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* ── Widoki (zapisane) ──────────────────────────────────────────────────── */
+
+/* Wiersz listy widokow: nazwa (klik = zastosuj) + krzyzyk usuwania. */
+.view-item {
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--radius);
+}
+
+.view-item:hover {
+  background: var(--bg-hover);
+}
+
+.view-item-on {
+  color: var(--fg);
+}
+
+.view-apply {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--s2) var(--s3);
+  color: inherit;
+  text-align: left;
+}
+
+.view-apply .picker-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-del {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--s2);
+  color: var(--fg-dim);
+  opacity: 0;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.view-item:hover .view-del {
+  opacity: 1;
+}
+
+.view-del:hover {
+  color: var(--danger, #e5534b);
+}
+
+/* Pole „Zapisz bieżący widok…" na gorze menu, nad lista widokow. */
+.view-save {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  padding: var(--s2);
+  margin-bottom: var(--s1);
+  border-bottom: 1px solid var(--border);
+}
+
+.view-save .picker-input {
+  flex: 1 1 auto;
+  min-width: 0; /* bez tego placeholder rozpycha wiersz i przycisk „Zapisz" wychodzi poza menu */
+  margin: 0;
+}
+
+.view-save .btn {
+  flex: 0 0 auto;
+}
+
+/* Biezacy uklad juz jest zapisanym widokiem — zapis wylaczony (tooltip mowi dlaczego). */
+.view-save .picker-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ── Baner aktualizacji ─────────────────────────────────────────────────── */

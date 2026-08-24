@@ -3,6 +3,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -258,6 +259,8 @@ interface Settings {
   showEmpty: boolean;
   /** Szerokosc panelu szczegolow w px — ustawiana chwytem na jego lewej krawedzi. */
   detailWidth: number;
+  /** Selektor zakresu jako karuzela (true) albo zwykla rozwijana lista (false). */
+  scopeCarousel: boolean;
 }
 
 const DETAIL_MIN = 360;
@@ -275,6 +278,7 @@ const DEFAULT_SETTINGS: Settings = {
   showDone: false,
   showEmpty: false,
   detailWidth: 520,
+  scopeCarousel: true,
 };
 
 function loadSettings(): Settings {
@@ -287,6 +291,61 @@ function loadSettings(): Settings {
   } catch {
     return DEFAULT_SETTINGS;
   }
+}
+
+/**
+ * Zapisany widok (jak w Linearze) — cały stan „na co patrzę": filtry, grupowanie,
+ * sortowanie, zakres i przełączniki. GLOBALNY (nie per projekt) i tylko na tym
+ * urządzeniu. Uwaga: filtry potrafią wskazywać wartości konkretnego projektu (nazwy
+ * etapów, id osób), więc widok zastosowany w innym projekcie może nic nie złapać.
+ */
+interface SavedView {
+  id: string;
+  name: string;
+  filters: Filters;
+  /** Tekst z pola wyszukiwania — zapisywany razem z filtrami. */
+  query: string;
+  groupBy: GroupBy;
+  subGroupBy: GroupBy | null;
+  sort: SortOpts;
+  scope: Scope;
+  onlyMine: boolean;
+  withUnassigned: boolean;
+  showDone: boolean;
+  showEmpty: boolean;
+  viewMode: ViewMode;
+}
+
+const VIEWS_KEY = 'binear.views.v1';
+
+function loadViews(): SavedView[] {
+  try {
+    const raw = localStorage.getItem(VIEWS_KEY);
+    const arr = raw ? (JSON.parse(raw) as SavedView[]) : [];
+    if (!Array.isArray(arr)) return [];
+    // Widoki sprzed pola `query` (i innych) — domykamy braki, zeby apply/fingerprint
+    // nie trafialy na undefined.
+    return arr.map((v) => ({ ...v, query: v.query ?? '' }));
+  } catch {
+    return [];
+  }
+}
+
+/** Porownywalny odcisk widoku — bez `id`/`name`, z filtrami bez ulotnych id warunkow. */
+function viewFingerprint(v: Omit<SavedView, 'id' | 'name'>): string {
+  return JSON.stringify({
+    filters: v.filters.map((c) => ({ field: c.field, op: c.op, values: c.values })),
+    query: v.query,
+    groupBy: v.groupBy,
+    subGroupBy: v.subGroupBy,
+    sort: v.sort,
+    scope: v.scope,
+    onlyMine: v.onlyMine,
+    withUnassigned: v.withUnassigned,
+    showDone: v.showDone,
+    showEmpty: v.showEmpty,
+    viewMode: v.viewMode,
+  });
 }
 
 /*
@@ -1039,7 +1098,7 @@ function bucket(
  * gorze. Dopiero brak dokladnego trafienia spuszcza nas do szukania po fragmencie.
  */
 function matchQuery(list: Task[], query: string): Task[] {
-  const q = query.trim().toLowerCase();
+  const q = (query ?? '').trim().toLowerCase();
   if (!q) return list;
 
   const asId = q.match(/^#?\s*(?:it[\s-]*)?(\d+)$/);
@@ -1302,6 +1361,321 @@ function Picker({
   );
 }
 
+// ─── Widoki (zapisane) ───────────────────────────────────────────────────────
+
+/**
+ * Rozwijane „Widoki" w pasku: lista zapisanych widokow (klik = zastosuj, ✓ = aktywny,
+ * ✕ = usun) plus pole „Zapisz bieżący widok…". Pozycjonowanie jak w `Picker`.
+ */
+function ViewsMenu({
+  anchor,
+  views,
+  activeId,
+  onApply,
+  onDelete,
+  onSave,
+  onClose,
+}: {
+  anchor: Anchor;
+  views: SavedView[];
+  activeId: string | null;
+  onApply: (v: SavedView) => void;
+  onDelete: (id: string) => void;
+  onSave: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState('');
+
+  const width = 260;
+  const left = Math.min(anchor.left + 32, window.innerWidth - width - 12);
+  const top = anchor.bottom + 4;
+
+  // Biezacy uklad juz odpowiada zapisanemu widokowi (activeId). Zapisywanie go pod
+  // nowa nazwa dawaloby duplikat o identycznym „odcisku" — fingerprint dopasowuje
+  // wtedy PIERWSZY z nich, wiec drugiego nie da sie potem zaznaczyc. Blokujemy zapis.
+  const activeName = views.find((v) => v.id === activeId)?.name ?? null;
+  const alreadySaved = activeId != null;
+
+  const save = () => {
+    const n = name.trim();
+    if (!n || alreadySaved) return;
+    onSave(n);
+    setName('');
+  };
+
+  return (
+    <>
+      <div className="picker-backdrop" onClick={onClose} />
+      <div className="picker" style={{ left, top, width }}>
+        <div className="picker-title">Widoki</div>
+        <div
+          className="view-save"
+          title={alreadySaved ? `Bieżący widok jest już zapisany jako „${activeName}"` : undefined}
+        >
+          <input
+            className="picker-input"
+            autoFocus={!alreadySaved}
+            disabled={alreadySaved}
+            value={name}
+            placeholder="Zapisz bieżący widok…"
+            spellCheck={false}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                save();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                onClose();
+              }
+            }}
+          />
+          <button
+            className="btn btn-primary"
+            disabled={alreadySaved || !name.trim()}
+            onClick={save}
+          >
+            Zapisz
+          </button>
+        </div>
+        <div className="picker-list">
+          {views.length === 0 && <div className="picker-empty">Brak zapisanych widoków</div>}
+          {views.map((v) => (
+            <div key={v.id} className={`view-item${v.id === activeId ? ' view-item-on' : ''}`}>
+              <button className="view-apply" onClick={() => onApply(v)}>
+                <span className="picker-label">{v.name}</span>
+                {v.id === activeId && (
+                  <span className="picker-check">
+                    <CheckIcon />
+                  </span>
+                )}
+              </button>
+              <button className="view-del" title="Usuń widok" onClick={() => onDelete(v.id)}>
+                <CloseIcon />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Wybor zakresu (Sprint / Poza / Wszystkie) ───────────────────────────────
+
+/**
+ * Selektor zakresu jako pionowa KARUZELA, w ktorej WYBRANA pozycja JEST przyciskiem
+ * (zostaje w pasku). Po otwarciu poprzednia pozycja wisi NAD przyciskiem, a nastepna
+ * POD nim — przygaszone. Kolko myszy obraca kolo (jeden krok na „zabkowanie"), tez na
+ * zwinietym przycisku. Klik w sasiada wybiera go (staje sie przyciskiem-srodkiem).
+ */
+function ScopePicker({
+  scope,
+  scopes,
+  counts,
+  activeSprint,
+  carousel,
+  onPick,
+}: {
+  scope: Scope;
+  scopes: typeof SCOPES;
+  counts: Record<Scope, number>;
+  activeSprint: { name: string; dateStart: string | null; dateEnd: string | null } | null;
+  /** true = karuzela (sasiedzi nad/pod przyciskiem); false = zwykla lista rozwijana. */
+  carousel: boolean;
+  onPick: (s: Scope) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const n = scopes.length;
+  const sel = Math.max(
+    0,
+    scopes.findIndex((s) => s.key === scope),
+  );
+  const cur = scopes[sel] ?? scopes[0];
+  const prev = scopes[(sel - 1 + n) % n];
+  const next = scopes[(sel + 1) % n];
+
+  // Kolko: jeden krok na „zabkowanie". Natywny listener (passive:false), zeby
+  // zablokowac przewijanie strony. `selRef` trzyma biezaca pozycje bez przepinania.
+  const selRef = useRef(sel);
+  selRef.current = sel;
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    let acc = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (n < 2) return;
+      e.preventDefault();
+      acc += e.deltaY;
+      if (Math.abs(acc) < 24) return;
+      const dir = acc > 0 ? 1 : -1;
+      acc = 0;
+      onPick(scopes[(selRef.current + dir + n) % n].key);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [scopes, onPick, n]);
+
+  const dates = (key: Scope) =>
+    key === 'sprint' && activeSprint ? (
+      <span className="segment-dates">{sprintRange(activeSprint.dateStart, activeSprint.dateEnd)}</span>
+    ) : null;
+  const labelFor = (s: { key: Scope; label: string }) =>
+    s.key === 'sprint' && activeSprint ? activeSprint.name : s.label;
+
+  // Sasiad (nad/pod przyciskiem) — przygaszony, klik go wybiera. Pokazujemy tylko gdy
+  // jest wiecej niz jeden zakres i faktycznie rozny od srodka.
+  const flank = (s: { key: Scope; label: string }, where: 'up' | 'down') => (
+    <button
+      className={`scope-flank scope-flank-${where}`}
+      onClick={() => onPick(s.key)}
+      title={`Zakres: ${labelFor(s)}`}
+    >
+      <span className="scope-picker-label">{labelFor(s)}</span>
+      {dates(s.key)}
+      <span className="segment-count">{counts[s.key]}</span>
+    </button>
+  );
+
+  const showFlanks = open && carousel && n > 1;
+
+  return (
+    <div className={`scope-picker-wrap${open ? ' scope-open' : ''}`} ref={wrapRef}>
+      {open && <div className="picker-backdrop" onClick={() => setOpen(false)} />}
+
+      {showFlanks && flank(prev, 'up')}
+
+      <button
+        className={`scope-picker${open ? ' scope-picker-open' : ''}`}
+        title="Zakres — kliknij, aby wybrać, albo przewiń kółkiem"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="scope-picker-label">{labelFor(cur)}</span>
+        {dates(cur.key)}
+        <span className="segment-count">{counts[cur.key]}</span>
+        <ChevronIcon open={open} />
+      </button>
+
+      {showFlanks && flank(next, 'down')}
+
+      {/* Zwykla lista rozwijana (gdy karuzela wylaczona) — pod przyciskiem, z ptaszkiem. */}
+      {open && !carousel && (
+        <div className="scope-menu" role="listbox">
+          {scopes.map((s) => (
+            <button
+              key={s.key}
+              role="option"
+              aria-selected={s.key === scope}
+              className={`scope-opt${s.key === scope ? ' scope-opt-on' : ''}`}
+              onClick={() => {
+                onPick(s.key);
+                setOpen(false);
+              }}
+            >
+              <span className="scope-opt-check">{s.key === scope && <CheckIcon />}</span>
+              <span className="scope-picker-label">{labelFor(s)}</span>
+              {dates(s.key)}
+              <span className="segment-count">{counts[s.key]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Poziomy pasek przewijania (wlasny) ──────────────────────────────────────
+
+/**
+ * Kontener z POZIOMYM przewijaniem i WLASNYM, zaokraglonym paskiem. Natywnego nie
+ * da sie zaokraglic w Firefoksie, wiec go chowamy i rysujemy pigulke sami — wyglada
+ * tak samo we wszystkich przegladarkach. Pasek pojawia sie tylko przy najechaniu
+ * i tylko gdy tresc naprawde wystaje.
+ */
+function ScrollX({
+  children,
+  onSpare,
+}: {
+  children: ReactNode;
+  /** Wolne miejsce w px (clientWidth - scrollWidth); ujemne = tresc wystaje/przewija. */
+  onSpare?: (spare: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ width: number; left: number } | null>(null);
+  // Podczas przeciagania pasek ma zostac widoczny, nawet gdy kursor zjedzie z obszaru.
+  const [dragging, setDragging] = useState(false);
+
+  const sync = useCallback(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const { scrollWidth, clientWidth, scrollLeft } = el;
+    onSpare?.(clientWidth - scrollWidth);
+    if (scrollWidth <= clientWidth + 1) {
+      setThumb(null);
+      return;
+    }
+    const width = Math.max(24, (clientWidth / scrollWidth) * clientWidth);
+    const maxLeft = clientWidth - width;
+    const range = scrollWidth - clientWidth;
+    setThumb({ width, left: range ? (scrollLeft / range) * maxLeft : 0 });
+  }, [onSpare]);
+
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    sync();
+    el.addEventListener('scroll', sync, { passive: true });
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    // Chipy dochodza/znikaja bez zmiany rozmiaru kontenera — stad obserwator drzewa.
+    const mo = new MutationObserver(sync);
+    mo.observe(el, { childList: true, subtree: true });
+    return () => {
+      el.removeEventListener('scroll', sync);
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [sync]);
+
+  const onDrag = (e: React.PointerEvent) => {
+    const el = trackRef.current;
+    if (!el || !thumb) return;
+    e.preventDefault();
+    setDragging(true);
+    const startX = e.clientX;
+    const startScroll = el.scrollLeft;
+    const maxLeft = el.clientWidth - thumb.width;
+    const range = el.scrollWidth - el.clientWidth;
+    const move = (ev: PointerEvent) => {
+      const ratio = maxLeft ? range / maxLeft : 0;
+      el.scrollLeft = startScroll + (ev.clientX - startX) * ratio;
+    };
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div className={`scrollx${dragging ? ' scrollx-dragging' : ''}`}>
+      <div className="scrollx-track" ref={trackRef}>
+        {children}
+      </div>
+      {thumb && (
+        <div
+          className="scrollx-bar"
+          onPointerDown={onDrag}
+          style={{ width: thumb.width, transform: `translateX(${thumb.left}px)` }}
+        />
+      )}
+    </div>
+  );
+}
+
 /**
  * Ile tagow miesci sie w wierszu przy danej szerokosci listy. Mierzymy realny
  * kontener (a nie okno), bo otwarty panel szczegolow zabiera polowe ekranu —
@@ -1369,9 +1743,18 @@ function useDebounced<T>(value: T, delay: number): T {
  *
  * `ref` idzie na `<input>`, bo `/` i `Ctrl+F` ustawiaja na nim kursor.
  */
-const SearchBox = forwardRef<HTMLInputElement, { onChange: (q: string) => void }>(
+/** Uchwyt SearchBoxa — poza fokusem pozwala ustawic tekst z zewnatrz (np. z widoku). */
+type SearchHandle = { focus: () => void; select: () => void; setValue: (v: string) => void };
+
+const SearchBox = forwardRef<SearchHandle, { onChange: (q: string) => void }>(
   function SearchBox({ onChange }, ref) {
     const [draft, setDraft] = useState('');
+    const inputRef = useRef<HTMLInputElement>(null);
+    useImperativeHandle(ref, () => ({
+      focus: () => inputRef.current?.focus(),
+      select: () => inputRef.current?.select(),
+      setValue: (v: string) => setDraft(v),
+    }));
     /*
      * 300 ms, nie 150. Przy 40 slowach na minute kolejne znaki dziela ~250 ms,
      * wiec przy 150 ms timer zdazal dobiec PRZED nastepnym klawiszem i lista
@@ -1386,7 +1769,7 @@ const SearchBox = forwardRef<HTMLInputElement, { onChange: (q: string) => void }
       <div className="search">
         <SearchIcon />
         <input
-          ref={ref}
+          ref={inputRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Filtruj zadania…"
@@ -2847,7 +3230,8 @@ function ViewMenu({
     unassigned: boolean;
     done: boolean;
     empty: boolean;
-    tag: string | null;
+    carousel: boolean;
+    filtersOn: boolean;
     theme: Theme;
     font: Font;
   };
@@ -2866,7 +3250,8 @@ function ViewMenu({
     unassigned: () => void;
     done: () => void;
     empty: () => void;
-    clearTag: () => void;
+    carousel: () => void;
+    clearFilters: () => void;
     reload: () => void;
     palette: () => void;
     theme: (t: Theme) => void;
@@ -3005,12 +3390,13 @@ function ViewMenu({
         {check('+ nieprzypisane', state.unassigned, on.unassigned, !state.mine)}
         {check('Pokaż zakończone', state.done, on.done)}
         {check('Puste kolumny', state.empty, on.empty)}
+        {check('Karuzela zakresu', state.carousel, on.carousel)}
 
         <div className="menu-sep" />
-        {state.tag && (
-          <button className="menu-item" onClick={() => { onClose(); on.clearTag(); }}>
+        {state.filtersOn && (
+          <button className="menu-item" onClick={() => { onClose(); on.clearFilters(); }}>
             <span className="menu-check" />
-            <span className="menu-label">Wyczyść tag: {state.tag}</span>
+            <span className="menu-label">Wyczyść filtry</span>
           </button>
         )}
         <button className="menu-item" onClick={() => { onClose(); on.reload(); }}>
@@ -3310,6 +3696,7 @@ export default function App() {
   const [withUnassigned, setWithUnassigned] = useState(saved.withUnassigned);
   const [showDone, setShowDone] = useState(saved.showDone);
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
+  const [scopeCarousel, setScopeCarousel] = useState(saved.scopeCarousel);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
   const [groupBy, setGroupBy] = useState<GroupBy>(saved.groupBy);
@@ -3398,7 +3785,7 @@ export default function App() {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [viewMenu, setViewMenu] = useState<Anchor | null>(null);
   const [projectMenu, setProjectMenu] = useState<Anchor | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<SearchHandle>(null);
   const [contentRef, contentWidth] = useWidth<HTMLDivElement>();
   const tagLimit = tagsForWidth(contentWidth);
 
@@ -3874,13 +4261,83 @@ export default function App() {
       showDone,
       showEmpty,
       detailWidth,
+      scopeCarousel,
     };
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, showEmpty, detailWidth]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, showEmpty, detailWidth, scopeCarousel]);
+
+  // ── Zapisane widoki (globalne) ──
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+    } catch {
+      // brak miejsca / tryb prywatny — widoki po prostu nie przezyja odswiezenia
+    }
+  }, [views]);
+
+  /** Biezacy stan „na co patrzę" — do zapisu i do wykrycia, ktory widok jest aktywny. */
+  const viewSnapshot = useMemo<Omit<SavedView, 'id' | 'name'>>(
+    () => ({
+      filters,
+      query,
+      groupBy,
+      subGroupBy,
+      sort,
+      // Preferencja (scopePref), nie efektywny `scope` — patrz zapis ustawien wyzej.
+      scope: scopePref,
+      onlyMine,
+      withUnassigned,
+      showDone,
+      showEmpty,
+      viewMode,
+    }),
+    [filters, query, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, showEmpty, viewMode],
+  );
+
+  const activeViewId = useMemo(() => {
+    const fp = viewFingerprint(viewSnapshot);
+    return views.find((v) => viewFingerprint(v) === fp)?.id ?? null;
+  }, [views, viewSnapshot]);
+
+  const applyView = useCallback((v: SavedView) => {
+    // Swieze id warunkow, zeby nie kolidowaly z licznikiem `condSeq` biezacej sesji.
+    setFilters(v.filters.map((c) => ({ ...c, id: newCondId() })));
+    // Wyszukiwanie: od razu do stanu i do widocznego pola (SearchBox ma wlasny draft).
+    // Widoki zapisane przed dodaniem pola `query` nie maja go wcale — bez `?? ''`
+    // setQuery(undefined) wywala matchQuery (query.trim) i cala aplikacja gasnie.
+    const q = v.query ?? '';
+    setQuery(q);
+    searchRef.current?.setValue(q);
+    setGroupBy(v.groupBy);
+    setSubGroupBy(v.subGroupBy);
+    setSort(v.sort);
+    setScope(v.scope);
+    setOnlyMine(v.onlyMine);
+    setWithUnassigned(v.withUnassigned);
+    setShowDone(v.showDone);
+    setShowEmpty(v.showEmpty);
+    setViewMode(v.viewMode);
+    // Menu zostaje otwarte — mozna przeklikiwac widoki i patrzec na wynik bez
+    // ponownego otwierania listy. Zamyka je klikniecie poza (backdrop) albo Esc.
+  }, []);
+
+  const saveView = useCallback(
+    (name: string) => {
+      const n = name.trim();
+      if (!n) return;
+      setViews((vs) => [...vs, { id: `v${Date.now()}`, name: n, ...viewSnapshot }]);
+    },
+    [viewSnapshot],
+  );
+
+  const deleteView = useCallback(
+    (id: string) => setViews((vs) => vs.filter((v) => v.id !== id)),
+    [],
+  );
 
   useEffect(() => {
     applyTheme(theme);
@@ -4796,25 +5253,15 @@ export default function App() {
         {/* Wybor Lista/Tablica siedzi wylacznie w panelu widoku (zakladki na gorze) —
             tu byl duplikat tej samej kontrolki. */}
         <div className="scopebar">
-          <div className="segments">
-            {scopes.map((s) => (
-              <button
-                key={s.key}
-                className={`segment${scope === s.key ? ' segment-active' : ''}`}
-                onClick={() => setScope(s.key)}
-                title={s.key === 'outside' ? 'Backlog i poprzednie sprinty' : undefined}
-              >
-                {s.key === 'sprint' && activeSprint ? activeSprint.name : s.label}
-                <span className="segment-count">{scopeCounts[s.key]}</span>
-              </button>
-            ))}
-          </div>
+          <ScopePicker
+            scope={scope}
+            scopes={scopes}
+            counts={scopeCounts}
+            activeSprint={activeSprint}
+            carousel={scopeCarousel}
+            onPick={setScope}
+          />
 
-          {scope === 'sprint' && activeSprint && (
-            <span className="sprint-dates">
-              {shortDate(activeSprint.dateStart)} – {shortDate(activeSprint.dateEnd)}
-            </span>
-          )}
           {!activeSprint && <span className="sprint-dates">brak aktywnego sprintu</span>}
 
           {marked.size > 0 && (
@@ -4826,39 +5273,118 @@ export default function App() {
             </span>
           )}
 
-          {tagFilter && (
-            <button className="tag tag-clear" onClick={() => setTagFilter(null)} title="Wyczyść filtr tagu">
-              <span className="tag-dot" style={{ background: 'var(--accent)' }} />
-              {tagFilter}
-              <span className="tag-x">
-                <CloseIcon />
-              </span>
+          {/* Przelaczniki „Tylko moje / + nieprzypisane / Zakończone" zdjete z paska —
+              zyja teraz wylacznie w menu widoku (ViewMenu), zeby nie zasmiecac zakresu. */}
+
+          {/* Pionowa kreska oddziela grupe zakresu (segmenty + daty) od grupy filtrow
+              (chipy + „+ Filtr"), zeby linia czytala sie jako dwa bloki, nie jeden ciag. */}
+          <span className="scopebar-div" aria-hidden />
+
+          {/* Przelacznik zapisanych widokow — po LEWEJ, przed grupa filtrow. */}
+          <button
+            className="views-btn"
+            title="Zapisane widoki"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setViewsMenu({ left: r.left - 32, top: r.bottom + 4, bottom: r.bottom + 4 });
+            }}
+          >
+            <ViewsIcon />
+            <span className="display-label">Widok:</span>
+            {views.find((v) => v.id === activeViewId)?.name ?? 'Własny'}
+            <ChevronIcon open={false} />
+          </button>
+
+          {/* Wyczyszczenie wszystkiego jako „×" MIEDZY widokiem a chipami. Pokazuj tez
+              przy samym tekscie wyszukiwania — czysci filtry ORAZ szukanie. */}
+          {(anyFilter(filters) || query.trim() !== '') && (
+            <button
+              className={`filter-clear-x${clearCollapsed ? ' filter-clear-x-min' : ''}`}
+              title="Wyczyść wszystkie (filtry i wyszukiwanie)"
+              onClick={() => {
+                setFilters(EMPTY_FILTERS);
+                setQuery('');
+                searchRef.current?.setValue('');
+              }}
+            >
+              <CloseIcon />
+              <span className="filter-clear-x-label">Wyczyść wszystkie</span>
             </button>
           )}
 
-          <label className="toggle">
-            <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
-            Tylko moje
-          </label>
-          {/* Sensowne tylko przy wlaczonym "Tylko moje" — inaczej nieprzypisane
-              i tak sa widoczne, wiec przelacznik nic by nie zmienil. */}
-          <label className={`toggle${onlyMine ? '' : ' toggle-off'}`} title={
-            onlyMine
-              ? 'Pokaż też zadania niczyje (konto-zaślepka)'
-              : 'Nieprzypisane są już widoczne — wyłącz „Tylko moje", żeby to zmienić'
-          }>
-            <input
-              type="checkbox"
-              checked={withUnassigned}
-              disabled={!onlyMine}
-              onChange={(e) => setWithUnassigned(e.target.checked)}
-            />
-            + nieprzypisane
-          </label>
-          <label className="toggle">
-            <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
-            Zakończone
-          </label>
+          {/* Chipy filtrow (przewijane POZIOMO), a TUZ ZA NIMI „+ Filtr" — dodawanie
+              dopisuje kolejny chip na koncu, wiec przycisk stoi tam, gdzie pojawi sie efekt. */}
+          {anyFilter(filters) && (
+            <ScrollX onSpare={onChipsSpare}>
+              {filters
+                .filter((c) => c.values.length)
+              .map((c) => (
+                <div className="filter-chip" key={c.id}>
+                  <button
+                    className="filter-chip-main filter-chip-opbtn"
+                    title="Zmień operator"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setOpMenu({ condId: c.id, anchor: { left: r.left, top: r.top, bottom: r.bottom } });
+                    }}
+                  >
+                    <span className="filter-chip-field">{FILTER_LABEL[c.field]}</span>
+                    <span className="filter-chip-op">{opLabel(c.op, c.values.length > 1)}</span>
+                  </button>
+                  <button
+                    className="filter-chip-main"
+                    title={c.values.map((v) => filterValueLabel(c.field, v)).join(', ')}
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setFilterPick({
+                        condId: c.id,
+                        anchor: { left: r.left - 32, top: r.top, bottom: r.bottom },
+                      });
+                    }}
+                  >
+                    {c.values.length === 1 ? (
+                      // Jedna wartosc: ta sama moneta (tlo POD ikona) co w facepile + podpis.
+                      <span className="filter-chip-val">
+                        <span className="filter-chip-stack">{filterToken(c.field, c.values[0], 0)}</span>
+                        {filterValueLabel(c.field, c.values[0])}
+                      </span>
+                    ) : (
+                      // Facepile jak w Linearze — nachodzace, NIEPRZEZROCZYSTE monety.
+                      // Osoba = awatar. Status/etap = znajoma ikona-pierscien NA monecie
+                      // podbarwionej kolorem wartosci: moneta jest widoczna i pelna, wiec
+                      // czysto zaslania sasiada (zero przeswitow), a jasniejsza ikona na
+                      // wierzchu zostaje czytelna. Priorytet: te same slupki co gdzie
+                      // indziej, na neutralnej monecie. Tag: podbarwiona moneta + maly rdzen.
+                      <span className="filter-chip-stack">
+                        {c.values.slice(0, CHIP_STACK_MAX).map((v, i) => filterToken(c.field, v, i))}
+                        {c.values.length > CHIP_STACK_MAX && (
+                          <span className="filter-chip-more">+{c.values.length - CHIP_STACK_MAX}</span>
+                        )}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    className="filter-chip-x"
+                    title="Usuń filtr"
+                    onClick={() => removeCondition(c.id)}
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+              ))}
+            </ScrollX>
+          )}
+
+          <button
+            className="filter-add"
+            title="Dodaj filtr (osoba, priorytet, etap, status, tag)"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setFilterMenu({ left: r.left - 32, top: r.bottom + 4, bottom: r.bottom + 4 });
+            }}
+          >
+            <span className="filter-add-plus">+</span> Filtr
+          </button>
         </div>
 
         {error && (
@@ -5097,6 +5623,77 @@ export default function App() {
         />
       )}
 
+      {viewsMenu && (
+        <ViewsMenu
+          anchor={viewsMenu}
+          views={views}
+          activeId={activeViewId}
+          onApply={applyView}
+          onDelete={deleteView}
+          onSave={saveView}
+          onClose={() => setViewsMenu(null)}
+        />
+      )}
+
+      {/* "+ Filtr": najpierw wybor wymiaru, potem popover wartosci w tym samym miejscu. */}
+      {filterMenu && (
+        <Picker
+          title="Dodaj filtr"
+          anchor={filterMenu}
+          options={addFilterOptions}
+          placeholder="Szukaj wymiaru…"
+          onClose={() => setFilterMenu(null)}
+          onPick={(value) => {
+            const anchor = filterMenu;
+            setFilterMenu(null);
+            addCondition(value as FilterField, anchor);
+          }}
+        />
+      )}
+
+      {(() => {
+        // Wartosci otwartego warunku — pobieramy go po id, zeby chip i popover byly zawsze zgodne.
+        const cond = filterPick && filters.find((c) => c.id === filterPick.condId);
+        if (!filterPick || !cond) return null;
+        return (
+          <Picker
+            multi
+            title={FILTER_LABEL[cond.field]}
+            anchor={filterPick.anchor}
+            options={filterOptions}
+            selected={cond.values}
+            emptyLabel="Brak wartości do wyboru"
+            onToggle={(value) => toggleCondValue(cond.id, value)}
+            onPick={() => {}}
+            onClose={() => {
+              // Porzucony, pusty warunek (np. „+ Filtr" bez wyboru) nie zostaje wiszacy.
+              if (!cond.values.length) removeCondition(cond.id);
+              setFilterPick(null);
+            }}
+          />
+        );
+      })()}
+
+      {(() => {
+        const cond = opMenu && filters.find((c) => c.id === opMenu.condId);
+        if (!opMenu || !cond) return null;
+        return (
+          <Picker
+            title="Operator"
+            anchor={opMenu.anchor}
+            options={opsFor(cond.field).map((op) => ({
+              value: op,
+              label: opLabel(op, cond.values.length > 1),
+            }))}
+            onClose={() => setOpMenu(null)}
+            onPick={(value) => {
+              setCondOp(cond.id, value as FilterOp);
+              setOpMenu(null);
+            }}
+          />
+        );
+      })()}
+
       {projectMenu && (
         <Picker
           title="Projekt"
@@ -5140,7 +5737,8 @@ export default function App() {
             unassigned: withUnassigned,
             done: showDone,
             empty: showEmpty,
-            tag: tagFilter,
+            carousel: scopeCarousel,
+            filtersOn: anyFilter(filters),
             theme,
             font,
           }}
@@ -5162,7 +5760,8 @@ export default function App() {
             unassigned: () => setWithUnassigned((v) => !v),
             done: () => setShowDone((v) => !v),
             empty: () => setShowEmpty((v) => !v),
-            clearTag: () => setTagFilter(null),
+            carousel: () => setScopeCarousel((v) => !v),
+            clearFilters: () => setFilters(EMPTY_FILTERS),
             reload: () => void reload(),
             palette: () => setPaletteOpen(true),
             theme: setTheme,
