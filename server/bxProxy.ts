@@ -22,12 +22,14 @@ const ALLOWED = new Set([
   'tasks.api.scrum.backlog.get', // id backlogu — bez niego nie ma jak wyjac zadania ze sprintu
   'tasks.api.scrum.task.get', // scrumowa czesc zadania: entityId, storyPoints, kod nadany przez Bitrix
   'tasks.task.history.list', // dziennik zmian zadania — z niego liczymy czas w statusie "W toku"
+  'task.item.getdependson', // zadania powiazane (DEPENDS_ON) — nowe tasks.task.* tego pola nie zna
   'task.commentitem.getlist',
   'im.dialog.messages.get', // komentarze zadan zyja dzis w czacie, nie na forum
   'sonet_group.user.groups', // projekty uzytkownika — lista w przelaczniku
   'user.get',
   // zapis — kazda zmiana idzie jako uzytkownik z URL-a webhooka
   'tasks.task.update',
+  'task.item.update', // legacy CTaskItem::update — jedyna droga zapisu DEPENDS_ON (zadania powiazane)
   'task.stages.movetask',
   'tasks.api.scrum.task.update', // sprint <-> backlog; przynaleznosc trzyma scrum, nie pole zadania
   'task.commentitem.add',

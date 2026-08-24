@@ -490,17 +490,20 @@ export interface ChecklistItem {
   id: number;
   title: string;
   done: boolean;
+  /** Zagniezdzenie w drzewie checklisty (0 = bezposrednio pod checklista). */
+  depth: number;
 }
 
 /**
- * Checklisty w Bitriksie to DRZEWO (pole `parentId`): wezel na poziomie 0 to tytul
- * checklisty, jego dzieci to pozycje. Zadanie moze miec kilka takich checklist —
- * dlatego grupujemy, a nie splaszczamy do jednej listy (inaczej naglowki liczyly
- * sie jako pozycje i 2 checklisty po 4 i 3 wygladaly jak jedna na 9).
+ * Checklisty w Bitriksie to DRZEWO (pole `parentId`) o DOWOLNEJ glebokosci: wezel na
+ * poziomie 0 to sama checklista (np. "BX_CHECKLIST_1"), jej potomkowie to pozycje —
+ * a te moga miec WLASNE podpozycje (i jeszcze glebiej). Zadanie moze miec kilka
+ * checklist, dlatego grupujemy. Splaszczamy CALE poddrzewo z `depth`, zeby zagniezdzone
+ * pozycje nie ginely (dawniej brano tylko bezposrednie dzieci — sub-itemy przepadaly).
  */
 export interface ChecklistGroup {
   id: number;
-  /** Pusty tytul = luzne pozycje bez sekcji (zwykla, jednopoziomowa checklista). */
+  /** Pusty tytul = luzne pozycje / techniczna nazwa checklisty (BX_CHECKLIST_N). */
   title: string;
   items: ChecklistItem[];
 }
@@ -524,23 +527,30 @@ function checklistGroups(v: unknown): ChecklistGroup[] {
   }
   // Kolejnosc jak w UI Bitriksa = kolejnosc tworzenia (id). `sortIndex` z API bywa
   // niespojny (np. ukonczona pozycja ma 0, a i tak wisi na koncu), wiec go nie uzywamy.
-  const bySort = (a: { id: number }, b: { id: number }) => a.id - b.id;
+  const kids = (parentId: number) => (byParent.get(parentId) ?? []).slice().sort((a, b) => a.id - b.id);
+
+  // Techniczna nazwa checklisty ("BX_CHECKLIST_1") nie jest naglowkiem dla usera.
+  const isSynthetic = (t: string) => /^BX_CHECKLIST_\d+$/i.test(t);
 
   const groups: ChecklistGroup[] = [];
   const loose: ChecklistItem[] = [];
-  for (const top of (byParent.get(0) ?? []).slice().sort(bySort)) {
-    const children = (byParent.get(top.id) ?? []).slice().sort(bySort);
-    if (children.length > 0) {
-      // Wezel z dziecmi = tytul checklisty; pozycje to jego dzieci.
-      groups.push({
-        id: top.id,
-        title: top.title,
-        items: children.map((c) => ({ id: c.id, title: c.title, done: c.done })),
-      });
-    } else {
-      // Wezel bez dzieci = zwykla pozycja (checklista bez sekcji).
-      loose.push({ id: top.id, title: top.title, done: top.done });
+  for (const root of kids(0)) {
+    const rootKids = kids(root.id);
+    if (rootKids.length === 0) {
+      // Wezel poziomu 0 bez dzieci = pojedyncza luzna pozycja.
+      loose.push({ id: root.id, title: root.title, done: root.done, depth: 0 });
+      continue;
     }
+    // Root z dziecmi = checklista. Splaszczamy CALE poddrzewo (rekurencyjnie) z depth.
+    const items: ChecklistItem[] = [];
+    const walk = (parentId: number, depth: number) => {
+      for (const n of kids(parentId)) {
+        items.push({ id: n.id, title: n.title, done: n.done, depth });
+        walk(n.id, depth + 1);
+      }
+    };
+    walk(root.id, 0);
+    groups.push({ id: root.id, title: isSynthetic(root.title) ? '' : root.title, items });
   }
   if (loose.length) groups.unshift({ id: 0, title: '', items: loose });
   return groups;
@@ -938,6 +948,77 @@ export async function updateTask(
   fields: Record<string, string | number>,
 ): Promise<void> {
   await call('tasks.task.update', { taskId, fields });
+}
+
+/**
+ * Zadania POWIAZANE (Bitrix: DEPENDS_ON, legacy CTaskItem). Nowe `tasks.task.*` tego
+ * pola nie znaja, wiec:
+ *  - odczyt: `task.item.getdependson` (zwraca tablice ID jako stringi),
+ *  - zapis:  `task.item.update(TASKID, { DEPENDS_ON: [...] })` — Bitrix podmienia CALA
+ *    liste, nie ma "dodaj jedno", wiec dodanie/usuniecie to odczyt + zapis zmienionej.
+ */
+export async function fetchRelated(taskId: number): Promise<number[]> {
+  const ids = await call<string[] | null>('task.item.getdependson', { TASKID: taskId });
+  return (ids ?? []).map(Number).filter((n) => Number.isFinite(n));
+}
+
+async function setRelated(taskId: number, ids: number[]): Promise<void> {
+  // Pusta lista kasuje wszystkie powiazania. ARFIELDS to nazwa argumentu legacy metody.
+  await call('task.item.update', { TASKID: taskId, ARFIELDS: { DEPENDS_ON: ids } });
+}
+
+export async function addRelated(taskId: number, otherId: number): Promise<void> {
+  const cur = await fetchRelated(taskId);
+  if (cur.includes(otherId)) return;
+  await setRelated(taskId, [...cur, otherId]);
+}
+
+export async function removeRelated(taskId: number, otherId: number): Promise<void> {
+  const cur = await fetchRelated(taskId);
+  await setRelated(
+    taskId,
+    cur.filter((id) => id !== otherId),
+  );
+}
+
+/**
+ * Ktore z podanych zadan MAJA >=1 powiazane (DEPENDS_ON) — do plakietki na liscie.
+ * DEPENDS_ON nie ma w danych listy, wiec pytamy per zadanie, ale batchem po 50 i bez
+ * `halt` (blad pojedynczego zadania pomijamy, nie wywraca calosci). Zwraca zbior ID
+ * zadan majacych powiazania.
+ */
+export async function fetchRelatedPresence(taskIds: number[]): Promise<Set<number>> {
+  const chunks: number[][] = [];
+  for (let i = 0; i < taskIds.length; i += 50) chunks.push(taskIds.slice(i, i + 50));
+
+  const have = new Set<number>();
+  // Batche puszczamy falami po kilka RÓWNOLEGLE — sekwencyjnie ~1000 zadan to 20 rund
+  // i kilkadziesiat sekund. Concurrency ograniczone, zeby nie wpasc w limit webhooka.
+  const CONCURRENCY = 4;
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    const wave = chunks.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      wave.map(async (chunk) => {
+        const cmd: Record<string, string> = {};
+        chunk.forEach((id, idx) => {
+          cmd[String(idx)] = `task.item.getdependson?${toQuery({ TASKID: id }).join('&')}`;
+        });
+        try {
+          const json = await post('batch', { halt: 0, cmd });
+          // `result.result` jest kluczowane po kluczu komendy (idx); PUSTE wyniki Bitrix
+          // POMIJA (klucza brak) — dlatego czytamy po idx, a nie po pozycji.
+          const res = json.result?.result ?? {};
+          chunk.forEach((id, idx) => {
+            const arr = res[String(idx)];
+            if (Array.isArray(arr) && arr.length > 0) have.add(id);
+          });
+        } catch {
+          // Pojedynczy batch padl — pomijamy; brak plakietki jest lepszy niz wywrocenie.
+        }
+      }),
+    );
+  }
+  return have;
 }
 
 /** Etap kanbana; dziala tylko dla zadan przypisanych do sprintu. */

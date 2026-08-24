@@ -27,6 +27,10 @@ import {
   fetchTaskDetail,
   fetchTaskHistory,
   fetchTasks,
+  fetchRelated,
+  fetchRelatedPresence,
+  addRelated,
+  removeRelated,
   formatDurationPl,
   inProgressIntervals,
   sumIntervalsMs,
@@ -69,8 +73,11 @@ import {
   BoardIcon,
   DirIcon,
   RefreshIcon,
+  ViewsIcon,
+  statusColor,
   SubtaskIcon,
   ParentIcon,
+  LinkIcon,
   MoreIcon,
   CheckIcon,
   CloseIcon,
@@ -1334,6 +1341,7 @@ function TaskRow({
   collapsed,
   marked,
   isNew,
+  hasRelated,
   stage,
   parentRef,
   tagLimit,
@@ -1360,6 +1368,8 @@ function TaskRow({
   marked: boolean;
   /** Nie bylo go przy poprzednim uruchomieniu — patrz src/seen.ts. */
   isNew: boolean;
+  /** Ma >=1 zadanie powiazane (DEPENDS_ON) — plakietka lancucha w wierszu. */
+  hasRelated?: boolean;
   onToggle: () => void;
   /** Zaznacz/odznacz z checkboxa — bez otwierania zadania. */
   /** Wyglad pierscienia etapu; brak = zadanie poza sprintem, pokazujemy status. */
@@ -1520,6 +1530,13 @@ function TaskRow({
           {elsewhereSubCount > 0 && <span className="row-subs-elsewhere">{elsewhereSubCount}</span>}
           {elsewhereSubCount > 0 && hiddenSubCount > 0 && <span className="row-subs-sep">·</span>}
           {hiddenSubCount > 0 && <span className="row-subs-hidden">{hiddenSubCount}</span>}
+        </span>
+      )}
+      {/* Plakietka „ma powiazane zadania" (DEPENDS_ON) — sama ikona lancucha, bo liczby
+          nie mamy w danych listy (patrz fetchRelatedPresence). */}
+      {hasRelated && (
+        <span className="row-related" title="Ma powiązane zadania">
+          <LinkIcon />
         </span>
       )}
       {/* Dwa rozne sygnaly, wiec dwa rozne ksztalty: "nowe" to cale zadanie,
@@ -1966,6 +1983,7 @@ function DetailPanel({
   width,
   onResize,
   onOpenTask,
+  onRelatedChange,
   onPick,
   onDeadline,
   onTitle,
@@ -1989,6 +2007,8 @@ function DetailPanel({
   onResize: (px: number) => void;
   onOpenTask: (id: number) => void;
   onPick: (kind: PickerKind, anchor: Anchor) => void;
+  /** Po zmianie liczby powiazanych — do plakietki w wierszu (App trzyma zbior). */
+  onRelatedChange: (taskId: number, hasRelated: boolean) => void;
   /** Nowy termin jako `YYYY-MM-DD`; pusty string kasuje. */
   onDeadline: (date: string) => void;
   onTitle: (title: string) => void;
@@ -2027,6 +2047,53 @@ function DetailPanel({
   const parent = task.parentId ? allTasks.find((t) => t.id === task.parentId) : undefined;
   const children = allTasks.filter((t) => t.parentId === task.id);
   const doneChildren = children.filter((t) => CLOSED_STATUSES.has(t.status)).length;
+
+  /*
+   * Zadania POWIAZANE (Bitrix DEPENDS_ON). Poza danymi listy — dociagamy osobno per
+   * zadanie (`fetchRelated`). Dodawanie/usuwanie optymistyczne: UI od razu, zapis w tle,
+   * a przy bledzie cofamy i mowimy toastem. Picker (dodanie) zyje lokalnie w panelu.
+   */
+  const [related, setRelated] = useState<number[]>([]);
+  const [relPicker, setRelPicker] = useState<Anchor | null>(null);
+  useEffect(() => {
+    let stale = false;
+    setRelated([]);
+    fetchRelated(task.id)
+      .then((ids) => !stale && setRelated(ids))
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [task.id]);
+
+  const linkRelated = (otherId: number) => {
+    if (otherId === task.id || related.includes(otherId)) return;
+    setRelated((r) => [...r, otherId]);
+    onRelatedChange(task.id, true); // po dodaniu na pewno ma powiazane — plakietka w wierszu
+    addRelated(task.id, otherId).catch((e) => {
+      setRelated((r) => {
+        const back = r.filter((id) => id !== otherId);
+        onRelatedChange(task.id, back.length > 0);
+        return back;
+      });
+      onError(`Nie udało się powiązać zadania: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  };
+  const unlinkRelated = (otherId: number) => {
+    setRelated((r) => {
+      const back = r.filter((id) => id !== otherId);
+      onRelatedChange(task.id, back.length > 0);
+      return back;
+    });
+    removeRelated(task.id, otherId).catch((e) => {
+      setRelated((r) => {
+        const back = r.includes(otherId) ? r : [...r, otherId];
+        onRelatedChange(task.id, back.length > 0);
+        return back;
+      });
+      onError(`Nie udało się odpiąć zadania: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  };
 
   /*
    * Odhaczanie pozycji checklisty wprost z panelu — optymistycznie (zmiana od razu),
@@ -2116,12 +2183,7 @@ function DetailPanel({
           </dd>
           <dt title={PICKER_HELP.sprint}>Sprint</dt>
           <dd>{sprintName}</dd>
-          <dt title={PICKER_HELP.parent}>Nadrzędne</dt>
-          <dd>
-            <FieldButton kind="parent" onPick={onPick}>
-              {parent ? (parent.code ?? `#${parent.id}`) : task.parentId ? `#${task.parentId}` : '—'}
-            </FieldButton>
-          </dd>
+          {/* „Nadrzędne" przeniesione do sekcji relacji (nizej), razem z „Powiązane". */}
           {/* Story pointy z bytu scruma — edytowalne tylko w projekcie scrumowym. */}
           {canStoryPoints && (
             <>
@@ -2187,15 +2249,58 @@ function DetailPanel({
           )}
         </dl>
 
-        {/* Hierarchia zadan — Bitrix uzywa jej w tej grupie (np. IT-747 wisi pod IT-748). */}
-        {parent && (
-          <button className="relation" onClick={() => onOpenTask(parent.id)}>
-            <span className="relation-kind">Zadanie nadrzędne</span>
-            <StatusIcon status={parent.status} />
-            <span className="row-code">{parent.code ?? `#${parent.id}`}</span>
-            <span className="relation-title">{parent.title || parent.rawTitle}</span>
-          </button>
-        )}
+        {/* Relacje zadania w JEDNEJ sekcji: nadrzedne (hierarchia Bitriksa) + powiazane
+            (DEPENDS_ON). Oddzielone kreska od opisu/podzadan ponizej. */}
+        <div className="rel-block">
+          {/* Nadrzędne: selektor (ustaw/zmień/odepnij — ten sam picker „parent") w naglowku,
+              a pod nim wiersz do PRZEJSCIA do rodzica, gdy jest ustawiony. */}
+          <div className="rel-head">
+            <span className="relation-kind">Nadrzędne</span>
+            <FieldButton kind="parent" onPick={onPick}>
+              {parent ? (parent.code ?? `#${parent.id}`) : task.parentId ? `#${task.parentId}` : '—'}
+            </FieldButton>
+          </div>
+          {parent && (
+            <button className="relation" onClick={() => onOpenTask(parent.id)}>
+              <StatusIcon status={parent.status} />
+              <span className="row-code">{parent.code ?? `#${parent.id}`}</span>
+              <span className="relation-title">{parent.title || parent.rawTitle}</span>
+            </button>
+          )}
+
+          <div className="rel-head">
+            <span className="relation-kind">Powiązane{related.length ? ` · ${related.length}` : ''}</span>
+            <button
+              className="rel-add"
+              title="Powiąż zadanie"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setRelPicker({ left: r.left - 200, top: r.bottom + 4, bottom: r.bottom + 4 });
+              }}
+            >
+              +
+            </button>
+          </div>
+          {related.map((id) => {
+            const t = allTasks.find((x) => x.id === id);
+            return (
+              <div key={id} className="relation relation-linked">
+                <button className="relation-main" onClick={() => onOpenTask(id)}>
+                  {t ? <StatusIcon status={t.status} /> : <span className="rel-dot" />}
+                  <span className="row-code">{t?.code ?? `#${id}`}</span>
+                  <span className="relation-title">
+                    {t ? t.title || t.rawTitle : 'zadanie spoza widoku'}
+                  </span>
+                </button>
+                <button className="relation-x" title="Odepnij" onClick={() => unlinkRelated(id)}>
+                  <CloseIcon />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="rel-sep" />
 
         {children.length > 0 && (
           <section className="subtasks">
@@ -2288,6 +2393,8 @@ function DetailPanel({
                     <button
                       key={it.id}
                       className={`check${it.done ? ' check-done' : ''}`}
+                      // Zagniezdzenie (sub-itemy) przez wciecie w lewo wg `depth`.
+                      style={{ paddingLeft: `calc(var(--s1) + ${it.depth * 18}px)` }}
                       title={it.done ? 'Odhacz' : 'Zaznacz jako zrobione'}
                       onClick={() => toggleCheck(group.id, it.id, it.done)}
                     >
@@ -2346,6 +2453,35 @@ function DetailPanel({
           onError={onError}
         />
       </div>
+
+      {/* Picker doboru zadania do powiazania — dowolne zadanie (w sprincie / poza),
+          szukane po kodzie i tytule; spoza listy wpisuje sie numer Bitriksa. */}
+      {relPicker && (
+        <Picker
+          title="Powiąż zadanie"
+          anchor={relPicker}
+          placeholder="Szukaj zadania…"
+          emptyLabel="Brak zadań do wyboru"
+          rawLabel={(n) => `#${n}`}
+          segments={[
+            { key: 'sprint', label: 'W sprincie' },
+            { key: 'outside', label: 'Poza sprintem' },
+          ]}
+          options={allTasks
+            .filter((t) => t.id !== task.id && !related.includes(t.id))
+            .map((t) => ({
+              value: String(t.id),
+              label: `${t.code ?? `#${t.id}`} — ${t.title || t.rawTitle}`,
+              group: t.sprintId ? 'sprint' : 'outside',
+              icon: <StatusIcon status={t.status} />,
+            }))}
+          onClose={() => setRelPicker(null)}
+          onPick={(value) => {
+            linkRelated(Number(value));
+            setRelPicker(null);
+          }}
+        />
+      )}
     </aside>
   );
 }
@@ -2894,8 +3030,102 @@ export default function App() {
   // Ustawienia widoku wczytane z poprzedniej sesji (patrz SETTINGS_KEY).
   const [saved] = useState(loadSettings);
 
+  /*
+   * Ktore zadania MAJA powiazane (DEPENDS_ON) — do plakietki w wierszu. Danych nie ma
+   * w liscie (patrz fetchRelatedPresence), wiec dociagamy je W TLE. Enricher:
+   *  - DELTA po `changedDate`: sprawdzamy tylko zadania NOWE albo ZMIENIONE od ostatniego
+   *    razu (edycja DEPENDS_ON bumpuje changedDate) — dzieki temu plakietki sa ZAWSZE
+   *    swieze przy pollingu, a nie „raz na projekt".
+   *  - BRAMKA na 'all': jedna runda bierze najwyzej CAP zadan i robi PRZERWE — nigdy nie
+   *    wystrzeliwujemy 1000 wywolan naraz. Reszte domiata w kolejnych rundach.
+   *  - Powiazania mogly ZNIKNAC — po sprawdzeniu tez USUWAMY z `relatedIds`.
+   * `relRunningRef` pilnuje, ze petla leci pojedynczo; czyta `tasksRef` na biezaco.
+   */
+  const [relatedIds, setRelatedIds] = useState<Set<number>>(new Set());
+  const groupIdRef = useRef(groupId);
+  groupIdRef.current = groupId;
+  // Cel enrichu to WIDOCZNY (przefiltrowany zakresem) podzbior, NIE cala lista projektu
+  // (~1000 zadan zaladowanych zawsze). Ustawiany nizej, gdy znamy `filtered`.
+  const enrichTargetsRef = useRef<Task[]>([]);
+  const relCheckedAtRef = useRef<Map<number, string>>(new Map()); // taskId -> changedDate przy sprawdzeniu
+  const relRunningRef = useRef(false);
+  useEffect(() => {
+    relCheckedAtRef.current = new Map();
+    setRelatedIds(new Set());
+  }, [groupId]);
+  const runRelatedEnricher = useCallback(async () => {
+    if (relRunningRef.current) return;
+    relRunningRef.current = true;
+    try {
+      // BRAMKA: przy duzym widoku (np. „Wszystkie"/„Poza sprintem" ~1000) NIE enrichujemy —
+      // to zajezdzalo webhooka (QUERY_LIMIT_EXCEEDED). Plakietki dzialaja w mniejszych
+      // widokach (sprint, zawezone filtry). CAP+przerwa dodatkowo dawkuja wywolania.
+      const MAX_VIEW = 400;
+      const CAP = 100;
+      for (;;) {
+        const targets = enrichTargetsRef.current;
+        if (targets.length > MAX_VIEW) break;
+        const forGroup = groupIdRef.current;
+        const todo = targets
+          .filter((t) => relCheckedAtRef.current.get(t.id) !== (t.changedDate ?? ''))
+          .slice(0, CAP);
+        if (!todo.length) break;
+        const ids = todo.map((t) => t.id);
+        let have: Set<number>;
+        try {
+          have = await fetchRelatedPresence(ids);
+        } catch {
+          break; // runda padla (np. limit) — sprobujemy przy nastepnej zmianie widoku
+        }
+        if (groupIdRef.current !== forGroup) break; // zmiana projektu w locie
+        setRelatedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of ids) {
+            if (have.has(id)) next.add(id);
+            else next.delete(id);
+          }
+          return next;
+        });
+        for (const t of todo) relCheckedAtRef.current.set(t.id, t.changedDate ?? '');
+        await new Promise((r) => setTimeout(r, 300)); // oddech dla webhooka
+      }
+    } finally {
+      relRunningRef.current = false;
+    }
+  }, []);
+
   const [scopePref, setScope] = useState<Scope>(saved.scope);
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  /*
+   * Filtry z paska — patrz `Filters`. Celowo NIE trzymamy ich w SETTINGS_KEY:
+   * odnosza sie do konkretnych osob/etapow/tagow tego projektu, wiec po powrocie
+   * do aplikacji (albo po zmianie projektu) byly juz nieaktualne. Zyja jedna sesje,
+   * tak samo jak szukanie.
+   */
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  /**
+   * „Wyczyść wszystkie" zwija sie do samego „×", gdy chipy zaczynaja przewijac
+   * (brak miejsca). Histereza: zwijamy, gdy tresc wystaje (spare < 0), a rozwijamy
+   * dopiero, gdy jest miejsce na CALY podpis (spare >= LABEL_W) — bez tego dokladanie
+   * podpisu znow powodowaloby wystawanie i przycisk migalby w kolko.
+   */
+  const [clearCollapsed, setClearCollapsed] = useState(false);
+  const onChipsSpare = useCallback((spare: number) => {
+    const LABEL_W = 130; // ~szerokosc podpisu „Wyczyść wszystkie" z odstepem
+    setClearCollapsed((prev) => (prev ? spare < LABEL_W : spare < -1));
+  }, []);
+  // Bez chipow ScrollX znika i przestaje raportowac miejsce — wracamy do pelnego podpisu.
+  useEffect(() => {
+    if (!anyFilter(filters)) setClearCollapsed(false);
+  }, [filters]);
+  /** Menu "+ Filtr" — wybor wymiaru; potem `filterPick` z wartosciami. */
+  const [filterMenu, setFilterMenu] = useState<Anchor | null>(null);
+  /** Otwarty popover wartosci dla jednego WARUNKU (wielokrotny wybor). */
+  const [filterPick, setFilterPick] = useState<{ condId: string; anchor: Anchor } | null>(null);
+  /** Otwarte menu operatora (to / to nie / dowolny z…) dla jednego warunku. */
+  const [opMenu, setOpMenu] = useState<{ condId: string; anchor: Anchor } | null>(null);
+  /** Zapisane widoki (globalne, localStorage) i otwarte menu „Widoki". */
+  const [views, setViews] = useState<SavedView[]>(loadViews);
+  const [viewsMenu, setViewsMenu] = useState<Anchor | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(saved.viewMode);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -3119,6 +3349,13 @@ export default function App() {
 
   /** Zadania widoczne po filtrach — panel szczegolow zaznacza po tym ukryte podzadania. */
   const visibleIds = useMemo(() => new Set(filtered.map((t) => t.id)), [filtered]);
+
+  // Enrich plakietek „powiazane" chodzi po WIDOCZNYM (przefiltrowanym) podzbiorze, nie po
+  // calej liscie projektu — patrz runRelatedEnricher (delta po changedDate + bramka rozmiaru).
+  enrichTargetsRef.current = filtered;
+  useEffect(() => {
+    void runRelatedEnricher();
+  }, [filtered, groupId, runRelatedEnricher]);
 
   /*
    * Ile podzadan NIE PRZESZLO filtrow. Wczesniej liczylem to jako
@@ -4321,6 +4558,7 @@ export default function App() {
                       }
                       marked={marked.has(t.id)}
                       isNew={newIds.has(t.id)}
+                      hasRelated={relatedIds.has(t.id)}
                       stage={t.stageId ? stageMeta.get(t.stageId) : undefined}
                       parentRef={parentOutside ? parentInfo(parentOutside) : undefined}
                       tagLimit={tagLimit}
@@ -4380,6 +4618,14 @@ export default function App() {
           width={detailWidth}
           onResize={setDetailWidth}
           onOpenTask={setOpenId}
+          onRelatedChange={(id, has) =>
+            setRelatedIds((prev) => {
+              const next = new Set(prev);
+              if (has) next.add(id);
+              else next.delete(id);
+              return next;
+            })
+          }
           onPick={(kind, anchor) => openPicker(kind, openTask.id, anchor)}
           onDeadline={(date) =>
             void mutate(

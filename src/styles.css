@@ -1521,6 +1521,19 @@ kbd {
  * "nowe" — zadanie, ktorego nie bylo przy poprzednim uruchomieniu. Wypelniony
  * akcent, bo to sygnal o CALYM zadaniu i ma byc widoczny na pierwszy rzut oka.
  */
+/* Plakietka „ma powiazane zadania" — sama ikona lancucha, wyciszona (jak subtaski). */
+.row-related {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  cursor: help;
+}
+
+.row:hover .row-related {
+  color: var(--fg-muted);
+}
+
 .row-new {
   flex: 0 0 auto;
   padding: 0 var(--s1);
@@ -2546,6 +2559,102 @@ a.mention:hover {
 
 .subtasks {
   margin-top: var(--s5);
+}
+
+/* Wiersz zadania powiazanego: klikalna tresc (otwiera) + „×" (odpina). */
+.relation-main {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+  text-align: left;
+}
+
+.relation-main > svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.relation-x {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 2px;
+  color: var(--fg-dim);
+  border-radius: var(--radius);
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.relation-linked:hover .relation-x {
+  opacity: 1;
+}
+
+.relation-x:hover {
+  color: var(--danger, #e5534b);
+}
+
+.relation-x > svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Zaslepka statusu, gdy powiazane zadanie jest spoza zaladowanej listy. */
+.rel-dot {
+  flex: 0 0 16px;
+  width: 8px;
+  height: 8px;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+/* Grupa „Powiązane" tuz pod „Nadrzędne" — bez duzego odstepu sekcji, zeby relacje
+   czytaly sie jako jeden blok. */
+.rel-block {
+  margin-bottom: var(--s1);
+}
+
+.rel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 26px;
+  margin-bottom: var(--s1);
+}
+
+/* Odstep miedzy pod-grupami relacji (Nadrzędne -> Powiązane). */
+.rel-head ~ .rel-head {
+  margin-top: var(--s3);
+}
+
+/* Kreska oddzielajaca blok relacji od reszty panelu (opis / podzadania). */
+.rel-sep {
+  height: 1px;
+  margin: var(--s3) 0 var(--s4);
+  background: var(--border);
+}
+
+/* „+" TUZ przy etykiecie „Powiązane" (nie dosuniety na drugi koniec) — maly, ale
+   od razu widoczny obok napisu. */
+.rel-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.rel-add:hover {
+  color: var(--fg);
+  background: var(--bg-active);
 }
 
 /* Podzadanie, ktorego nie widac na liscie przy biezacych filtrach. */
