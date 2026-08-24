@@ -122,6 +122,87 @@ type GroupBy = 'stage' | 'status' | 'assignee';
 type PickerKind = 'status' | 'priority' | 'assignee' | 'stage' | 'sprint' | 'points' | 'parent';
 type ViewMode = 'list' | 'board';
 
+/*
+ * Filtry w stylu Linear: pasek nad lista, do ktorego dokladasz warunki. Kazdy
+ * wymiar (osoba, priorytet, etap, status, tag) to jeden "chip" z lista wybranych
+ * wartosci. W obrebie jednego wymiaru wartosci lacza sie przez LUB (pasuje
+ * dowolna z nich), a rozne wymiary przez ORAZ (wszystkie musza pasowac) —
+ * dokladnie jak w Linearze.
+ *
+ * Filtr etapu trzymamy po NAZWIE, nie po id: te same etapy powtarzaja sie miedzy
+ * sprintami pod innym id (patrz stageOrder), wiec filtr po id przezylby tylko
+ * jeden sprint. Filtr osoby trzyma id — konto-zaslepke zbijamy do UNASSIGNED_ID,
+ * dzieki czemu jeden warunek "Nieprzypisane" lapie i braki, i zaslepke.
+ */
+type FilterField = 'assignee' | 'priority' | 'stage' | 'status' | 'tag';
+
+/**
+ * Operatory jak w Linearze. Wymiary jednowartosciowe (osoba/priorytet/status/etap —
+ * zadanie ma jedna wartosc) dostaja `is`/`isNot`; tag jest wielowartosciowy, wiec ma
+ * `anyOf`/`allOf`/`noneOf`. Pusty zestaw wartosci nie zawezaja niczego.
+ */
+type FilterOp = 'is' | 'isNot' | 'anyOf' | 'allOf' | 'noneOf';
+
+/** Jeden warunek paska. Ten sam wymiar moze wystapic wiele razy (np. tag = X ORAZ tag ≠ Y). */
+interface Condition {
+  id: string;
+  field: FilterField;
+  op: FilterOp;
+  values: string[];
+}
+
+/** Lista warunkow — miedzy warunkami ORAZ, wewnatrz warunku decyduje operator. */
+type Filters = Condition[];
+
+const FILTER_FIELDS: { field: FilterField; label: string }[] = [
+  { field: 'assignee', label: 'Osoba' },
+  { field: 'priority', label: 'Priorytet' },
+  { field: 'stage', label: 'Etap' },
+  { field: 'status', label: 'Status' },
+  { field: 'tag', label: 'Tag' },
+];
+
+const FILTER_LABEL = Object.fromEntries(FILTER_FIELDS.map((f) => [f.field, f.label])) as Record<
+  FilterField,
+  string
+>;
+
+/** Wymiary, w ktorych zadanie ma WIELE wartosci naraz — tylko tam ma sens „wszystkie z". */
+const MULTI_FIELDS = new Set<FilterField>(['tag']);
+
+const opsFor = (field: FilterField): FilterOp[] =>
+  MULTI_FIELDS.has(field) ? ['anyOf', 'allOf', 'noneOf'] : ['is', 'isNot'];
+
+const defaultOp = (field: FilterField): FilterOp => opsFor(field)[0];
+
+/** Podpis operatora na chipie. `many` = wybrano wiecej niz jedna wartosc. */
+function opLabel(op: FilterOp, many: boolean): string {
+  switch (op) {
+    case 'is':
+      return many ? 'to jedno z' : 'to';
+    case 'isNot':
+      return many ? 'to żadne z' : 'to nie';
+    case 'anyOf':
+      return 'dowolny z';
+    case 'allOf':
+      return 'wszystkie z';
+    case 'noneOf':
+      return 'żaden z';
+  }
+}
+
+// Stabilne id warunku — wystarczy monotoniczny licznik na czas zycia karty.
+let condSeq = 0;
+const newCondId = (): string => `c${++condSeq}`;
+
+/** Ile ikon pokazac w nachodzacym stosie na chipie, zanim przejdziemy na „+N". */
+const CHIP_STACK_MAX = 5;
+
+const EMPTY_FILTERS: Filters = [];
+
+/** Czy jakikolwiek warunek realnie zawezaja (ma wybrane wartosci). */
+const anyFilter = (f: Filters) => f.some((c) => c.values.length > 0);
+
 const SCOPES: { key: Scope; label: string }[] = [
   { key: 'sprint', label: 'Aktywny sprint' },
   { key: 'outside', label: 'Poza sprintem' },
@@ -974,6 +1055,45 @@ function matchQuery(list: Task[], query: string): Task[] {
   );
 }
 
+/**
+ * Czy zadanie przechodzi przez komplet filtrow z paska (patrz `Filters`). W obrebie
+ * wymiaru LUB, miedzy wymiarami ORAZ. Etap dopasowujemy po nazwie (etapy sa per
+ * sprint), osobe po id — z konto-zaslepka i brakiem zbitymi do UNASSIGNED_ID.
+ */
+function matchFilters(t: Task, conditions: Filters, stageNames: Map<number, string>): boolean {
+  return conditions.every((c) => matchCondition(t, c, stageNames));
+}
+
+function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>): boolean {
+  if (!c.values.length) return true; // niedokonczony warunek nie zawezaja
+
+  if (c.field === 'tag') {
+    switch (c.op) {
+      case 'allOf':
+        return c.values.every((v) => t.tags.includes(v));
+      case 'noneOf':
+        return !c.values.some((v) => t.tags.includes(v));
+      default: // anyOf
+        return c.values.some((v) => t.tags.includes(v));
+    }
+  }
+
+  // Wymiary jednowartosciowe: wyliczamy klucz zadania (osoba po id, reszta wprost)
+  // i sprawdzamy przynaleznosc; `isNot` odwraca wynik.
+  const key =
+    c.field === 'assignee'
+      ? isUnassigned(t.responsibleId)
+        ? String(UNASSIGNED_ID)
+        : String(t.responsibleId)
+      : c.field === 'priority'
+        ? t.priority
+        : c.field === 'status'
+          ? t.status
+          : (t.stageId && stageNames.get(t.stageId)) || ''; // stage — po nazwie
+  const inSet = c.values.includes(key);
+  return c.op === 'isNot' ? !inSet : inSet;
+}
+
 // ─── Formatowanie ────────────────────────────────────────────────────────────
 
 const MONTHS = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
@@ -982,7 +1102,30 @@ function shortDate(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  const base = `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  // Rok DOPISUJEMY tylko, gdy to NIE biezacy rok. Bez tego „23 wrz" (2025) i „20 sie"
+  // (2026) wygladaja jak ta sama skala, wiec poprawnie posortowana lista (po pelnym
+  // znaczniku czasu) sprawia wrazenie przemieszanej na granicy lat. Biezacy rok
+  // zostaje zwiezly.
+  const y = d.getFullYear();
+  return y === new Date().getFullYear() ? base : `${base} ${y}`;
+}
+
+/**
+ * Zwiezly zakres sprintu do selektora zakresu. Ten sam miesiac -> „17–24 sie" (jedna
+ * nazwa miesiaca zamiast dwoch); rozne miesiace -> pelne „17 sie – 2 wrz". Rok tylko,
+ * gdy inny niz biezacy (jak w shortDate).
+ */
+function sprintRange(start: string | null, end: string | null): string {
+  if (!start || !end) return '';
+  const a = new Date(start);
+  const b = new Date(end);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return '';
+  if (a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()) {
+    const yr = a.getFullYear() === new Date().getFullYear() ? '' : ` ${a.getFullYear()}`;
+    return `${a.getDate()}–${b.getDate()} ${MONTHS[a.getMonth()]}${yr}`;
+  }
+  return `${shortDate(start)} – ${shortDate(end)}`;
 }
 
 function dateTime(iso: string | null): string {
@@ -1015,6 +1158,9 @@ function Picker({
   rawLabel,
   placeholder = 'Filtruj…',
   segments,
+  multi = false,
+  selected,
+  onToggle,
   onPick,
   onClose,
 }: {
@@ -1033,12 +1179,36 @@ function Picker({
   placeholder?: string;
   /** Zakladki filtrujace opcje po `Option.group`; pusty klucz = pokaz wszystkie. */
   segments?: { key: string; label: string }[];
+  /**
+   * Tryb wielokrotny (filtry): klik/Enter PRZELACZA pozycje i NIE zamyka popovera —
+   * mozna zaznaczyc kilka wartosci naraz. Zamyka dopiero tlo albo Escape.
+   * Zaznaczone dostaja ptaszek po prawej. Bez tego picker dziala po staremu:
+   * jeden wybor i zamkniecie.
+   */
+  multi?: boolean;
+  selected?: string[];
+  onToggle?: (value: string) => void;
   onPick: (value: string) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const [seg, setSeg] = useState(segments?.[0]?.key ?? '');
+  const sel = useMemo(() => new Set(selected ?? []), [selected]);
+  /*
+   * Bezpiecznik otwarcia: menu wyskakuje TUZ pod klikanym przyciskiem, wiec szybki
+   * „doklik" (ten sam ruch, ktory otworzyl menu) trafial w pierwsza pozycje, zanim
+   * kursor w ogole ruszyl w strone celu — stad „klikam Tag, wychodzi Osoba". Przez
+   * pierwsze ~140 ms po otwarciu ignorujemy klik w pozycje; swiadomy, wycelowany klik
+   * i tak trwa dluzej, wiec go nie blokujemy. (Klawiatura/Enter dziala od razu.)
+   */
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setArmed(true), 140);
+    return () => clearTimeout(t);
+  }, []);
+  /** W trybie wielokrotnym wybor przelacza pozycje i zostawia popover otwarty. */
+  const choose = (value: string) => (multi ? onToggle?.(value) : onPick(value));
 
   const shown = useMemo(() => {
     // Filtr zakladki: pusty klucz nie zawęża; opcje bez `group` (np. "—") widac zawsze.
@@ -1102,7 +1272,7 @@ function Picker({
             } else if (e.key === 'Enter') {
               e.preventDefault();
               const opt = shown[cursor];
-              if (opt) onPick(opt.value);
+              if (opt) choose(opt.value);
             }
           }}
         />
@@ -1113,13 +1283,16 @@ function Picker({
               {/* Kreska tylko MIEDZY pozycjami — na samej gorze listy nie ma czego dzielic. */}
               {o.divider && i > 0 && <div className="picker-sep" />}
               <button
-                className={`picker-item${i === cursor ? ' picker-item-active' : ''}`}
+                className={`picker-item${i === cursor ? ' picker-item-active' : ''}${
+                  multi && sel.has(o.value) ? ' picker-item-on' : ''
+                }`}
                 onMouseEnter={() => setCursor(i)}
-                onClick={() => onPick(o.value)}
+                onClick={() => armed && choose(o.value)}
               >
                 {o.photo !== undefined ? <Avatar name={o.label} photo={o.photo} /> : o.icon}
                 <span className="picker-label">{o.label}</span>
                 {o.hint && <span className="palette-hint">{o.hint}</span>}
+                {multi && <span className="picker-check">{sel.has(o.value) && <CheckIcon />}</span>}
               </button>
             </Fragment>
           ))}
@@ -3144,6 +3317,71 @@ export default function App() {
   const [sort, setSort] = useState<SortOpts>(saved.sort);
   const [detailWidth, setDetailWidth] = useState(saved.detailWidth);
   const patchSort = useCallback((patch: Partial<SortOpts>) => setSort((s) => ({ ...s, ...patch })), []);
+
+  /** Dodaj nowy warunek dla wymiaru i od razu otworz jego wartosci. */
+  const addCondition = useCallback((field: FilterField, anchor: Anchor) => {
+    const id = newCondId();
+    setFilters((f) => [...f, { id, field, op: defaultOp(field), values: [] }]);
+    setFilterPick({ condId: id, anchor });
+  }, []);
+
+  /** Przelacz jedna wartosc w konkretnym warunku (klik w pozycje popovera). */
+  const toggleCondValue = useCallback(
+    (condId: string, value: string) =>
+      setFilters((f) =>
+        f.map((c) =>
+          c.id === condId
+            ? {
+                ...c,
+                values: c.values.includes(value)
+                  ? c.values.filter((v) => v !== value)
+                  : [...c.values, value],
+              }
+            : c,
+        ),
+      ),
+    [],
+  );
+
+  /** Zmien operator warunku (menu na chipie). */
+  const setCondOp = useCallback(
+    (condId: string, op: FilterOp) =>
+      setFilters((f) => f.map((c) => (c.id === condId ? { ...c, op } : c))),
+    [],
+  );
+
+  /** Usun jeden warunek (krzyzyk na chipie albo porzucony, pusty popover). */
+  const removeCondition = useCallback(
+    (condId: string) => setFilters((f) => f.filter((c) => c.id !== condId)),
+    [],
+  );
+
+  /**
+   * Szybki filtr po tagu (paleta / klik w tag na wierszu). Trafia do wspolnego
+   * warunku „Tag: dowolny z", tworzac go w razie potrzeby; zdjecie ostatniego tagu
+   * usuwa caly warunek. Warunki tagu z innym operatorem (np. „żaden z") zostawiamy.
+   */
+  const toggleTag = useCallback(
+    (tag: string) =>
+      setFilters((f) => {
+        const anyCond = f.find((c) => c.field === 'tag' && c.op === 'anyOf');
+        if (!anyCond) {
+          return [...f, { id: newCondId(), field: 'tag' as FilterField, op: 'anyOf' as FilterOp, values: [tag] }];
+        }
+        const values = anyCond.values.includes(tag)
+          ? anyCond.values.filter((v) => v !== tag)
+          : [...anyCond.values, tag];
+        if (!values.length) return f.filter((c) => c !== anyCond);
+        return f.map((c) => (c === anyCond ? { ...c, values } : c));
+      }),
+    [],
+  );
+
+  /** Czy tag jest gdziekolwiek dodatnio wybrany — do „✓" w palecie. */
+  const tagActive = useCallback(
+    (tag: string) => filters.some((c) => c.field === 'tag' && c.op !== 'noneOf' && c.values.includes(tag)),
+    [filters],
+  );
   /** Zatwierdzony filtr — SearchBox oddaje go po przerwie w pisaniu, nie po znaku. */
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
@@ -3197,7 +3435,7 @@ export default function App() {
       setMarkAnchor(null);
       setCollapsed(new Set());
       setCollapsedTasks(new Set());
-      setTagFilter(null);
+      setFilters(EMPTY_FILTERS);
       setQuery('');
       setCursor(0);
       selectProject(id);
@@ -3239,10 +3477,12 @@ export default function App() {
           t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
         if (onlyMine && !mineOrFree) return false;
         if (!showDone && CLOSED_STATUSES.has(t.status)) return false;
-        if (tagFilter && !t.tags.includes(tagFilter)) return false;
+        // Filtry z paska (Linear) — patrz `matchFilters`. Sa w `base`, wiec liczniki
+        // przy zakresach i decyzja o zamknieciu panelu tez je uwzgledniaja.
+        if (!matchFilters(t, filters, stageNames)) return false;
         return true;
       }),
-    [tasks, onlyMine, withUnassigned, showDone, tagFilter, me],
+    [tasks, onlyMine, withUnassigned, showDone, filters, stageNames, me],
   );
 
   // `base` po wyszukiwaniu, ale BEZ ograniczenia zakresem — wspolne dla licznikow
@@ -3281,6 +3521,170 @@ export default function App() {
     for (const t of tasks) for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pl'));
   }, [tasks]);
+
+  /** Etykieta pojedynczej wartosci filtra — do podpisu chipa. */
+  const filterValueLabel = useCallback(
+    (field: FilterField, value: string): string => {
+      if (field === 'assignee')
+        return Number(value) === UNASSIGNED_ID
+          ? UNASSIGNED_LABEL
+          : (people.find((p) => p.id === Number(value))?.name ?? `#${value}`);
+      if (field === 'priority') return labels.priority[value] ?? value;
+      if (field === 'status') return labels.status[value] ?? value;
+      return value; // etap i tag — wartoscia jest sama nazwa
+    },
+    [people, labels],
+  );
+
+  /** Etap ma to samo id w kazdym sprincie — do ikony na chipie mapujemy po nazwie. */
+  const stageIconByName = useMemo(() => {
+    const m = new Map<string, { color: string | null; progress: number | null }>();
+    for (const s of stages) {
+      if (sprintId && s.sprintId !== sprintId) continue;
+      if (m.has(s.name)) continue;
+      const meta = stageMeta.get(s.id);
+      m.set(s.name, { color: meta?.color ?? s.color, progress: meta?.progress ?? null });
+    }
+    return m;
+  }, [stages, sprintId, stageMeta]);
+
+  /** Ikona/awatar pojedynczej wartosci filtra — do „facepile" na chipie (jak w Linearze). */
+  const filterValueIcon = useCallback(
+    (field: FilterField, value: string): ReactNode => {
+      if (field === 'assignee') {
+        if (Number(value) === UNASSIGNED_ID) return <Avatar name={null} />;
+        const p = people.find((x) => x.id === Number(value));
+        return <Avatar name={p?.name ?? `#${value}`} photo={p?.photo} />;
+      }
+      if (field === 'priority') return <PriorityIcon priority={value} />;
+      if (field === 'status') return <StatusIcon status={value} />;
+      if (field === 'stage') {
+        const meta = stageIconByName.get(value);
+        return <StageIcon progress={meta?.progress ?? null} color={meta?.color ?? null} />;
+      }
+      return <span className="tag-dot" style={{ background: tagHue(value) }} />;
+    },
+    [people, stageIconByName],
+  );
+
+  /**
+   * Sam kolor wartosci — do jednolitych „monet" w facepile (wiele wartosci). Pelne
+   * kolorowe krazki nachodza na siebie czysto (jak awatary); rysowanie tam pierscieni
+   * dawalo podwojne obwodki i przeswitujace slivery sasiada.
+   */
+  const filterValueColor = useCallback(
+    (field: FilterField, value: string): string => {
+      if (field === 'status') return statusColor(value);
+      if (field === 'stage') {
+        const c = stageIconByName.get(value)?.color;
+        return c ? `#${c}` : 'var(--fg-dim)';
+      }
+      if (field === 'tag') return tagHue(value);
+      // Priorytet: trzy odrebne kolory (jak slupki w PriorityIcon) — wysoki pomaranczowy,
+      // normalny akcent motywu, niski wyciszona szarosc.
+      if (field === 'priority')
+        return value === '2'
+          ? 'var(--accent-orange)'
+          : value === '1'
+            ? 'var(--fg-muted)'
+            : 'color-mix(in srgb, var(--accent-green) 55%, white)';
+      return 'var(--fg-dim)';
+    },
+    [stageIconByName],
+  );
+
+  /**
+   * Jeden token facepile: okragla moneta z tlem POD ikona (podbarwiona dla
+   * statusu/etapu/tagu, neutralna dla priorytetu, awatar dla osoby). Uzywany tak
+   * samo w chipie jedno- i wielowartosciowym, zeby pojedyncza wartosc miala to samo
+   * tlo co monety w facepile — rozni je tylko podpis obok (tylko przy 1 wartosci).
+   */
+  const filterToken = useCallback(
+    (field: FilterField, v: string, i: number): ReactNode => {
+      const color = filterValueColor(field, v);
+      const hasIcon = field === 'status' || field === 'stage';
+      const tinted = hasIcon || field === 'tag' || field === 'priority';
+      // Priorytet ma WLASNY, kolorowy znak (slupki), wiec jego moneta jest tylko lekko
+      // podbarwiona (28%), zeby slupki zostaly czytelne; reszta (pierscien/tag) 55%.
+      const tintPct = field === 'priority' ? 28 : 55;
+      return (
+        <span
+          className="filter-chip-vicon"
+          key={v}
+          style={{
+            zIndex: CHIP_STACK_MAX - i,
+            ...(tinted
+              ? { background: `color-mix(in srgb, ${color} ${tintPct}%, var(--bg-panel))` }
+              : {}),
+          }}
+        >
+          {field === 'assignee' ? (
+            filterValueIcon('assignee', v)
+          ) : hasIcon ? (
+            filterValueIcon(field, v)
+          ) : field === 'tag' ? (
+            <span className="filter-chip-tagcore" style={{ background: color }} />
+          ) : (
+            filterValueIcon('priority', v)
+          )}
+        </span>
+      );
+    },
+    [filterValueColor, filterValueIcon],
+  );
+
+  /** Menu "+ Filtr": lista wymiarow (z liczba juz wybranych wartosci jako dopisek). */
+  const addFilterOptions = useMemo<Option[]>(
+    () =>
+      FILTER_FIELDS.map((f) => {
+        // Ile aktywnych warunkow juz dotyczy tego wymiaru — ten sam wymiar moze wystapic wiele razy.
+        const n = filters.filter((c) => c.field === f.field && c.values.length).length;
+        return { value: f.field, label: f.label, hint: n ? String(n) : undefined };
+      }),
+    [filters],
+  );
+
+  /** Opcje wartosci dla otwartego warunku — te same ikony/awatary co w wierszu listy. */
+  const filterOptions = useMemo<Option[]>(() => {
+    const field = filters.find((c) => c.id === filterPick?.condId)?.field;
+    if (!field) return [];
+    if (field === 'assignee')
+      return people.map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }));
+    if (field === 'priority')
+      return Object.entries(labels.priority).map(([value, label]) => ({
+        value,
+        label,
+        icon: <PriorityIcon priority={value} />,
+      }));
+    if (field === 'status')
+      return Object.entries(labels.status).map(([value, label]) => ({
+        value,
+        label,
+        icon: <StatusIcon status={value} />,
+      }));
+    if (field === 'stage') {
+      // Nazwy etapow aktywnego sprintu, bez powtorek, w kolejnosci procesu.
+      const seen = new Set<string>();
+      const opts: Option[] = [];
+      for (const s of [...stages].filter((x) => x.sprintId === sprintId).sort((a, b) => a.sort - b.sort)) {
+        if (seen.has(s.name)) continue;
+        seen.add(s.name);
+        const meta = stageMeta.get(s.id);
+        opts.push({
+          value: s.name,
+          label: s.name,
+          icon: <StageIcon progress={meta?.progress ?? null} color={meta?.color ?? s.color} />,
+        });
+      }
+      return opts;
+    }
+    return allTags.map(([tag, count]) => ({
+      value: tag,
+      label: tag,
+      hint: String(count),
+      icon: <span className="tag-dot" style={{ background: tagHue(tag) }} />,
+    }));
+  }, [filters, filterPick, people, labels, stages, sprintId, stageMeta, allTags]);
 
   /*
    * Klucze pustych grup dla danej osi — tylko etap i status maja skonczony, znany
@@ -3999,21 +4403,22 @@ export default function App() {
       },
     );
 
-    if (tagFilter) {
+    if (anyFilter(filters)) {
       list.push({
-        id: 'tag-clear',
-        section: 'Tagi',
-        label: `Wyczyść filtr tagu: ${tagFilter}`,
-        run: () => setTagFilter(null),
+        id: 'filter-clear',
+        section: 'Filtry',
+        label: 'Wyczyść filtry',
+        run: () => setFilters(EMPTY_FILTERS),
       });
     }
+    // Tag z palety wpada do wspolnego warunku „Tag: dowolny z" (przelacza).
     for (const [tag, count] of allTags) {
       list.push({
         id: `tag-${tag}`,
         section: 'Tagi',
         label: tag,
-        hint: String(count),
-        run: () => setTagFilter(tag),
+        hint: tagActive(tag) ? '✓' : String(count),
+        run: () => toggleTag(tag),
       });
     }
 
@@ -4043,8 +4448,10 @@ export default function App() {
     withUnassigned,
     showDone,
     showEmpty,
-    tagFilter,
+    filters,
     allTags,
+    toggleTag,
+    tagActive,
     sort,
     patchSort,
     reload,
@@ -4572,7 +4979,7 @@ export default function App() {
                         setCursor(flat.findIndex((x) => x.id === t.id));
                         setMenu({ taskId: t.id, targets: targetsFor(t.id), anchor });
                       }}
-                      onTag={setTagFilter}
+                      onTag={(name) => toggleTag(name)}
                     />
                           ))}
                       </DropZone>

@@ -56,6 +56,11 @@ export function StatusIcon({ status }: { status: string }) {
   return <StatusRing progress={v.progress} color={v.color} />;
 }
 
+/** Sam kolor statusu (bez rysunku) — do jednolitych „monet" w facepile filtra. */
+export function statusColor(status: string): string {
+  return (STATUS_VISUAL[status] ?? STATUS_VISUAL['2']).color;
+}
+
 /**
  * Pierscien dla ETAPU sprintu. Ta ikona oznacza stan przeplywu pracy —
  * a tym w tej grupie jest etap kanbana, nie wbudowany status Bitriksa.
@@ -99,12 +104,21 @@ export function CommentIcon() {
 
 /** Priorytet: slupki. Normalny nie rysuje sie wcale — brak sygnalu to tez sygnal. */
 export function PriorityIcon({ priority }: { priority: string }) {
-  if (priority === '1') return <span className="prio-spacer" aria-hidden />;
+  // Slupki rosnaco: liczba pelnych slupkow = poziom. Niski 1, Normalny 2, Wysoki 3.
+  // Kazdy poziom ma teraz widoczna ikone (dawniej Normalny byl pusty).
+  const active = priority === '2' ? 3 : priority === '1' ? 2 : priority === '0' ? 1 : 0;
+  if (active === 0) return <span className="prio-spacer" aria-hidden />;
 
-  const high = priority === '2';
-  const color = high ? 'var(--accent-orange)' : 'var(--fg-dim)';
-  const heights = high ? [4, 7, 10] : [4, 4, 4];
-  const dim = high ? [1, 1, 1] : [1, 0.35, 0.35];
+  // Kazdy poziom ma WLASNY kolor, nie tylko inna liczbe slupkow. Pilny (2) =
+  // pomaranczowy, standardowy (1) = szary, latwy (0) = zielony rozjasniony do
+  // jasnosci pomaranczu (odpowiednik „orange", nie ciemny bazowy accent-green).
+  const color =
+    priority === '2'
+      ? 'var(--accent-orange)'
+      : priority === '1'
+        ? 'var(--fg-muted)'
+        : 'color-mix(in srgb, var(--accent-green) 55%, white)';
+  const heights = [4, 7, 10];
 
   return (
     <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden>
@@ -116,8 +130,8 @@ export function PriorityIcon({ priority }: { priority: string }) {
           width="2.6"
           height={h}
           rx="0.8"
-          fill={color}
-          opacity={dim[i]}
+          style={{ fill: color }}
+          opacity={i < active ? 1 : 0.28}
         />
       ))}
     </svg>

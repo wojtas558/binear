@@ -674,6 +674,7 @@ kbd {
 /* Strzalka ma tylko sygnalizowac, ze da sie kliknac — nie konkurowac z nazwa. */
 .brand > .chev {
   color: var(--fg-dim);
+  margin-top: -1px;
 }
 
 .brand-name {
@@ -941,10 +942,43 @@ kbd {
   color: var(--fg);
 }
 
+/* Wlasny checkbox — natywny (kwadrat OS, przegladarkowy blekit) odstawal od reszty
+   menu. Pusty: obrys w kolorze ramki. Zaznaczony: wypelnienie akcentem + biala fajka
+   rysowana z obroconej ramki. Dziala w kazdym motywie (akcent to zawsze kolor). */
 .ds-check input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
   margin: 0;
-  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.ds-check input:hover {
+  border-color: var(--accent);
+}
+
+.ds-check input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ds-check input:checked::after {
+  content: '';
+  width: 4px;
+  height: 8px;
+  margin-top: -1px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 .ds-check-off {
@@ -952,8 +986,10 @@ kbd {
   cursor: default;
 }
 
-.ds-check-off input {
+.ds-check-off input,
+.ds-check input:disabled {
   cursor: default;
+  opacity: 0.45;
 }
 
 .main {
@@ -1032,7 +1068,10 @@ kbd {
 
 /* ── Pasek zakresu ──────────────────────────────────────────────────────── */
 
+/* Zakres + „+ Filtr" + chipy filtrow + przelacznik widoku — wszystko w JEDNEJ linii.
+   `position: relative`, bo wlasny pasek przewijania chipow kotwiczy sie do jej dolu. */
 .scopebar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--s3);
@@ -1072,13 +1111,30 @@ kbd {
 }
 
 .segment-count {
+  /* Rezerwa na 4 cyfry (do 9999), zeby segment nie zmienial szerokosci przy zmianie
+     liczby po filtrach. Do 999 z zapasem, 4 cyfry na styk; 5+ (rzadkie) moze poszerzyc. */
+  display: inline-block;
+  min-width: 4ch;
+  text-align: center;
   font-size: var(--t-micro);
-  color: var(--fg-dim);
+  /* Cieplejszy niz --fg-dim i pogrubiony: przy micro-rozmiarze dim/thin gubil sie. */
+  color: var(--fg-muted);
+  font-weight: var(--w-medium);
   font-variant-numeric: tabular-nums;
 }
 
+/* Ramy czasowe wplecione w segment sprintu, tuz za nazwa — male i wyszarzone,
+   z lekkim odstepem, zeby nie zlewaly sie z etykieta ani z licznikiem. */
+.segment-dates {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  margin-left: -2px;
+}
+
 .sprint-dates {
-  font-size: var(--t-mini);
+  flex: 0 0 auto;
+  font-size: var(--t-micro);
   color: var(--fg-dim);
   white-space: nowrap;
 }
@@ -1112,6 +1168,319 @@ kbd {
 
 .toggle-off input {
   cursor: default;
+}
+
+/* ── Filtry (styl Linear) ─────────────────────────────────────────────────── */
+
+/* Przycisk "+ Filtr" w pasku zakresu — dyskretny, obok przelacznikow. */
+.filter-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 var(--s2);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.filter-add:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+.filter-add-plus {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg-dim);
+}
+
+/* Pionowa kreska oddzielajaca grupe zakresu od grupy filtrow. */
+.scopebar-div {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+}
+
+/* Przelacznik zapisanych widokow — styl jak "+ Filtr". */
+.views-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 var(--s2);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.views-btn:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+/* Kontener chipow z WLASNYM poziomym paskiem (patrz komponent ScrollX). Zajmuje wolne
+   miejsce miedzy „+ Filtr" a przelacznikiem widoku; `align-self: stretch` rozciaga go na
+   pelna wysokosc linii, zeby pasek mogl usiasc na jej DOLNEJ KRAWEDZI. */
+.scrollx {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  /* Nie ROZPYCHA sie na cala szerokosc — bierze tyle, ile trzeba na chipy, dzieki
+     czemu „+ Filtr" stoi tuz za nimi. Gdy chipow duzo, kurczy sie (min-width: 0)
+     i przewija; prawa grupa i tak jest dosunieta przez swoj margin-left: auto. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Wlasciwy scroller — natywny pasek ukryty (jego rogow nie da sie zaokraglic
+   w Firefoksie), przewijanie zostaje. */
+.scrollx-track {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--s2);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox */
+}
+
+.scrollx-track::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+/* Wlasny pasek. Sam element to WYSOKA, przezroczysta strefa chwytu (latwo trafic),
+   a widoczna jest tylko cienka pigulka (::before) dosunieta do DOLU — czyli do dolnej
+   krawedzi linii filtrow. Kotwiczy sie do .filterbar (position: relative), stad `left`
+   rowny lewemu paddingowi paska. */
+.scrollx-bar {
+  position: absolute;
+  left: 0; /* wzgledem .scrollx — czyli lewa krawedz obszaru chipow */
+  bottom: 0; /* dolna krawedz linii = kreska panelu */
+  height: 14px; /* strefa chwytu — duzo wieksza niz sama pigulka */
+  cursor: grab;
+  opacity: 0;
+  pointer-events: none; /* w spoczynku nie przechwytuje klikniec w chipy */
+  transition: opacity 150ms ease;
+}
+
+.scrollx-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0; /* pigulka rowno z krawedzia panelu */
+  height: 4px; /* wysokosc WIDOCZNA (bez zmian) */
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 120ms ease;
+}
+
+/* Widoczny przy najechaniu na obszar ORAZ przez caly czas przeciagania (kursor moze
+   wtedy zjechac z paska, a chwyt ma trwac dalej). */
+.scrollx:hover .scrollx-bar,
+.scrollx-dragging .scrollx-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.scrollx-bar:hover::before,
+.scrollx-bar:active::before,
+.scrollx-dragging .scrollx-bar::before {
+  background: var(--fg-dim);
+}
+
+.scrollx-bar:active {
+  cursor: grabbing;
+}
+
+/* Jeden warunek: [pole : wartosci] + krzyzyk. Nie kurczyc — inaczej chipy zlepilyby
+   sie zamiast przewijac. */
+.filter-chip {
+  display: inline-flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  height: 30px;
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.filter-chip-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 var(--s2);
+  font-size: var(--t-mini);
+  color: var(--fg);
+  white-space: nowrap;
+  transition: background 120ms ease;
+}
+
+.filter-chip-main:hover {
+  background: var(--bg-active);
+}
+
+/* Chip ma dwa klikalne segmenty (operator | wartosci) — kreska je rozdziela. */
+.filter-chip-main + .filter-chip-main {
+  box-shadow: inset 1px 0 0 var(--border);
+}
+
+.filter-chip-field {
+  color: var(--fg-muted);
+}
+
+/* Operator jest klikalny (zmienia „to / to nie / …") — mocniejszy niz pole. */
+.filter-chip-op {
+  color: var(--fg);
+}
+
+/* Ikona przy pojedynczej wartosci — mala, wyrownana do napisu. */
+.filter-chip-vicon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.filter-chip-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg);
+  font-weight: var(--w-medium);
+}
+
+/* Wiele wartosci = facepile jak w Linearze: nachodzace na siebie okragle tokeny. */
+.filter-chip-stack {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Kazdy token to NIEPRZEZROCZYSTY okragly krazek rozdzielony obwodka w kolorze
+   tla chipa (--bg-panel). Wypelnienie (awatar osoby albo pelna kolorowa moneta)
+   calkowicie zaslania sasiada — zadnych sliverow ani polprzezroczystych przeswitow.
+   Lewy jest na wierzchu (z-index z JSX), a obwodka odcina token pod spodem. */
+.filter-chip-stack .filter-chip-vicon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg-active); /* fallback, gdy token nie ma wlasnego wypelnienia */
+  box-shadow: 0 0 0 1px var(--bg-panel);
+  margin-left: -7px;
+  overflow: hidden;
+}
+
+.filter-chip-stack .filter-chip-vicon:first-child {
+  margin-left: 0;
+}
+
+/* Ikona-pierscien (status/etap) na podbarwionej monecie — wyraznie mniejsza od krazka,
+   zeby siedziala na srodku z marginesem i nie dotykala brzegu (postep to niesymetryczny
+   wycinek, wiec bez zapasu „ucieka" w bok). */
+.filter-chip-stack .filter-chip-vicon > svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Pelna moneta w kolorze wartosci (priorytet) wypelniajaca token. */
+.filter-chip-coin {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+/* Rdzen tagu na podbarwionej monecie — maly pelny krazek jak kropka tagu w wierszu,
+   tyle ze wysrodkowany na tokenie facepile (moneta zaslania sasiada, rdzen niesie kolor). */
+.filter-chip-tagcore {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.filter-chip-stack .avatar {
+  flex-basis: 20px;
+  width: 20px;
+  height: 20px;
+}
+
+.filter-chip-stack .filter-chip-more {
+  margin-left: 6px;
+}
+
+.filter-chip-more {
+  color: var(--fg-dim);
+  font-weight: var(--w-normal);
+}
+
+.filter-chip-x {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--fg-dim);
+  box-shadow: inset 1px 0 0 var(--border);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.filter-chip-x:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+.filter-chip-x > svg {
+  display: block;
+}
+
+/* „Wyczyść wszystkie" miedzy widokiem a chipami: ikona „×" + podpis. Przy ciasnym
+   pasku (waski ekran) podpis znika i zostaje samo „×" — patrz @media nizej. */
+.filter-clear-x {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 var(--s2);
+  color: var(--fg-dim);
+  border-radius: var(--radius);
+  white-space: nowrap;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.filter-clear-x:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+.filter-clear-x > svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
+.filter-clear-x-label {
+  font-size: var(--t-mini);
+}
+
+/* Chipy zaczely przewijac (brak miejsca) — zwijamy do samego „×" (JS: filter-clear-x-min). */
+.filter-clear-x-min {
+  width: 22px;
+  padding: 0;
+  justify-content: center;
+}
+
+.filter-clear-x-min .filter-clear-x-label {
+  display: none;
 }
 
 /* ── Lista ──────────────────────────────────────────────────────────────── */
@@ -2002,6 +2371,25 @@ img.avatar {
   background: var(--border);
 }
 
+/* Wybor wielokrotny (filtry): zaznaczona pozycja + ptaszek po prawej. */
+.picker-item-on {
+  color: var(--fg);
+}
+
+.picker-check {
+  flex: 0 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.picker-check > svg {
+  width: 14px;
+  height: 14px;
+}
+
 .menu-item:disabled {
   opacity: 0.4;
   cursor: default;
@@ -2324,6 +2712,7 @@ body.resizing {
   padding: 2px var(--s1);
   color: inherit;
   border-radius: var(--radius);
+  white-space: nowrap; /* „21 sie" (a z rokiem „21 sie 2025") w jednej linii, nie 21 / sie */
   transition: background 120ms ease;
 }
 
