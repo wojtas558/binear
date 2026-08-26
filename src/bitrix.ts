@@ -564,6 +564,7 @@ export interface TaskDetail {
   checklist: ChecklistGroup[];
   creatorName: string | null;
   creatorId: number | null;
+  creatorPhoto: string | null;
   favorite: boolean;
   timeEstimate: number;
   /** Story pointy scruma — `null` gdy nieoszacowane lub projekt bez scruma. */
@@ -610,6 +611,7 @@ export async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
     checklist: checklistGroups(t.checklist),
     creatorName: personName(t.creator),
     creatorId: personId(t.creator),
+    creatorPhoto: personPhoto(t.creator),
     favorite: t.favorite === 'Y' || t.favorite === true,
     timeEstimate: Number(t.timeEstimate ?? 0),
     storyPoints: storyPointValue(scrum?.storyPoints),
@@ -948,6 +950,11 @@ export async function updateTask(
   fields: Record<string, string | number>,
 ): Promise<void> {
   await call('tasks.task.update', { taskId, fields });
+}
+
+/** Nieodwracalne usuniecie zadania. W UI zawsze poprzedzone potwierdzeniem. */
+export async function deleteTask(taskId: number): Promise<void> {
+  await call('tasks.task.delete', { taskId });
 }
 
 /**

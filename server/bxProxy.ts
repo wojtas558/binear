@@ -35,6 +35,7 @@ const ALLOWED = new Set([
   'task.commentitem.add',
   'task.checklistitem.complete', // odhaczenie pozycji checklisty
   'task.checklistitem.renew', // cofniecie odhaczenia
+  'tasks.task.delete', // usuniecie zadania — nieodwracalne, w UI zawsze za potwierdzeniem
 ]);
 
 /** Serializacja zagniezdzonych parametrow w formacie, ktorego oczekuje Bitrix (PHP-style brackets). */

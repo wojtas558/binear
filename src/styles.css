@@ -1066,6 +1066,12 @@ kbd {
   color: var(--fg);
 }
 
+/* Kosz w naglowku panelu — czerwony dopiero na hover, zeby nie krzyczal. */
+.icon-btn-danger:hover {
+  background: color-mix(in srgb, var(--danger, #e5534b) 14%, transparent);
+  color: var(--danger, #e5534b);
+}
+
 /* ── Pasek zakresu ──────────────────────────────────────────────────────── */
 
 /* Zakres + „+ Filtr" + chipy filtrow + przelacznik widoku — wszystko w JEDNEJ linii.
@@ -2265,6 +2271,15 @@ kbd {
 
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+.btn-danger {
+  color: #fff;
+  background: var(--danger, #e5534b);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger, #e5534b) 85%, black);
 }
 
 .row-more {

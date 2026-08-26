@@ -41,6 +41,7 @@ import {
   WORK_END_HOUR,
   latestChange,
   moveToSprint,
+  deleteTask,
   moveToStage,
   setChecklistItem,
   updateStoryPoints,
@@ -86,6 +87,7 @@ import {
   CopyIcon,
   ExternalIcon,
   ElsewhereIcon,
+  TrashIcon,
   tagHue,
 } from './icons';
 import { Board } from './Board';
@@ -832,6 +834,44 @@ function useBitrixData() {
   );
 
   /**
+   * Usuniecie zadania — optymistyczne: znika z listy od razu, REST leci w tle,
+   * a przy bledzie wraca na swoje miejsce. Nieodwracalne po stronie Bitriksa,
+   * wiec wywolujacy MUSI wczesniej potwierdzic (patrz Confirm).
+   */
+  const removeTask = useCallback(
+    async (id: number) => {
+      const snapshot = tasksRef.current;
+      const before = snapshot.find((t) => t.id === id);
+      if (!before) return;
+
+      setData((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== id) }));
+      setPending((p) => new Set(p).add(id));
+
+      try {
+        await deleteTask(id);
+      } catch (e) {
+        // Przywracamy zadanie na jego pierwotna pozycje, nie na koniec listy.
+        setData((d) => {
+          if (d.tasks.some((t) => t.id === id)) return d;
+          const idx = snapshot.findIndex((t) => t.id === id);
+          const tasks = [...d.tasks];
+          tasks.splice(idx < 0 ? tasks.length : idx, 0, before);
+          return { ...d, tasks };
+        });
+        toast(`Nie udało się usunąć zadania: ${e instanceof Error ? e.message : String(e)}`);
+        throw e;
+      } finally {
+        setPending((p) => {
+          const next = new Set(p);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    [toast],
+  );
+
+  /**
    * Otwarcie zadania gasi oba sygnaly: nowosc i nieprzeczytane komentarze.
    * Licznik komentarzy zerujemy tylko lokalnie — Bitrix i tak odnotowuje
    * odwiedziny przy `tasks.task.get`, ktore panel szczegolow wlasnie wykonuje.
@@ -875,6 +915,7 @@ function useBitrixData() {
     newIds,
     reload: load,
     mutate,
+    removeTask,
     toast,
     selectProject,
     markOpened,
@@ -2544,6 +2585,7 @@ function DetailPanel({
   onDeadline,
   onTitle,
   onClose,
+  onDelete,
   onError,
 }: {
   task: Task;
@@ -2569,6 +2611,8 @@ function DetailPanel({
   onDeadline: (date: string) => void;
   onTitle: (title: string) => void;
   onClose: () => void;
+  /** Usuniecie zadania — panel sam pyta o potwierdzenie przez App (setConfirm). */
+  onDelete: () => void;
   onError: (m: string) => void;
 }) {
   // Opis nie jedzie w liscie (bylby kilka MB dla ~1000 zadan) — dociagamy przy otwarciu.
@@ -2720,6 +2764,9 @@ function DetailPanel({
           >
             <ExternalIcon />
           </a>
+          <button className="icon-btn icon-btn-danger" onClick={onDelete} title="Usuń zadanie">
+            <TrashIcon />
+          </button>
           <button className="icon-btn" onClick={onClose} title="Zamknij (Esc)">
             <CloseIcon />
           </button>
@@ -2738,7 +2785,11 @@ function DetailPanel({
             </FieldButton>
           </dd>
           <dt title={PICKER_HELP.sprint}>Sprint</dt>
-          <dd>{sprintName}</dd>
+          <dd>
+            <FieldButton kind="sprint" onPick={onPick}>
+              {sprintName}
+            </FieldButton>
+          </dd>
           {/* „Nadrzędne" przeniesione do sekcji relacji (nizej), razem z „Powiązane". */}
           {/* Story pointy z bytu scruma — edytowalne tylko w projekcie scrumowym. */}
           {canStoryPoints && (
@@ -2799,7 +2850,11 @@ function DetailPanel({
             <>
               <dt>Autor</dt>
               <dd>
-                <PersonInline id={detail.creatorId} name={detail.creatorName} />
+                <PersonInline
+                  id={detail.creatorId}
+                  name={detail.creatorName}
+                  photo={detail.creatorPhoto}
+                />
               </dd>
             </>
           )}
@@ -3419,11 +3474,15 @@ function ViewMenu({
 function Confirm({
   title,
   body,
+  confirmLabel = 'Zmień status',
+  danger = false,
   onYes,
   onClose,
 }: {
   title: string;
   body: string;
+  confirmLabel?: string;
+  danger?: boolean;
   onYes: () => void;
   onClose: () => void;
 }) {
@@ -3444,14 +3503,14 @@ function Confirm({
             Anuluj
           </button>
           <button
-            className="btn btn-primary"
+            className={danger ? 'btn btn-danger' : 'btn btn-primary'}
             autoFocus
             onClick={() => {
               onClose();
               onYes();
             }}
           >
-            Zmień status
+            {confirmLabel}
           </button>
         </div>
       </div>
@@ -3462,6 +3521,8 @@ function Confirm({
 interface ConfirmState {
   title: string;
   body: string;
+  confirmLabel?: string;
+  danger?: boolean;
   onYes: () => void;
 }
 
@@ -3581,6 +3642,7 @@ export default function App() {
     newIds,
     reload,
     mutate,
+    removeTask,
     toast,
     selectProject,
     markOpened,
@@ -5050,7 +5112,10 @@ export default function App() {
         options: people.map((p, i) => ({
           value: String(p.id),
           label: p.name,
-          photo: p.photo,
+          // „Nieprzypisane" to konto-zaslepka — pusty awatar (kolko-placeholder), ten sam
+          // co przy nieprzypisanym zadaniu w wierszu; nie zdjecie/inicjal.
+          photo: p.id === UNASSIGNED_ID ? undefined : p.photo,
+          icon: p.id === UNASSIGNED_ID ? <Avatar name={null} /> : undefined,
           divider: i > 0 && people[i - 1].id === me && p.id !== me,
         })),
         apply: (value: string) => {
@@ -5577,6 +5642,18 @@ export default function App() {
             )
           }
           onClose={() => setOpenId(null)}
+          onDelete={() =>
+            setConfirm({
+              title: `Usunąć zadanie „${openTask.title || openTask.rawTitle}"?`,
+              body: 'Zadanie zniknie z Bitriksa razem z podzadaniami, komentarzami i checklistą. Tej operacji nie da się cofnąć.',
+              confirmLabel: 'Usuń',
+              danger: true,
+              onYes: () => {
+                setOpenId(null);
+                void removeTask(openTask.id);
+              },
+            })
+          }
           onError={toast}
         />
       )}
@@ -5719,6 +5796,8 @@ export default function App() {
         <Confirm
           title={confirm.title}
           body={confirm.body}
+          confirmLabel={confirm.confirmLabel}
+          danger={confirm.danger}
           onYes={confirm.onYes}
           onClose={() => setConfirm(null)}
         />
