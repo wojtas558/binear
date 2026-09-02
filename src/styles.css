@@ -2237,6 +2237,54 @@ input[type='search']::-webkit-search-decoration {
   cursor: help;
 }
 
+/* Ekran awaryjny ErrorBoundary — zamiast bialej strony po wyjatku w renderze. */
+.crash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  align-items: flex-start;
+  max-width: 640px;
+  margin: var(--s4);
+  padding: var(--s4);
+  color: var(--fg);
+  background: var(--bg-panel);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.crash h2 {
+  font-size: var(--t-body);
+}
+
+.crash p {
+  color: var(--fg-muted);
+}
+
+.crash-msg {
+  align-self: stretch;
+  max-height: 180px;
+  padding: var(--s2);
+  overflow: auto;
+  font-size: var(--t-mini);
+  color: var(--danger, #e5534b);
+  background: var(--bg-base);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+}
+
+.crash-actions {
+  display: flex;
+  gap: var(--s2);
+}
+
+/* Termin na karcie tablicy — ten sam zapis co w wierszu listy, tylko przygaszony. */
+.card-date {
+  flex: 0 0 auto;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
 /* Kropka epika — dzis tylko w polu panelu szczegolow, obok nazwy epika. */
 .row-epic-dot {
   flex: 0 0 8px;

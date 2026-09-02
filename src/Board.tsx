@@ -1,7 +1,8 @@
 import { type MouseEvent as ReactMouseEvent } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
-import type { Stage, Task } from './bitrix';
+import type { Epic, Stage, Task } from './bitrix';
 import { Avatar, CommentIcon, ParentIcon, PriorityIcon, tagHue } from './icons';
+import { shortDate, isUnassigned } from './taskView';
 import { colDropId, dragId } from './dnd';
 
 /**
@@ -28,6 +29,7 @@ export function Board({
   marked,
   newIds,
   parentLabels,
+  epicOf,
   onOpen,
   onMenu,
 }: {
@@ -45,6 +47,8 @@ export function Board({
   /** Zadania, ktorych nie bylo przy poprzednim uruchomieniu — patrz src/seen.ts. */
   newIds: Set<number>;
   parentLabels: Map<number, string>;
+  /** Epik zadania — karta pokazuje ta sama plakietke co wiersz listy (parytet widokow). */
+  epicOf: (t: Task) => Epic | null;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
 }) {
   const byStage = new Map<number, Task[]>();
@@ -81,6 +85,7 @@ export function Board({
           marked={marked}
           newIds={newIds}
           parentLabels={parentLabels}
+          epicOf={epicOf}
           onOpen={onOpen}
           onMenu={onMenu}
         />
@@ -99,6 +104,7 @@ export function Board({
           marked={marked}
           newIds={newIds}
           parentLabels={parentLabels}
+          epicOf={epicOf}
           onOpen={onOpen}
           onMenu={onMenu}
         />
@@ -118,6 +124,7 @@ function BoardColumn({
   marked,
   newIds,
   parentLabels,
+  epicOf,
   onOpen,
   onMenu,
 }: {
@@ -133,6 +140,7 @@ function BoardColumn({
   marked: Set<number>;
   newIds: Set<number>;
   parentLabels: Map<number, string>;
+  epicOf: (t: Task) => Epic | null;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
 }) {
   const { setNodeRef, isOver, active } = useDroppable({
@@ -160,6 +168,7 @@ function BoardColumn({
             isNew={newIds.has(t.id)}
             busy={pending.has(t.id)}
             parentLabel={parentLabels.get(t.id)}
+            epic={epicOf(t)}
             onOpen={onOpen}
             onMenu={onMenu}
           />
@@ -181,6 +190,7 @@ function BoardCard({
   isNew,
   busy,
   parentLabel,
+  epic,
   onOpen,
   onMenu,
 }: {
@@ -192,6 +202,8 @@ function BoardCard({
   isNew: boolean;
   busy: boolean;
   parentLabel: string | undefined;
+  /** Epik zadania — ta sama plakietka co w wierszu listy (parytet widokow). */
+  epic: Epic | null;
   onOpen: (id: number, e: ReactMouseEvent) => void;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
 }) {
@@ -239,7 +251,18 @@ function BoardCard({
             {t.newComments}
           </span>
         )}
-        <Avatar name={t.responsibleName} photo={t.responsiblePhoto} />
+        {/* Termin — ten sam format co w wierszu listy. */}
+        {t.deadline && (
+          <span className="card-date" title="Termin">
+            {shortDate(t.deadline)}
+          </span>
+        )}
+        {/* Zaslepka -> pusty awatar, dokladnie jak na liscie. */}
+        {isUnassigned(t.responsibleId) ? (
+          <Avatar name={null} />
+        ) : (
+          <Avatar name={t.responsibleName} photo={t.responsiblePhoto} />
+        )}
       </div>
       {parentLabel !== undefined && (
         <div className="card-parent">
@@ -248,7 +271,7 @@ function BoardCard({
         </div>
       )}
       <div className="card-title">{t.title || t.rawTitle}</div>
-      {t.tags.length > 0 && (
+      {(t.tags.length > 0 || epic) && (
         <div className="card-tags">
           {t.tags.map((tag) => (
             <span key={tag} className="tag tag-static">
@@ -256,6 +279,23 @@ function BoardCard({
               {tag}
             </span>
           ))}
+          {/* Epik — ta sama kwadratowa plakietka co w wierszu, tez za tagami. */}
+          {epic &&
+            (() => {
+              const col = epic.color ? `#${epic.color}` : tagHue(epic.name);
+              return (
+                <span
+                  className="row-epic"
+                  title={`Epik: ${epic.name}`}
+                  style={{
+                    borderColor: `color-mix(in srgb, ${col} 26%, transparent)`,
+                    background: `color-mix(in srgb, ${col} 9%, transparent)`,
+                  }}
+                >
+                  {epic.name}
+                </span>
+              );
+            })()}
         </div>
       )}
     </article>

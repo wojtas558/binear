@@ -69,7 +69,18 @@ function bbToMarkdown(s: string): string {
 }
 
 function normalize(raw: string): string {
-  return bbToMarkdown(decodeEntities(raw)).replace(/\r\n?/g, '\n');
+  return (
+    bbToMarkdown(decodeEntities(raw))
+      .replace(/\r\n?/g, '\n')
+      /*
+       * Naprawa tabeli sklejonej w jedna linie: bywa, ze linia separatora ma doklejony
+       * PIERWSZY wiersz danych, np. `|---|---| | a | b |`. Wtedy separator nie pasuje do
+       * `RE.sep`, tabela w ogole nie jest rozpoznawana i caly blok ladowal jako akapity.
+       * Rozcinamy takie linie z powrotem na dwie. Leniwy `*?` gwarantuje, ze separator
+       * konczy sie na OSTATNIEJ kresce przed spacja i kolejnym `|`.
+       */
+      .replace(/^([ \t]*\|[-:| \t]*?\|)[ \t]+(\|.*)$/gm, '$1\n$2')
+  );
 }
 
 // ─── Inline ──────────────────────────────────────────────────────────────────
@@ -249,7 +260,21 @@ export function renderDescription(raw: string): ReactNode[] {
   let k = 0;
   const key = () => k++;
 
+  /*
+   * Bezpiecznik: `i` posuwa sie recznie w kazdej galezi, wiec jeden przeoczony krok
+   * zawiesza CALA karte (tak sie stalo przy tabeli sklejonej w jedna linie). Kazdy
+   * obrot petli musi zjesc co najmniej jedna linie, wiec wiecej obrotow niz linii
+   * (z zapasem) znaczy, ze stoimy w miejscu — wtedy przerywamy i pokazujemy reszte
+   * jako zwykly tekst, zamiast wieszac przegladarke.
+   */
+  const maxSteps = lines.length + 1000;
+  let steps = 0;
+
   for (let i = 0; i < lines.length; ) {
+    if (++steps > maxSteps) {
+      out.push(<pre key={key()}>{lines.slice(i).join('\n')}</pre>);
+      break;
+    }
     const line = lines[i];
 
     if (!line.trim()) {
@@ -381,6 +406,17 @@ export function renderDescription(raw: string): ReactNode[] {
       i++;
     }
     if (para.length) out.push(<p key={key()}>{inline(para.join(' '), key)}</p>);
+    else {
+      /*
+       * Linia WYGLADA na poczatek bloku, ale zaden blok jej nie przyjal — w praktyce
+       * wiersz `|…|` bez poprawnej linii separatora pod spodem (tabela sklejona w jedna
+       * linie). Petla akapitu zrywa sie wtedy od razu, `para` zostaje puste i `i` NIE
+       * rusza sie z miejsca: `for` kreci sie w kolko i zawiesza cala karte.
+       * Dlatego zawsze robimy krok naprzod i pokazujemy taka linie jako zwykly akapit.
+       */
+      out.push(<p key={key()}>{inline(line, key)}</p>);
+      i++;
+    }
   }
 
   return out;

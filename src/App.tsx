@@ -66,6 +66,7 @@ import {
   setCachedDetail,
 } from './detailCache';
 import { renderDescription, setPortalBase } from './markdown';
+import { ErrorBoundary } from './ErrorBoundary';
 import { checkForUpdate, runUpdate, type UpdateInfo } from './version';
 import {
   Avatar,
@@ -95,6 +96,14 @@ import {
   PinIcon,
   tagHue,
 } from './icons';
+import {
+  MONTHS,
+  shortDate,
+  isUnassigned,
+  setUnassignedId,
+  UNASSIGNED_ID,
+  UNASSIGNED_LABEL,
+} from './taskView';
 import { Board } from './Board';
 import { CommandPalette, type Command } from './CommandPalette';
 import { applyTheme, loadTheme, watchSystemTheme, THEMES, type Theme } from './theme';
@@ -396,16 +405,7 @@ function viewFingerprint(v: Omit<SavedView, 'id' | 'name'>): string {
  * Podmiana nazwy takze przy autorze zrobilaby z historii zadania bezimienna
  * liste "Nieprzypisane" i skasowalaby jedyny slad, skad zadanie sie wzielo.
  */
-/*
- * Konto-zaslepka "Nieprzypisane". Wartosc przychodzi z .env przez /api/config
- * (BX_UNASSIGNED_ID) i jest ustawiana raz, zanim wczytamy zadania — patrz
- * useBitrixData. Dlatego `let`, nie `const`: 251 to jedynie domyslka na start.
- */
-let UNASSIGNED_ID = 251;
-const UNASSIGNED_LABEL = 'Nieprzypisane';
-
-const isUnassigned = (responsibleId: number | null) =>
-  responsibleId === null || responsibleId === UNASSIGNED_ID;
+/* Konto-zaslepka i formatowanie daty mieszkaja w ./taskView — dzieli je z Board. */
 
 /*
  * Osoba w tekscie (autor, wspolwykonawca, obserwator, autor komentarza). Konto-zaslepka
@@ -631,7 +631,7 @@ function useBitrixData() {
 
       // Konto-zaslepka z .env — ustawiamy PRZED wczytaniem zadan, wiec grupowanie,
       // picker i widok "Nieprzypisane" czytaja juz wlasciwe id.
-      if (Number.isFinite(config.unassignedId)) UNASSIGNED_ID = config.unassignedId;
+      setUnassignedId(config.unassignedId);
 
       // Renderer wzmianek potrzebuje adresu portalu; znamy go dopiero z konfiguracji.
       setPortalBase(config.portal);
@@ -1251,20 +1251,7 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>):
 
 // ─── Formatowanie ────────────────────────────────────────────────────────────
 
-const MONTHS = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
-
-function shortDate(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const base = `${d.getDate()} ${MONTHS[d.getMonth()]}`;
-  // Rok DOPISUJEMY tylko, gdy to NIE biezacy rok. Bez tego „23 wrz" (2025) i „20 sie"
-  // (2026) wygladaja jak ta sama skala, wiec poprawnie posortowana lista (po pelnym
-  // znaczniku czasu) sprawia wrazenie przemieszanej na granicy lat. Biezacy rok
-  // zostaje zwiezly.
-  const y = d.getFullYear();
-  return y === new Date().getFullYear() ? base : `${base} ${y}`;
-}
+// `shortDate` przeniesione do ./taskView — ten sam format daty na liscie i na tablicy.
 
 /**
  * Zwiezly zakres sprintu do selektora zakresu. Ten sam miesiac -> „17–24 sie" (jedna
@@ -3102,9 +3089,14 @@ function DetailPanel({
         <div className="desc">
           {detailError && <p className="desc-dim">Nie udało się pobrać szczegółów.</p>}
           {!detailError && detail === null && <p className="desc-dim">Wczytywanie…</p>}
+          {/* Opis idzie przez parser markdown/BB — najbardziej „obcy" input w calej
+              aplikacji. Wlasna siatka bezpieczenstwa, zeby jeden dziwny opis psul
+              najwyzej swoja ramke, a nie caly panel zadania. */}
           {detail &&
             (detail.description.trim() ? (
-              renderDescription(detail.description)
+              <ErrorBoundary where="opis zadania">
+                {renderDescription(detail.description)}
+              </ErrorBoundary>
             ) : (
               <p className="desc-dim">Brak opisu.</p>
             ))}
@@ -5852,6 +5844,7 @@ export default function App() {
             stages={boardStages}
             showDone={showDone}
             shownEmpty={pinnedStages}
+            epicOf={epicOf}
             pending={pending}
             activeId={flat[cursor]?.id ?? null}
             openId={openId}
