@@ -103,6 +103,12 @@ export interface Task {
    */
   storyPoints: number | null;
   /**
+   * Epik scruma, do ktorego nalezy zadanie. `null` = bez epika (albo jeszcze nie
+   * dociagniete). Tak jak story pointy, lezy na scrumowym bycie zadania i wchodzi
+   * osobnym, tlowym przebiegiem (patrz `fetchScrumMeta`).
+   */
+  epicId: number | null;
+  /**
    * Nieprzeczytane komentarze — licznik prowadzi Bitrix wzgledem konta z webhooka.
    * Jest w `tasks.task.list`, wiec kropka na wierszu nie kosztuje ani jednego
    * dodatkowego zapytania.
@@ -126,6 +132,14 @@ export interface Sprint {
   name: string;
   dateStart: string | null;
   dateEnd: string | null;
+}
+
+/** Epik scruma — nadrzedny "temat" grupujacy zadania ponad sprintami. */
+export interface Epic {
+  id: number;
+  name: string;
+  /** Kolor nadany w Bitriksie (hex bez #) — do kropki/pigulki na wierszu. */
+  color: string | null;
 }
 
 export interface Project {
@@ -258,8 +272,9 @@ function normalizeTask(t: any): Task {
       .map((tag: any) => str(tag?.title))
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b, 'pl')),
-    // Dociagane osobno przez `fetchStoryPoints` — lista Bitriksa ich nie niesie.
+    // Dociagane osobno przez `fetchScrumMeta` — lista Bitriksa ich nie niesie.
     storyPoints: null,
+    epicId: null,
     newComments: Math.max(0, Number(t.newCommentsCount ?? t.NEW_COMMENTS_COUNT ?? 0) || 0),
   };
 }
@@ -315,34 +330,42 @@ export async function fetchTasks(groupId: number): Promise<Task[]> {
   return tasks.map(normalizeTask);
 }
 
+/** Scrumowe pola zadania spoza `tasks.task.list` — dociagane w tle jednym przebiegiem. */
+export interface ScrumMeta {
+  storyPoints: number | null;
+  epicId: number | null;
+}
+
 /**
- * Story pointy dla listy zadan. Nie ma ich w `tasks.task.list` — kazdy punkt
- * to pole na scrumowym bycie zadania (`tasks.api.scrum.task.get`), wiec jedno
- * id = jedno wywolanie, pakowane po 50 w batch (dla ~1000 zadan to ~20 zapytan).
+ * Scrumowe pola listy zadan (story pointy + epik). Nie ma ich w `tasks.task.list`
+ * — obydwa leza na scrumowym bycie zadania (`tasks.api.scrum.task.get`), a ta jedna
+ * metoda oddaje je RAZEM, wiec pobranie epika nie kosztuje ani jednego dodatkowego
+ * wywolania ponad to, co i tak robimy dla story pointow. Jedno id = jedno wywolanie,
+ * pakowane po 50 w batch (dla ~1000 zadan to ~20 zapytan).
  *
  * Dlatego to przebieg TLOWY, odpalany po pierwszym renderze: `onChunk` oddaje
- * wyniki partiami, zeby badge'y pojawialy sie na biezaco, a nie po calosci.
- * Zwracamy tylko realne oszacowania (brak/zero pomijamy), wiec brak klucza w
- * mapie == "bez story pointow".
+ * wyniki partiami, zeby badge'y pojawialy sie na biezaco, a nie po calosci. Do
+ * mapy trafia zadanie, ktore ma story pointy ALBO epik; brak klucza == ani jedno.
  */
-export async function fetchStoryPoints(
+export async function fetchScrumMeta(
   taskIds: number[],
-  onChunk?: (points: Map<number, number>) => void,
-): Promise<Map<number, number>> {
-  const all = new Map<number, number>();
+  onChunk?: (meta: Map<number, ScrumMeta>) => void,
+): Promise<Map<number, ScrumMeta>> {
+  const all = new Map<number, ScrumMeta>();
 
   for (let i = 0; i < taskIds.length; i += 50) {
     const ids = taskIds.slice(i, i + 50);
     // Zadanie spoza scruma zwroci blad i wywali caly batch — wtedy ta partia
-    // po prostu nie dostaje story pointow (reszta przebiegu leci dalej).
+    // po prostu nie dostaje scrumowych pol (reszta przebiegu leci dalej).
     const results = await callBatch(
       ids.map((id) => ({ method: 'tasks.api.scrum.task.get', params: { id } })),
     ).catch(() => [] as any[]);
 
-    const chunk = new Map<number, number>();
+    const chunk = new Map<number, ScrumMeta>();
     results.forEach((r, j) => {
       const sp = storyPointValue(r?.storyPoints);
-      if (sp !== null) chunk.set(ids[j], sp);
+      const eid = relId(r?.epicId);
+      if (sp !== null || eid !== null) chunk.set(ids[j], { storyPoints: sp, epicId: eid });
     });
 
     if (chunk.size) {
@@ -352,6 +375,29 @@ export async function fetchStoryPoints(
   }
 
   return all;
+}
+
+/**
+ * Epiki grupy — nadrzedne tematy scruma. Osobne zapytanie (jak sprint/backlog),
+ * bo `tasks.task.list` o nich nie wie. Blad polykamy: projekt bez scruma nie ma
+ * epikow i wtedy funkcja epika po prostu sie nie pokazuje.
+ *
+ * UWAGA: filtr MUSI byc UPPER_CASE (`GROUP_ID`) — jak w `sprint.list`. Lowercase
+ * `groupId` po cichu zwraca pusta liste zamiast bledu (sprawdzone na zywo).
+ */
+export async function fetchEpics(groupId: number): Promise<Epic[]> {
+  try {
+    const res = await call<any>('tasks.api.scrum.epic.list', { filter: { GROUP_ID: groupId } });
+    // `call` oddaje juz `.result` (tablica epikow); zostawiamy fallback na `{ epics }`.
+    const rows: any[] = Array.isArray(res) ? res : (res?.epics ?? []);
+    return rows.map((e) => ({
+      id: Number(e.id),
+      name: str(e.name),
+      color: str(e.color).replace(/^#/, '') || null,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -952,6 +998,15 @@ export async function updateTask(
   await call('tasks.task.update', { taskId, fields });
 }
 
+/**
+ * Tagi zadania. Bitrix podmienia CALA liste, wiec wolajacy podaje komplet nazw
+ * (dodanie = stary zestaw + nowa nazwa, usuniecie = zestaw bez niej). Osobna
+ * funkcja, bo `updateTask` przyjmuje tylko pola skalarne, a `TAGS` to tablica.
+ */
+export async function updateTags(taskId: number, tags: string[]): Promise<void> {
+  await call('tasks.task.update', { taskId, fields: { TAGS: tags } });
+}
+
 /** Nieodwracalne usuniecie zadania. W UI zawsze poprzedzone potwierdzeniem. */
 export async function deleteTask(taskId: number): Promise<void> {
   await call('tasks.task.delete', { taskId });
@@ -1055,6 +1110,14 @@ export async function moveToSprint(taskId: number, entityId: number): Promise<vo
  */
 export async function updateStoryPoints(taskId: number, points: number | ''): Promise<void> {
   await call('tasks.api.scrum.task.update', { id: taskId, fields: { storyPoints: points } });
+}
+
+/**
+ * Epik zadania — jak sprint i story pointy, na scrumowym bycie zadania, stad ta
+ * sama metoda. `0` odpina epik (zadanie bez tematu).
+ */
+export async function updateEpic(taskId: number, epicId: number): Promise<void> {
+  await call('tasks.api.scrum.task.update', { id: taskId, fields: { epicId } });
 }
 
 /** Odhaczenie / cofniecie pozycji checklisty — dwie osobne metody Bitriksa. */

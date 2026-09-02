@@ -942,6 +942,25 @@ kbd {
   color: var(--fg);
 }
 
+/*
+ * Pola szukania sa `type=search` (zeby menedzery hasel nie brały ich za login),
+ * ale natywnego krzyzyka WebKita nie chcemy — mamy wlasne czyszczenie i klawiature.
+ */
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Tagi w polu panelu — zawijaja sie, gdy jest ich kilka. */
+.dd-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 /* Wlasny checkbox — natywny (kwadrat OS, przegladarkowy blekit) odstawal od reszty
    menu. Pusty: obrys w kolorze ramki. Zaznaczony: wypelnienie akcentem + biala fajka
    rysowana z obroconej ramki. Dziala w kazdym motywie (akcent to zawsze kolor). */
@@ -1779,7 +1798,8 @@ kbd {
   align-items: center;
   gap: var(--s2);
   height: var(--row-h);
-  padding: 0 var(--s4);
+  /* Z lewej ciasniej niz z prawej — checkbox ma stac blisko krawedzi. */
+  padding: 0 var(--s4) 0 var(--s3);
   cursor: pointer;
 }
 
@@ -1896,8 +1916,9 @@ kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 20px;
-  width: 20px;
+  /* Waski slot: szerszy odsuwal priorytet niepotrzebnie daleko od lewej krawedzi. */
+  flex: 0 0 14px;
+  width: 14px;
   height: 20px;
   padding: 0;
   color: var(--fg-dim);
@@ -1954,7 +1975,8 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: var(--s1);
-  flex: 0 0 84px;
+  /* Stala kolumna trzyma tytuly w jednej linii; waska, zeby kod stal blisko tytulu. */
+  flex: 0 0 56px;
   font-size: var(--t-mini);
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
@@ -2124,6 +2146,44 @@ kbd {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   cursor: help;
+}
+
+/* Kropka epika — dzis tylko w polu panelu szczegolow, obok nazwy epika. */
+.row-epic-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+}
+
+/*
+ * Epik w wierszu — KWADRATOWA plakietka tuz za tagami (tagi sa pigulkami, wiec
+ * ostry naroznik od razu odroznia epik od etykiety). Klik filtruje po epiku.
+ */
+.row-epic {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 160px;
+  height: 20px;
+  padding: 0 var(--s2);
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+  border: 1px solid transparent; /* kolor ustawiany inline (kolor epika) */
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+/* Dopiero pod kursorem robi sie wyrazisty — w spoczynku ma nie krzyczec. */
+.row-epic:hover {
+  color: var(--fg);
 }
 
 .row-busy {

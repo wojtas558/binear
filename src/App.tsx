@@ -24,7 +24,8 @@ import {
   fetchFieldEnums,
   fetchProjects,
   fetchStages,
-  fetchStoryPoints,
+  fetchScrumMeta,
+  fetchEpics,
   fetchTaskDetail,
   fetchTaskHistory,
   fetchTasks,
@@ -45,9 +46,12 @@ import {
   moveToStage,
   setChecklistItem,
   updateStoryPoints,
+  updateEpic,
+  updateTags,
   updateTask,
   type AppConfig,
   type Comment,
+  type Epic,
   type FieldEnums,
   type Project,
   type Sprint,
@@ -122,7 +126,16 @@ import {
 /** Zakres listy. Domyslnie tylko aktywny sprint — reszta jest na jedno klikniecie obok. */
 type Scope = 'sprint' | 'outside' | 'all';
 type GroupBy = 'stage' | 'status' | 'assignee';
-type PickerKind = 'status' | 'priority' | 'assignee' | 'stage' | 'sprint' | 'points' | 'parent';
+type PickerKind =
+  | 'status'
+  | 'priority'
+  | 'assignee'
+  | 'stage'
+  | 'sprint'
+  | 'points'
+  | 'parent'
+  | 'epic'
+  | 'tags';
 type ViewMode = 'list' | 'board';
 
 /*
@@ -137,7 +150,7 @@ type ViewMode = 'list' | 'board';
  * jeden sprint. Filtr osoby trzyma id — konto-zaslepke zbijamy do UNASSIGNED_ID,
  * dzieki czemu jeden warunek "Nieprzypisane" lapie i braki, i zaslepke.
  */
-type FilterField = 'assignee' | 'priority' | 'stage' | 'status' | 'tag';
+type FilterField = 'assignee' | 'priority' | 'stage' | 'status' | 'tag' | 'epic';
 
 /**
  * Operatory jak w Linearze. Wymiary jednowartosciowe (osoba/priorytet/status/etap —
@@ -162,6 +175,7 @@ const FILTER_FIELDS: { field: FilterField; label: string }[] = [
   { field: 'priority', label: 'Priorytet' },
   { field: 'stage', label: 'Etap' },
   { field: 'status', label: 'Status' },
+  { field: 'epic', label: 'Epik' },
   { field: 'tag', label: 'Tag' },
 ];
 
@@ -172,6 +186,13 @@ const FILTER_LABEL = Object.fromEntries(FILTER_FIELDS.map((f) => [f.field, f.lab
 
 /** Wymiary, w ktorych zadanie ma WIELE wartosci naraz — tylko tam ma sens „wszystkie z". */
 const MULTI_FIELDS = new Set<FilterField>(['tag']);
+
+/**
+ * Pseudo-wartosc filtra tagu „Bez tagów" — zadanie bez zadnego tagu. Znak NUL nie
+ * moze byc prawdziwym tagiem, wiec nie zderzy sie z nazwa. Traktowana jak zwykla
+ * wartosc w warunku (anyOf/allOf/noneOf), tylko dopasowanie liczy pusta liste tagow.
+ */
+const NO_TAGS = '\u0000';
 
 const opsFor = (field: FilterField): FilterOp[] =>
   MULTI_FIELDS.has(field) ? ['anyOf', 'allOf', 'noneOf'] : ['is', 'isNot'];
@@ -424,6 +445,8 @@ const PICKER_TITLE: Record<PickerKind, string> = {
   sprint: 'Sprint',
   points: 'Story points',
   parent: 'Zadanie nadrzędne',
+  epic: 'Epik',
+  tags: 'Tagi',
 };
 
 const PICKER_HELP: Record<PickerKind, string> = {
@@ -434,6 +457,8 @@ const PICKER_HELP: Record<PickerKind, string> = {
   sprint: 'Wrzuć zadanie do sprintu albo odeślij do backlogu',
   points: 'Punkty scruma — szacunek złożoności',
   parent: 'Zadanie, pod którym to zadanie wisi',
+  epic: 'Nadrzędny temat scruma grupujący zadania ponad sprintami',
+  tags: 'Etykiety zadania — klikaj, aby dodać lub zdjąć',
 };
 
 /** Kolejnosc pozycji w menu kontekstowym; skrot pokazujemy jako podpowiedz. */
@@ -486,6 +511,10 @@ interface Data {
   config: AppConfig | null;
   /** Projekty do przelaczenia. Pusto, gdy webhook nie ma dostepu do grup roboczych. */
   projects: Project[];
+  /** Epiki grupy — nadrzedne tematy scruma. Pusto w projekcie bez scruma. */
+  epics: Epic[];
+  /** epicId -> epik, do podpisu/koloru na wierszu i w panelu. */
+  epicNames: Map<number, Epic>;
   /** Projekt, z ktorego pochodza `tasks` — rozstrzygniety wybor, nie preferencja. */
   groupId: number | null;
 }
@@ -501,6 +530,8 @@ const EMPTY: Data = {
   backlogId: null,
   config: null,
   projects: [],
+  epics: [],
+  epicNames: new Map(),
   groupId: null,
 };
 
@@ -592,12 +623,13 @@ function useBitrixData() {
       // Recznie wybrany projekt bije ten z .env — patrz src/project.ts.
       const groupId = project ?? Number(config.groupId);
 
-      const [tasks, labels, activeSprint, projects, backlogId] = await Promise.all([
+      const [tasks, labels, activeSprint, projects, backlogId, epics] = await Promise.all([
         fetchTasks(groupId),
         fetchFieldEnums(),
         fetchActiveSprint(groupId),
         fetchProjects(),
         fetchBacklogId(groupId),
+        fetchEpics(groupId),
       ]);
 
       /*
@@ -676,11 +708,11 @@ function useBitrixData() {
         // `fetchTasks` ma je puste, a bez tego badge'y gaslyby na kazdej cichej
         // sondzie i zapalaly sie od nowa dopiero po tlowym dociagnieciu. Id zadan
         // sa globalne, wiec nie ma ryzyka podmiany miedzy projektami.
-        const carried = new Map(prev.tasks.map((t) => [t.id, t.storyPoints]));
+        const carried = new Map(prev.tasks.map((t) => [t.id, { sp: t.storyPoints, ep: t.epicId }]));
         return {
           tasks: tasks.map((t) => {
-            const sp = carried.get(t.id);
-            return sp != null ? { ...t, storyPoints: sp } : t;
+            const c = carried.get(t.id);
+            return c ? { ...t, storyPoints: c.sp, epicId: c.ep } : t;
           }),
           stages,
           stageNames: new Map(stages.map((s) => [s.id, s.name])),
@@ -691,24 +723,27 @@ function useBitrixData() {
           backlogId,
           config,
           projects,
+          epics,
+          epicNames: new Map(epics.map((e) => [e.id, e])),
           groupId,
         };
       });
 
       /*
-       * Story pointy dociagamy PO pierwszym renderze: to jedno wywolanie na zadanie
-       * (~20 batchy dla ~1000 zadan), wiec blokowanie nimi startu zabiloby szybki
-       * pierwszy obraz, o ktory cala ta sciezka walczy. Wyniki wpadaja partiami i sa
-       * scalane po id; straznik `groupId` odrzuca je po przelaczeniu projektu.
+       * Scrumowe pola (story pointy + epik) dociagamy PO pierwszym renderze: to jedno
+       * wywolanie na zadanie (~20 batchy dla ~1000 zadan), wiec blokowanie nimi startu
+       * zabiloby szybki pierwszy obraz, o ktory cala ta sciezka walczy. Wyniki wpadaja
+       * partiami i sa scalane po id; straznik `groupId` odrzuca je po przelaczeniu projektu.
        */
-      void fetchStoryPoints(ids, (points) => {
+      void fetchScrumMeta(ids, (meta) => {
         setData((d) =>
           d.groupId === groupId
             ? {
                 ...d,
-                tasks: d.tasks.map((t) =>
-                  points.has(t.id) ? { ...t, storyPoints: points.get(t.id)! } : t,
-                ),
+                tasks: d.tasks.map((t) => {
+                  const m = meta.get(t.id);
+                  return m ? { ...t, storyPoints: m.storyPoints, epicId: m.epicId } : t;
+                }),
               }
             : d,
         );
@@ -1168,13 +1203,15 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>):
   if (!c.values.length) return true; // niedokonczony warunek nie zawezaja
 
   if (c.field === 'tag') {
+    // „Bez tagów" (NO_TAGS) pasuje do zadania z pusta lista tagow; reszta jak zwykle.
+    const has = (v: string) => (v === NO_TAGS ? t.tags.length === 0 : t.tags.includes(v));
     switch (c.op) {
       case 'allOf':
-        return c.values.every((v) => t.tags.includes(v));
+        return c.values.every(has);
       case 'noneOf':
-        return !c.values.some((v) => t.tags.includes(v));
+        return !c.values.some(has);
       default: // anyOf
-        return c.values.some((v) => t.tags.includes(v));
+        return c.values.some(has);
     }
   }
 
@@ -1189,7 +1226,9 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>):
         ? t.priority
         : c.field === 'status'
           ? t.status
-          : (t.stageId && stageNames.get(t.stageId)) || ''; // stage — po nazwie
+          : c.field === 'epic'
+            ? String(t.epicId ?? 0) // 0 = bez epika
+            : (t.stageId && stageNames.get(t.stageId)) || ''; // stage — po nazwie
   const inSet = c.values.includes(key);
   return c.op === 'isNot' ? !inSet : inSet;
 }
@@ -1256,6 +1295,7 @@ function Picker({
   anchor,
   emptyLabel,
   rawLabel,
+  freeLabel,
   placeholder = 'Filtruj…',
   segments,
   multi = false,
@@ -1275,6 +1315,11 @@ function Picker({
    * identyfikator grupy stoi w adresie Bitriksa (`/workgroups/group/451/`).
    */
   rawLabel?: (n: number) => string;
+  /**
+   * Jak `rawLabel`, ale dla DOWOLNEGO tekstu — pozwala oddac wartosc, ktorej nie ma
+   * na liscie (dzis: zalozenie nowego tagu wprost z pola szukania).
+   */
+  freeLabel?: (text: string) => string;
   /** Podpowiedz w polu; przy story pointach to nie "Filtruj", tylko "wpisz liczbę". */
   placeholder?: string;
   /** Zakladki filtrujace opcje po `Option.group`; pusty klucz = pokaz wszystkie. */
@@ -1316,14 +1361,18 @@ function Picker({
 
     const q = query.trim().toLowerCase();
     const hits = q ? bySeg.filter((o) => o.label.toLowerCase().includes(q)) : bySeg;
+    const typed = query.trim();
     const withRaw =
       rawLabel && /^\d+$/.test(q) && Number(q) > 0 && !hits.some((o) => o.value === q)
         ? [{ value: q, label: rawLabel(Number(q)) }, ...hits]
-        : hits;
+        : // Dowolny tekst spoza listy — np. zupelnie nowy tag zakladany w locie.
+          freeLabel && typed && !bySeg.some((o) => o.label.toLowerCase() === q)
+          ? [{ value: typed, label: freeLabel(typed) }, ...hits]
+          : hits;
 
     // Nie renderujemy setek pozycji naraz — reszta jest osiagalna przez szukanie.
     return withRaw.slice(0, 200);
-  }, [options, query, rawLabel, seg]);
+  }, [options, query, rawLabel, freeLabel, seg]);
 
   useEffect(() => setCursor(0), [query, seg]);
 
@@ -1354,6 +1403,8 @@ function Picker({
         )}
         <input
           className="picker-input"
+          /* type=search — inaczej menedzery hasel biora to pole za login i wchodza z podpowiedzia. */
+          type="search"
           autoFocus
           value={query}
           placeholder={placeholder}
@@ -1811,6 +1862,7 @@ const SearchBox = forwardRef<SearchHandle, { onChange: (q: string) => void }>(
         <SearchIcon />
         <input
           ref={inputRef}
+          type="search"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Filtruj zadania…"
@@ -1939,6 +1991,8 @@ function TaskRow({
   marked,
   isNew,
   hasRelated,
+  epic,
+  onEpic,
   stage,
   parentRef,
   tagLimit,
@@ -1967,6 +2021,10 @@ function TaskRow({
   isNew: boolean;
   /** Ma >=1 zadanie powiazane (DEPENDS_ON) — plakietka lancucha w wierszu. */
   hasRelated?: boolean;
+  /** Epik zadania — kolorowa kropka w wierszu; brak, gdy zadanie bez epika. */
+  epic?: Epic | null;
+  /** Klik w kropke epika — szybki filtr po tym epiku. */
+  onEpic?: (epicId: number) => void;
   onToggle: () => void;
   /** Zaznacz/odznacz z checkboxa — bez otwierania zadania. */
   /** Wyglad pierscienia etapu; brak = zadanie poza sprintem, pokazujemy status. */
@@ -2101,6 +2159,29 @@ function TaskRow({
 
       {/* Liczba tagow w wierszu zalezy od szerokosci listy — reszta jako "+N". */}
       {task.tags.length > 0 && <TagStrip tags={task.tags} limit={tagLimit} onPick={onTag} />}
+
+      {/* Epik — kwadratowa plakietka ZA tagami; klik filtruje liste po tym epiku. */}
+      {epic &&
+        (() => {
+          const col = epic.color ? `#${epic.color}` : tagHue(epic.name);
+          return (
+            <button
+              type="button"
+              className="row-epic"
+              title={`Epik: ${epic.name} — kliknij, aby filtrować`}
+              style={{
+                borderColor: `color-mix(in srgb, ${col} 26%, transparent)`,
+                background: `color-mix(in srgb, ${col} 9%, transparent)`,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (task.epicId != null) onEpic?.(task.epicId);
+              }}
+            >
+              {epic.name}
+            </button>
+          );
+        })()}
 
       {/*
         Jeden znacznik "⑂" na oba rodzaje niewidocznych tutaj podzadan, dwie liczby:
@@ -2570,6 +2651,7 @@ function DetailPanel({
   task,
   stageName,
   sprintName,
+  epic,
   labels,
   me,
   portal,
@@ -2591,6 +2673,8 @@ function DetailPanel({
   task: Task;
   stageName: string;
   sprintName: string;
+  /** Epik zadania — do pola w panelu; `null`, gdy bez epika lub projekt bez scruma. */
+  epic: Epic | null;
   labels: FieldEnums;
   me: number | null;
   portal: string | null;
@@ -2790,6 +2874,27 @@ function DetailPanel({
               {sprintName}
             </FieldButton>
           </dd>
+          {/* Epik — nadrzedny temat scruma. Tylko w projekcie scrumowym (jak story pointy). */}
+          {canStoryPoints && (
+            <>
+              <dt>Epik</dt>
+              <dd>
+                <FieldButton kind="epic" onPick={onPick}>
+                  {epic ? (
+                    <>
+                      <span
+                        className="row-epic-dot"
+                        style={{ background: epic.color ? `#${epic.color}` : tagHue(epic.name) }}
+                      />
+                      {epic.name}
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </FieldButton>
+              </dd>
+            </>
+          )}
           {/* „Nadrzędne" przeniesione do sekcji relacji (nizej), razem z „Powiązane". */}
           {/* Story pointy z bytu scruma — edytowalne tylko w projekcie scrumowym. */}
           {canStoryPoints && (
@@ -2836,16 +2941,21 @@ function DetailPanel({
               <StatusIcon status={task.status} /> {labels.status[task.status] ?? task.status}
             </FieldButton>
           </dd>
-          {task.tags.length > 0 && (
-            <>
-              <dt>Tagi</dt>
-              <dd className="dd-wrap">
-                {task.tags.map((t) => (
-                  <Tag key={t} name={t} />
-                ))}
-              </dd>
-            </>
-          )}
+          {/* Tagi jak epik: pole otwiera picker, tyle ze wielokrotny (zadanie ma ich kilka). */}
+          <dt title={PICKER_HELP.tags}>Tagi</dt>
+          <dd>
+            <FieldButton kind="tags" onPick={onPick}>
+              {task.tags.length ? (
+                <span className="dd-tags">
+                  {task.tags.map((t) => (
+                    <Tag key={t} name={t} />
+                  ))}
+                </span>
+              ) : (
+                '—'
+              )}
+            </FieldButton>
+          </dd>
           {detail?.creatorName && (
             <>
               <dt>Autor</dt>
@@ -3575,6 +3685,8 @@ function ContextMenu({
     sprint: bulk ? '' : sprintName,
     points: bulk ? '' : task.storyPoints != null ? String(task.storyPoints) : '—',
     parent: bulk ? '' : task.parentId ? `#${task.parentId}` : '—',
+    epic: '', // epika nie ma w MENU_ITEMS — edytuje sie go w panelu/filtrze
+    tags: '', // tagi tez nie — edytuje sie je w panelu
   };
 
   const width = 248;
@@ -3634,6 +3746,8 @@ export default function App() {
     backlogId,
     config,
     projects,
+    epics,
+    epicNames,
     groupId,
     loading,
     error,
@@ -3831,6 +3945,27 @@ export default function App() {
     (tag: string) => filters.some((c) => c.field === 'tag' && c.op !== 'noneOf' && c.values.includes(tag)),
     [filters],
   );
+
+  /**
+   * Szybki filtr po epiku (klik w kropke na wierszu). Jak `toggleTag`, tylko epik jest
+   * jednowartosciowy — wspolny warunek „Epik: to", ponowny klik w ten sam epik go zdejmuje.
+   */
+  const toggleEpicFilter = useCallback(
+    (epicId: number) =>
+      setFilters((f) => {
+        const value = String(epicId);
+        const cond = f.find((c) => c.field === 'epic' && c.op === 'is');
+        if (!cond) {
+          return [...f, { id: newCondId(), field: 'epic' as FilterField, op: 'is' as FilterOp, values: [value] }];
+        }
+        const values = cond.values.includes(value)
+          ? cond.values.filter((v) => v !== value)
+          : [...cond.values, value];
+        if (!values.length) return f.filter((c) => c !== cond);
+        return f.map((c) => (c === cond ? { ...c, values } : c));
+      }),
+    [],
+  );
   /** Zatwierdzony filtr — SearchBox oddaje go po przerwie w pisaniu, nie po znaku. */
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
@@ -3907,8 +4042,9 @@ export default function App() {
       }
     }
     return [...map.values()].sort((a, b) => {
-      // Zalogowany uzytkownik na gorze, "Nieprzypisane" na koncu, reszta alfabetycznie.
-      const rank = (p: Person) => (p.id === me ? 0 : p.id === UNASSIGNED_ID ? 2 : 1);
+      // Zalogowany uzytkownik na gorze, tuz pod nim "Nieprzypisane" (najczestsze dwa
+      // cele przypisania stoja razem), dalej reszta alfabetycznie.
+      const rank = (p: Person) => (p.id === me ? 0 : p.id === UNASSIGNED_ID ? 1 : 2);
       return rank(a) - rank(b) || a.name.localeCompare(b.name, 'pl');
     });
   }, [tasks, me]);
@@ -3980,9 +4116,12 @@ export default function App() {
           : (people.find((p) => p.id === Number(value))?.name ?? `#${value}`);
       if (field === 'priority') return labels.priority[value] ?? value;
       if (field === 'status') return labels.status[value] ?? value;
+      if (field === 'epic')
+        return value === '0' ? 'Bez epika' : (epicNames.get(Number(value))?.name ?? `#${value}`);
+      if (field === 'tag' && value === NO_TAGS) return 'Bez tagów';
       return value; // etap i tag — wartoscia jest sama nazwa
     },
-    [people, labels],
+    [people, labels, epicNames],
   );
 
   /** Etap ma to samo id w kazdym sprincie — do ikony na chipie mapujemy po nazwie. */
@@ -4011,9 +4150,15 @@ export default function App() {
         const meta = stageIconByName.get(value);
         return <StageIcon progress={meta?.progress ?? null} color={meta?.color ?? null} />;
       }
-      return <span className="tag-dot" style={{ background: tagHue(value) }} />;
+      if (field === 'epic') {
+        const e = epicNames.get(Number(value));
+        const c = value === '0' ? 'var(--fg-dim)' : e?.color ? `#${e.color}` : tagHue(e?.name ?? value);
+        return <span className="tag-dot" style={{ background: c }} />;
+      }
+      const dotColor = value === NO_TAGS ? 'var(--fg-dim)' : tagHue(value);
+      return <span className="tag-dot" style={{ background: dotColor }} />;
     },
-    [people, stageIconByName],
+    [people, stageIconByName, epicNames],
   );
 
   /**
@@ -4028,7 +4173,11 @@ export default function App() {
         const c = stageIconByName.get(value)?.color;
         return c ? `#${c}` : 'var(--fg-dim)';
       }
-      if (field === 'tag') return tagHue(value);
+      if (field === 'tag') return value === NO_TAGS ? 'var(--fg-dim)' : tagHue(value);
+      if (field === 'epic') {
+        const e = epicNames.get(Number(value));
+        return value === '0' ? 'var(--fg-dim)' : e?.color ? `#${e.color}` : tagHue(e?.name ?? value);
+      }
       // Priorytet: trzy odrebne kolory (jak slupki w PriorityIcon) — wysoki pomaranczowy,
       // normalny akcent motywu, niski wyciszona szarosc.
       if (field === 'priority')
@@ -4039,7 +4188,7 @@ export default function App() {
             : 'color-mix(in srgb, var(--accent-green) 55%, white)';
       return 'var(--fg-dim)';
     },
-    [stageIconByName],
+    [stageIconByName, epicNames],
   );
 
   /**
@@ -4052,7 +4201,7 @@ export default function App() {
     (field: FilterField, v: string, i: number): ReactNode => {
       const color = filterValueColor(field, v);
       const hasIcon = field === 'status' || field === 'stage';
-      const tinted = hasIcon || field === 'tag' || field === 'priority';
+      const tinted = hasIcon || field === 'tag' || field === 'epic' || field === 'priority';
       // Priorytet ma WLASNY, kolorowy znak (slupki), wiec jego moneta jest tylko lekko
       // podbarwiona (28%), zeby slupki zostaly czytelne; reszta (pierscien/tag) 55%.
       const tintPct = field === 'priority' ? 28 : 55;
@@ -4071,7 +4220,7 @@ export default function App() {
             filterValueIcon('assignee', v)
           ) : hasIcon ? (
             filterValueIcon(field, v)
-          ) : field === 'tag' ? (
+          ) : field === 'tag' || field === 'epic' ? (
             <span className="filter-chip-tagcore" style={{ background: color }} />
           ) : (
             filterValueIcon('priority', v)
@@ -4127,13 +4276,32 @@ export default function App() {
       }
       return opts;
     }
-    return allTags.map(([tag, count]) => ({
-      value: tag,
-      label: tag,
-      hint: String(count),
-      icon: <span className="tag-dot" style={{ background: tagHue(tag) }} />,
-    }));
-  }, [filters, filterPick, people, labels, stages, sprintId, stageMeta, allTags]);
+    if (field === 'epic') {
+      const dot = (c: string) => <span className="tag-dot" style={{ background: c }} />;
+      return [
+        { value: '0', label: 'Bez epika', icon: dot('var(--fg-dim)') },
+        ...epics.map((e) => ({
+          value: String(e.id),
+          label: e.name,
+          icon: dot(e.color ? `#${e.color}` : tagHue(e.name)),
+        })),
+      ];
+    }
+    return [
+      // „Bez tagów" — zadania zupelnie bez etykiet (patrz NO_TAGS w matchCondition).
+      {
+        value: NO_TAGS,
+        label: 'Bez tagów',
+        icon: <span className="tag-dot" style={{ background: 'var(--fg-dim)' }} />,
+      },
+      ...allTags.map(([tag, count]) => ({
+        value: tag,
+        label: tag,
+        hint: String(count),
+        icon: <span className="tag-dot" style={{ background: tagHue(tag) }} />,
+      })),
+    ];
+  }, [filters, filterPick, people, labels, stages, sprintId, stageMeta, allTags, epics]);
 
   /*
    * Klucze pustych grup dla danej osi — tylko etap i status maja skonczony, znany
@@ -4996,8 +5164,14 @@ export default function App() {
     apply: (value: string) => unknown;
     /** Pozwala wpisac wartosc spoza listy (liczba) — dla story pointow i rodzica. */
     rawLabel?: (n: number) => string;
+    /** To samo, ale dowolnym tekstem — dla zakladania nowego tagu. */
+    freeLabel?: (text: string) => string;
     placeholder?: string;
     segments?: { key: string; label: string }[];
+    /** Tryb wielokrotny (tagi): klik przelacza pozycje i nie zamyka popovera. */
+    multi?: boolean;
+    selected?: string[];
+    onToggle?: (value: string) => void;
   } | null>(() => {
     if (!picker || !pickerTask) return null;
 
@@ -5068,6 +5242,59 @@ export default function App() {
         },
       };
     }
+    if (picker.kind === 'epic') {
+      /*
+       * Epik to nadrzedny temat scruma. "Bez epika" (0) odpina. Historycznych/obcych
+       * epikow nie ma jak wymyslic — pokazujemy te z grupy plus opcje odpiecia.
+       */
+      const dot = (c: string) => <span className="tag-dot" style={{ background: c }} />;
+      return {
+        title: epics.length ? 'Epik' : 'Projekt nie ma epików',
+        options: [
+          { value: '0', label: 'Bez epika', icon: dot('var(--fg-dim)') },
+          ...epics.map((e) => ({
+            value: String(e.id),
+            label: e.name,
+            icon: dot(e.color ? `#${e.color}` : tagHue(e.name)),
+          })),
+        ],
+        placeholder: 'Szukaj epika…',
+        apply: (value: string) => {
+          const eid = Number(value); // 0 = odepnij
+          return forEach({ epicId: eid || null }, (id) => updateEpic(id, eid), 'epik');
+        },
+      };
+    }
+    if (picker.kind === 'tags') {
+      /*
+       * Wielokrotny wybor: klik PRZELACZA tag i nie zamyka popovera, wiec da sie
+       * poprawic kilka naraz. Bitrix podmienia cala liste, wiec przy kazdym klikniecu
+       * wysylamy komplet nazw. Wpisanie nazwy spoza listy zaklada NOWY tag (freeLabel).
+       */
+      const current = pickerTask.tags;
+      const setTags = (next: string[]) =>
+        forEach({ tags: [...next].sort((a, b) => a.localeCompare(b, 'pl')) },
+          (id) => updateTags(id, next), 'tagi');
+      return {
+        title: 'Tagi',
+        options: allTags.map(([tag, count]) => ({
+          value: tag,
+          label: tag,
+          hint: String(count),
+          icon: <span className="tag-dot" style={{ background: tagHue(tag) }} />,
+        })),
+        placeholder: 'Szukaj lub wpisz nowy…',
+        freeLabel: (t) => `Nowy tag „${t}"`,
+        multi: true,
+        selected: current,
+        onToggle: (value: string) => {
+          const has = current.includes(value);
+          void setTags(has ? current.filter((t) => t !== value) : [...current, value]);
+        },
+        // W trybie multi Picker uzywa onToggle; `apply` zostaje dla zgodnosci typu.
+        apply: () => {},
+      };
+    }
     if (picker.kind === 'parent') {
       /*
        * Rodzicem moze byc DOWOLNE zadanie — nie tylko z biezacego widoku — wiec
@@ -5116,7 +5343,12 @@ export default function App() {
           // co przy nieprzypisanym zadaniu w wierszu; nie zdjecie/inicjal.
           photo: p.id === UNASSIGNED_ID ? undefined : p.photo,
           icon: p.id === UNASSIGNED_ID ? <Avatar name={null} /> : undefined,
-          divider: i > 0 && people[i - 1].id === me && p.id !== me,
+          // Kreska pod para „ja + Nieprzypisane" — oddziela skroty od reszty ludzi.
+          divider:
+            i > 0 &&
+            p.id !== me &&
+            p.id !== UNASSIGNED_ID &&
+            (people[i - 1].id === me || people[i - 1].id === UNASSIGNED_ID),
         })),
         apply: (value: string) => {
           const p = people.find((x) => x.id === Number(value));
@@ -5209,6 +5441,8 @@ export default function App() {
     labels,
     activeSprint,
     backlogId,
+    epics,
+    allTags,
     mutate,
     applyStage,
     reload,
@@ -5227,6 +5461,12 @@ export default function App() {
           ? activeSprint.name
           : `Sprint #${t.sprintId}`,
     [activeSprint],
+  );
+
+  /** Epik zadania jako obiekt {nazwa, kolor} — albo null, gdy bez epika/nie dociagniete. */
+  const epicOf = useCallback(
+    (t: Task): Epic | null => (t.epicId != null ? (epicNames.get(t.epicId) ?? null) : null),
+    [epicNames],
   );
 
   return (
@@ -5557,6 +5797,8 @@ export default function App() {
                       marked={marked.has(t.id)}
                       isNew={newIds.has(t.id)}
                       hasRelated={relatedIds.has(t.id)}
+                      epic={epicOf(t)}
+                      onEpic={toggleEpicFilter}
                       stage={t.stageId ? stageMeta.get(t.stageId) : undefined}
                       parentRef={parentOutside ? parentInfo(parentOutside) : undefined}
                       tagLimit={tagLimit}
@@ -5606,6 +5848,7 @@ export default function App() {
           task={openTask}
           stageName={(openTask.stageId && stageNames.get(openTask.stageId)) || 'Poza sprintem'}
           sprintName={sprintLabel(openTask)}
+          epic={epicOf(openTask)}
           labels={labels}
           me={me}
           portal={config?.portal ?? null}
@@ -5689,8 +5932,12 @@ export default function App() {
           title={pickerConfig.title}
           options={pickerConfig.options}
           rawLabel={pickerConfig.rawLabel}
+          freeLabel={pickerConfig.freeLabel}
           placeholder={pickerConfig.placeholder}
           segments={pickerConfig.segments}
+          multi={pickerConfig.multi}
+          selected={pickerConfig.selected}
+          onToggle={pickerConfig.onToggle}
           anchor={picker.anchor}
           onClose={() => setPicker(null)}
           onPick={(value) => {

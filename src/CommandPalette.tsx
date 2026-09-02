@@ -51,6 +51,7 @@ export function CommandPalette({
       <div className="palette" role="dialog" aria-label="Paleta poleceń">
         <input
           className="palette-input"
+          type="search"
           autoFocus
           value={query}
           placeholder="Szukaj zadania lub polecenia…"

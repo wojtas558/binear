@@ -20,6 +20,7 @@ const ALLOWED = new Set([
   'tasks.api.scrum.kanban.getStages',
   'tasks.api.scrum.sprint.list',
   'tasks.api.scrum.backlog.get', // id backlogu — bez niego nie ma jak wyjac zadania ze sprintu
+  'tasks.api.scrum.epic.list', // epiki grupy — nadrzedne tematy scruma (badge + filtr)
   'tasks.api.scrum.task.get', // scrumowa czesc zadania: entityId, storyPoints, kod nadany przez Bitrix
   'tasks.task.history.list', // dziennik zmian zadania — z niego liczymy czas w statusie "W toku"
   'task.item.getdependson', // zadania powiazane (DEPENDS_ON) — nowe tasks.task.* tego pola nie zna
