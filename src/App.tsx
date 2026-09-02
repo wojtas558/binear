@@ -92,6 +92,7 @@ import {
   ExternalIcon,
   ElsewhereIcon,
   TrashIcon,
+  PinIcon,
   tagHue,
 } from './icons';
 import { Board } from './Board';
@@ -280,6 +281,13 @@ interface Settings {
    * nie ma skonczonego zbioru grup do domalowania.
    */
   showEmpty: boolean;
+  /**
+   * PUSTE kategorie (kolumny/grupy), ktore mimo braku zadan maja byc widoczne —
+   * po NAZWIE, bo te same etapy maja rozne id w kazdym sprincie (patrz stageOrder).
+   * Zastepuje dawny globalny przelacznik „Puste kolumny": zamiast wszystko-albo-nic
+   * wybierasz w panelu, ktore konkretnie puste kategorie pokazac. Puste = zadna.
+   */
+  shownEmpty: string[];
   /** Szerokosc panelu szczegolow w px — ustawiana chwytem na jego lewej krawedzi. */
   detailWidth: number;
   /** Selektor zakresu jako karuzela (true) albo zwykla rozwijana lista (false). */
@@ -300,9 +308,17 @@ const DEFAULT_SETTINGS: Settings = {
   withUnassigned: false,
   showDone: false,
   showEmpty: false,
+  shownEmpty: [],
   detailWidth: 520,
   scopeCarousel: true,
 };
+
+/**
+ * Klucz przypietej kategorii = OS + nazwa. Sama nazwa by nie wystarczyla: „W toku"
+ * jest jednoczesnie etapem i statusem, wiec przypiecie na jednej osi zapalaloby
+ * te druga po przelaczeniu (pod)grupowania.
+ */
+const pinKey = (axis: GroupBy, name: string) => `${axis}:${name}`;
 
 function loadSettings(): Settings {
   try {
@@ -3381,6 +3397,7 @@ function ViewMenu({
   activeSprintName,
   scopes,
   scopeCounts,
+  columns,
   onClose,
   on,
 }: {
@@ -3404,6 +3421,8 @@ function ViewMenu({
   /** Zakresy, ktore maja sens w tym projekcie — bez sprintu zostaje sam "Wszystkie". */
   scopes: typeof SCOPES;
   scopeCounts: Record<Scope, number>;
+  /** Kategorie biezacego poziomu: czy maja teraz zadania i czy sa przypiete. */
+  columns: { name: string; present: boolean; pinned: boolean }[];
   onClose: () => void;
   on: {
     view: (v: ViewMode) => void;
@@ -3415,6 +3434,7 @@ function ViewMenu({
     unassigned: () => void;
     done: () => void;
     empty: () => void;
+    toggleColumn: (name: string) => void;
     carousel: () => void;
     clearFilters: () => void;
     reload: () => void;
@@ -3432,9 +3452,22 @@ function ViewMenu({
   const boardMode = state.view === 'board';
   const groupRow = `${rowClass}${boardMode ? ' ds-row-off' : ''}`;
 
+  // Panel „Kolumny/Grupy" wyskakuje jako OSOBNY panel obok (panel w panelu), nie sekcja.
+  const [colsOpen, setColsOpen] = useState(false);
+  // Nazwa mowi, po co ten panel jest: trzymac PUSTE kategorie widoczne mimo braku zadan.
+  const colTitle = boardMode
+    ? 'Puste kolumny'
+    : state.subGroup
+      ? 'Puste podgrupy'
+      : 'Puste grupy';
+
   // `height` sluzy tylko do tego, by panel nie wyjechal pod dolna krawedz ekranu.
   const left = Math.min(anchor.left, window.innerWidth - width - 12);
   const top = Math.min(anchor.top, Math.max(12, window.innerHeight - height - 12));
+
+  // Flyout siada z lewej strony menu; gdy tam ciasno — z prawej.
+  const flyW = 240;
+  const flyLeft = left - flyW - 8 >= 8 ? left - flyW - 8 : left + width + 8;
 
   const check = (label: string, on_: boolean, run: () => void, disabled = false) => (
     <label className={`ds-check${disabled ? ' ds-check-off' : ''}`}>
@@ -3554,10 +3587,22 @@ function ViewMenu({
         {check('Tylko moje', state.mine, on.mine)}
         {check('+ nieprzypisane', state.unassigned, on.unassigned, !state.mine)}
         {check('Pokaż zakończone', state.done, on.done)}
-        {check('Puste kolumny', state.empty, on.empty)}
         {check('Karuzela zakresu', state.carousel, on.carousel)}
 
         <div className="menu-sep" />
+        {/* „Kolumny/Grupy" otwiera OSOBNY panel obok — w dolnej sekcji, obok akcji. */}
+        {columns.length > 0 && (
+          <button
+            className={`menu-item${colsOpen ? ' menu-item-on' : ''}`}
+            onClick={() => setColsOpen((o) => !o)}
+          >
+            <span className="menu-check" />
+            <span className="menu-label">{colTitle}</span>
+            <span className="menu-flyarrow">
+              <ChevronIcon open={colsOpen} />
+            </span>
+          </button>
+        )}
         {state.filtersOn && (
           <button className="menu-item" onClick={() => { onClose(); on.clearFilters(); }}>
             <span className="menu-check" />
@@ -3576,6 +3621,38 @@ function ViewMenu({
           <kbd>K</kbd>
         </button>
       </div>
+
+      {/* Panel w panelu — osobny, obok menu widoku; checkbox na kazda kolumne/grupe. */}
+      {colsOpen && columns.length > 0 && (
+        <div className="menu view-cols-flyout" style={{ left: flyLeft, top, width: flyW }}>
+          <div className="ds-colhead">{colTitle}</div>
+          <div className="ds-colhint">Przypnij, żeby została widoczna także pusta.</div>
+          <div className="ds-collist">
+            {columns.map((c) => {
+              const pinned = c.pinned;
+              return (
+                <button
+                  key={c.name}
+                  className={`ds-pinrow${pinned ? ' ds-pinrow-on' : ''}`}
+                  title={
+                    pinned
+                      ? 'Przypięta — zostaje na widoku, nawet gdy pusta'
+                      : 'Nieprzypięta — zniknie, gdy nie ma zadań'
+                  }
+                  onClick={() => on.toggleColumn(c.name)}
+                >
+                  <span className="ds-pin">
+                    <PinIcon filled={pinned} />
+                  </span>
+                  <span className="ds-pinname">{c.name}</span>
+                  {/* Kolumna z zadaniami i tak jest widoczna — pinezka liczy sie dopiero przy zerze. */}
+                  {!c.present && <span className="ds-pinempty">pusta</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -3872,6 +3949,7 @@ export default function App() {
   const [withUnassigned, setWithUnassigned] = useState(saved.withUnassigned);
   const [showDone, setShowDone] = useState(saved.showDone);
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
+  const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
   const [scopeCarousel, setScopeCarousel] = useState(saved.scopeCarousel);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
@@ -4312,9 +4390,10 @@ export default function App() {
    * Kolumna "zakonczone" (etap FINISH albo status zamkniety) podlega WYLACZNIE
    * ustawieniu "Pokaż zakończone", nie "Puste kolumny".
    */
-  const emptyKeysFor = useCallback(
+  /** Wszystkie kategorie osi, ktore MOGA istniec bez zadan — kandydaci do panelu „Puste". */
+  const allEmptyKeys = useCallback(
     (axis: GroupBy | null): string[] => {
-      if (!showEmpty || !axis) return [];
+      if (!axis) return [];
       if (axis === 'stage')
         return stages
           .filter((s) => s.sprintId === sprintId)
@@ -4324,7 +4403,17 @@ export default function App() {
         return Object.keys(labels.status).filter((k) => showDone || !CLOSED_STATUSES.has(k));
       return [];
     },
-    [showEmpty, stages, sprintId, showDone, labels.status],
+    [stages, sprintId, showDone, labels.status],
+  );
+
+  /**
+   * Puste grupy, ktore realnie domalowujemy: tylko te ZAZNACZONE w panelu „Puste".
+   * Dawniej rzadzil tym jeden przelacznik (wszystko albo nic) — teraz wybor jest per kategoria.
+   */
+  const emptyKeysFor = useCallback(
+    (axis: GroupBy | null): string[] =>
+      axis ? allEmptyKeys(axis).filter((k) => shownEmpty.includes(pinKey(axis, k))) : [],
+    [allEmptyKeys, shownEmpty],
   );
 
   const groups = useMemo(
@@ -4490,6 +4579,7 @@ export default function App() {
       withUnassigned,
       showDone,
       showEmpty,
+      shownEmpty,
       detailWidth,
       scopeCarousel,
     };
@@ -4498,7 +4588,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, showEmpty, detailWidth, scopeCarousel]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, showEmpty, shownEmpty, detailWidth, scopeCarousel]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -4964,6 +5054,52 @@ export default function App() {
     [stages, sprintId],
   );
 
+  /**
+   * PUSTE kategorie do panelu — te, ktore w biezacym widoku nie maja ani jednego
+   * zadania, wiec bez zaznaczenia w ogole by sie nie pokazaly. Poziom bierzemy
+   * najglebszy: tablica -> etapy, lista z podgrupowaniem -> os PODGRUPY, inaczej
+   * os grupowania. Kategorie z zadaniami widac zawsze — nie ma ich na tej liscie.
+   */
+  /** Os, ktorej dotyczy panel: tablica -> etapy, lista -> podgrupa albo grupa. */
+  const colAxis: GroupBy | null = viewMode === 'board' ? 'stage' : (subGroupBy ?? groupBy);
+
+  /** Przypnij/odepnij kategorie biezacej osi — klucz niesie os, wiec osie sie nie mieszaja. */
+  const toggleColumn = useCallback(
+    (name: string) => {
+      if (!colAxis) return;
+      const k = pinKey(colAxis, name);
+      setShownEmpty((s) => (s.includes(k) ? s.filter((n) => n !== k) : [...s, k]));
+    },
+    [colAxis],
+  );
+
+  /** Nazwy etapow przypietych na tablicy — Board dostaje juz gotowa liste. */
+  const pinnedStages = useMemo(
+    () => allEmptyKeys('stage').filter((n) => shownEmpty.includes(pinKey('stage', n))),
+    [allEmptyKeys, shownEmpty],
+  );
+
+  const categories = useMemo(() => {
+    const axis = colAxis;
+    if (!axis) return [] as { name: string; present: boolean; pinned: boolean }[];
+    /*
+     * Tylko kategorie, ktore MOGA istniec bez zadan (realne etapy/statusy) — bo panel
+     * sluzy do trzymania PUSTYCH kolumn na widoku. Twory pochodne z danych, jak
+     * „Poza sprintem" (etykieta zastepcza dla zadan bez etapu) czy konkretna osoba,
+     * nie daja sie wyliczyc przy zerze, wiec ich tu nie ma. Kubelek daje kolejnosc
+     * procesu i informacje, czy kategoria ma teraz zadania.
+     */
+    const keys = new Set(allEmptyKeys(axis));
+    if (!keys.size) return [] as { name: string; present: boolean; pinned: boolean }[];
+    return bucket(filtered, axis, stageNames, stageOrder, labels.status, me, sort, allEmptyKeys(axis))
+      .filter((g) => keys.has(g.label))
+      .map((g) => ({
+        name: g.label,
+        present: g.tasks.length > 0,
+        pinned: shownEmpty.includes(pinKey(axis, g.label)),
+      }));
+  }, [colAxis, filtered, stageNames, stageOrder, labels.status, me, sort, allEmptyKeys, shownEmpty]);
+
   /*
    * Karty na tablicy sortujemy tym samym porzadkiem co wiersze w liscie — kolumna
    * pozostaje etapem, ale wewnatrz niej kolejnosc idzie za ustawieniem Sortowanie
@@ -5074,12 +5210,6 @@ export default function App() {
         section: 'Filtry',
         label: showDone ? 'Ukryj zakończone' : 'Pokaż zakończone',
         run: () => setShowDone((v) => !v),
-      },
-      {
-        id: 'toggle-empty',
-        section: 'Filtry',
-        label: showEmpty ? 'Ukryj puste kolumny' : 'Pokaż puste kolumny',
-        run: () => setShowEmpty((v) => !v),
       },
       {
         id: 'reload',
@@ -5720,8 +5850,8 @@ export default function App() {
           <Board
             tasks={boardTasks}
             stages={boardStages}
-            showEmpty={showEmpty}
             showDone={showDone}
+            shownEmpty={pinnedStages}
             pending={pending}
             activeId={flat[cursor]?.id ?? null}
             openId={openId}
@@ -6071,6 +6201,7 @@ export default function App() {
           activeSprintName={activeSprint?.name ?? null}
           scopes={scopes}
           scopeCounts={scopeCounts}
+          columns={categories}
           onClose={() => setViewMenu(null)}
           on={{
             view: setViewMode,
@@ -6086,6 +6217,7 @@ export default function App() {
             unassigned: () => setWithUnassigned((v) => !v),
             done: () => setShowDone((v) => !v),
             empty: () => setShowEmpty((v) => !v),
+            toggleColumn,
             carousel: () => setScopeCarousel((v) => !v),
             clearFilters: () => setFilters(EMPTY_FILTERS),
             reload: () => void reload(),

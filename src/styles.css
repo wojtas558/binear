@@ -942,6 +942,40 @@ kbd {
   color: var(--fg);
 }
 
+/* „Kolumny/Grupy" jako osobny panel (flyout) obok menu widoku — panel w panelu. */
+.view-cols-flyout {
+  z-index: 22;
+  padding: var(--s2);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
+/* Strzalka po prawej pozycji menu, ktora otwiera flyout. */
+.menu-flyarrow {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--fg-dim);
+}
+
+.menu-item-on {
+  background: var(--bg-active);
+}
+
+/* Panel „Kolumny" w menu widoku — naglowek + lista przelacznikow kolumn tablicy. */
+.ds-colhead {
+  padding: var(--s1) var(--s2) 2px;
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+
+.ds-collist {
+  max-height: 168px;
+  overflow-y: auto;
+}
+
 /*
  * Pola szukania sa `type=search` (zeby menedzery hasel nie brały ich za login),
  * ale natywnego krzyzyka WebKita nie chcemy — mamy wlasne czyszczenie i klawiature.
@@ -959,6 +993,61 @@ input[type='search']::-webkit-search-decoration {
   align-items: center;
   gap: 4px;
   min-width: 0;
+}
+
+.ds-colhint {
+  padding: 0 var(--s2) var(--s1);
+  font-size: var(--t-micro);
+  line-height: 1.35;
+  color: var(--fg-dim);
+}
+
+/* Wiersz z pinezka — klik przypina kolumne, zeby przetrwala na widoku przy zerze. */
+.ds-pinrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--s2);
+  text-align: left;
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+}
+
+.ds-pinrow:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+/* Przypieta: pinezka w akcencie, nazwa pelnym kolorem. */
+.ds-pinrow-on {
+  color: var(--fg);
+}
+
+.ds-pin {
+  display: inline-flex;
+  flex: 0 0 14px;
+  color: var(--fg-dim);
+}
+
+.ds-pinrow-on .ds-pin {
+  color: var(--accent);
+}
+
+.ds-pinname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Znacznik „pusta" — ta kolumna zniknie, jesli jej nie przypniesz. */
+.ds-pinempty {
+  flex: 0 0 auto;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
 }
 
 /* Wlasny checkbox — natywny (kwadrat OS, przegladarkowy blekit) odstawal od reszty

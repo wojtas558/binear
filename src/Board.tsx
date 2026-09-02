@@ -20,8 +20,8 @@ const NO_STAGE = -1;
 export function Board({
   tasks,
   stages,
-  showEmpty,
   showDone,
+  shownEmpty,
   pending,
   activeId,
   openId,
@@ -33,8 +33,8 @@ export function Board({
 }: {
   tasks: Task[];
   stages: Stage[];
-  /** Gdy false, kolumna bez kart znika — patrz Settings.showEmpty. */
-  showEmpty: boolean;
+  /** PUSTE kolumny (po nazwie etapu), ktore mimo braku kart maja byc widoczne. */
+  shownEmpty: string[];
   /** Kolumna konca (etap typu FINISH) podlega temu, nie `showEmpty`. */
   showDone: boolean;
   pending: Set<number>;
@@ -58,10 +58,10 @@ export function Board({
   const columns = [...stages]
     .sort((a, b) => a.sort - b.sort)
     .filter((s) => {
-      if ((byStage.get(s.id)?.length ?? 0) > 0) return true; // sa karty — zawsze
-      // Pusta kolumna: pokazuj tylko przy "Puste kolumny", a kolumne konca
-      // (FINISH) dodatkowo tylko przy "Pokaż zakończone".
-      return showEmpty && (showDone || s.type !== 'FINISH');
+      if ((byStage.get(s.id)?.length ?? 0) > 0) return true; // sa karty — zawsze widoczna
+      // Pusta kolumna: tylko gdy ZAZNACZONA w panelu; kolumna konca (FINISH)
+      // dodatkowo tylko przy „Pokaż zakończone".
+      return shownEmpty.includes(s.name) && (showDone || s.type !== 'FINISH');
     });
   const orphans = byStage.get(NO_STAGE) ?? [];
 
