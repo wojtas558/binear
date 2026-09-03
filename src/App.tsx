@@ -101,6 +101,7 @@ import {
   shortDate,
   isUnassigned,
   setUnassignedId,
+  sumPoints,
   UNASSIGNED_ID,
   UNASSIGNED_LABEL,
 } from './taskView';
@@ -1462,6 +1463,20 @@ function Picker({
  * Rozwijane „Widoki" w pasku: lista zapisanych widokow (klik = zastosuj, ✓ = aktywny,
  * ✕ = usun) plus pole „Zapisz bieżący widok…". Pozycjonowanie jak w `Picker`.
  */
+/**
+ * Suma story pointow w naglowku grupy i podgrupy — ten sam zeton co w kolumnie
+ * tablicy (parytet widokow). Nic nie rysuje, gdy w kubelku nie ma oszacowan.
+ */
+function GroupPoints({ tasks }: { tasks: Task[] }) {
+  const sp = sumPoints(tasks);
+  if (sp === null) return null;
+  return (
+    <span className="head-sp" title="Suma story points w grupie">
+      {sp} SP
+    </span>
+  );
+}
+
 function ViewsMenu({
   anchor,
   views,
@@ -1470,6 +1485,10 @@ function ViewsMenu({
   onDelete,
   onSave,
   onClose,
+  autoFocusInput = true,
+  hover = false,
+  onHoverIn,
+  onHoverOut,
 }: {
   anchor: Anchor;
   views: SavedView[];
@@ -1478,6 +1497,14 @@ function ViewsMenu({
   onDelete: (id: string) => void;
   onSave: (name: string) => void;
   onClose: () => void;
+  /** Menu otwarte najechaniem NIE zabiera focusu — inaczej kradnie klawiature mimochodem. */
+  autoFocusInput?: boolean;
+  /** Otwarte najechaniem — bez tla na caly ekran (patrz nizej). */
+  hover?: boolean;
+  /** Kursor wrocil nad menu — odwolaj zaplanowane zamkniecie. */
+  onHoverIn?: () => void;
+  /** Kursor zszedl z menu — zaplanuj zamkniecie. */
+  onHoverOut?: () => void;
 }) {
   const [name, setName] = useState('');
 
@@ -1500,8 +1527,19 @@ function ViewsMenu({
 
   return (
     <>
-      <div className="picker-backdrop" onClick={onClose} />
-      <div className="picker" style={{ left, top, width }}>
+      {/*
+        Tlo TYLKO przy otwarciu klikiem. Otwarte najechaniem nie moze go miec: tlo
+        na caly ekran natychmiast przykrywa przycisk, przegladarka odpala na nim
+        `mouseleave` i menu zamyka samo siebie ulamek sekundy po otwarciu.
+        Wersja hover zamyka sie zjechaniem kursora, wiec lapacz klikniec jest zbedny.
+      */}
+      {!hover && <div className="picker-backdrop" onClick={onClose} />}
+      <div
+        className="picker"
+        style={{ left, top, width }}
+        onMouseEnter={onHoverIn}
+        onMouseLeave={onHoverOut}
+      >
         <div className="picker-title">Widoki</div>
         <div
           className="view-save"
@@ -1509,7 +1547,7 @@ function ViewsMenu({
         >
           <input
             className="picker-input"
-            autoFocus={!alreadySaved}
+            autoFocus={autoFocusInput && !alreadySaved}
             disabled={alreadySaved}
             value={name}
             placeholder="Zapisz bieżący widok…"
@@ -3929,7 +3967,36 @@ export default function App() {
   const [opMenu, setOpMenu] = useState<{ condId: string; anchor: Anchor } | null>(null);
   /** Zapisane widoki (globalne, localStorage) i otwarte menu „Widoki". */
   const [views, setViews] = useState<SavedView[]>(loadViews);
-  const [viewsMenu, setViewsMenu] = useState<Anchor | null>(null);
+  /** `hover: true` = menu wyskoczylo samo, bez klikniecia (nie kradnie wtedy focusu). */
+  const [viewsMenu, setViewsMenu] = useState<(Anchor & { hover?: boolean }) | null>(null);
+  /*
+   * Widoki otwieraja sie na NAJECHANIE, ale z dwoma opoznieniami, bez ktorych takie
+   * menu jest nie do zycia: krotka zwloka przed otwarciem (przejazd myszy obok
+   * przycisku niczego nie wyskakuje) i dluzsza przed zamknieciem (da sie zjechac
+   * z przycisku na menu po skosie, nie tracac go po drodze).
+   */
+  const viewsTimer = useRef<number | null>(null);
+  const clearViewsTimer = useCallback(() => {
+    if (viewsTimer.current !== null) {
+      clearTimeout(viewsTimer.current);
+      viewsTimer.current = null;
+    }
+  }, []);
+  const openViewsSoon = useCallback(
+    (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      const anchor = { left: r.left - 32, top: r.bottom + 4, bottom: r.bottom + 4, hover: true };
+      clearViewsTimer();
+      viewsTimer.current = window.setTimeout(() => setViewsMenu(anchor), 140);
+    },
+    [clearViewsTimer],
+  );
+  const closeViewsSoon = useCallback(() => {
+    clearViewsTimer();
+    viewsTimer.current = window.setTimeout(() => setViewsMenu(null), 260);
+  }, [clearViewsTimer]);
+  // Timer nie moze przezyc odmontowania — inaczej setState poleci w pustke.
+  useEffect(() => clearViewsTimer, [clearViewsTimer]);
   const [viewMode, setViewMode] = useState<ViewMode>(saved.viewMode);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -4317,7 +4384,14 @@ export default function App() {
     const field = filters.find((c) => c.id === filterPick?.condId)?.field;
     if (!field) return [];
     if (field === 'assignee')
-      return people.map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }));
+      return people.map((p) => ({
+        value: String(p.id),
+        label: p.name,
+        // „Nieprzypisane" to konto-zaslepka: pusty awatar, nie inicjal — tak samo jak
+        // w wierszu listy, na karcie i w pickerze osoby.
+        photo: p.id === UNASSIGNED_ID ? undefined : p.photo,
+        icon: p.id === UNASSIGNED_ID ? <Avatar name={null} /> : undefined,
+      }));
     if (field === 'priority')
       return Object.entries(labels.priority).map(([value, label]) => ({
         value,
@@ -5711,7 +5785,11 @@ export default function App() {
           <button
             className="views-btn"
             title="Zapisane widoki"
+            onMouseEnter={(e) => openViewsSoon(e.currentTarget)}
+            onMouseLeave={closeViewsSoon}
             onClick={(e) => {
+              // Klik dziala jak dawniej: otwiera od razu (i ustawia focus w polu nazwy).
+              clearViewsTimer();
               const r = e.currentTarget.getBoundingClientRect();
               setViewsMenu({ left: r.left - 32, top: r.bottom + 4, bottom: r.bottom + 4 });
             }}
@@ -5871,6 +5949,7 @@ export default function App() {
                   <ChevronIcon open={!isCollapsed} />
                   <span className="group-label">{g.label}</span>
                   <span className="group-count">{g.tasks.length}</span>
+                  <GroupPoints tasks={g.tasks} />
                 </div>
                 {!isCollapsed &&
                   g.subs.map((sub) => {
@@ -5894,6 +5973,7 @@ export default function App() {
                             <ChevronIcon open={!subCollapsed} />
                             <span className="subgroup-label">{sub.label}</span>
                             <span className="group-count">{sub.tasks.length}</span>
+                            <GroupPoints tasks={sub.tasks} />
                           </div>
                         )}
                         {!subCollapsed &&
@@ -6078,7 +6158,15 @@ export default function App() {
           onApply={applyView}
           onDelete={deleteView}
           onSave={saveView}
-          onClose={() => setViewsMenu(null)}
+          /* Otwarte najechaniem: nie zabieramy focusu i pilnujemy kursora nad menu. */
+          autoFocusInput={!viewsMenu.hover}
+          hover={!!viewsMenu.hover}
+          onHoverIn={clearViewsTimer}
+          onHoverOut={closeViewsSoon}
+          onClose={() => {
+            clearViewsTimer();
+            setViewsMenu(null);
+          }}
         />
       )}
 

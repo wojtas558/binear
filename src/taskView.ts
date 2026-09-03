@@ -37,3 +37,20 @@ export const UNASSIGNED_LABEL = 'Nieprzypisane';
 
 export const isUnassigned = (responsibleId: number | null) =>
   responsibleId === null || responsibleId === UNASSIGNED_ID;
+
+/*
+ * Suma story pointow — naglowek grupy, podgrupy i kolumny tablicy pokazuje ja
+ * obok liczby zadan (patrz issue #2). `null` zamiast zera, gdy ZADNE zadanie w
+ * kubelku nie ma oszacowania: "0 SP" klamie, bo sugeruje oszacowane na zero,
+ * a nie nieoszacowane. Zadania bez pointow po prostu nie wchodza do sumy.
+ */
+export function sumPoints(tasks: { storyPoints: number | null }[]): number | null {
+  let sum = 0;
+  let any = false;
+  for (const t of tasks) {
+    if (t.storyPoints == null) continue;
+    sum += t.storyPoints;
+    any = true;
+  }
+  return any ? sum : null;
+}

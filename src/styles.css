@@ -1789,6 +1789,25 @@ input[type='search']::-webkit-search-decoration {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Suma story pointow w naglowku grupy, podgrupy i kolumny tablicy. Cichszy brat
+ * `.row-sp`: ten sam ksztalt i ta sama tabularna cyfra, zeby "SP" czytalo sie
+ * wszedzie tak samo, ale bez wypelnienia — naglowek ma zostac naglowkiem, a nie
+ * konkurowac o uwage z zetonami na kartach pod nim.
+ */
+.head-sp {
+  flex: 0 0 auto;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--s1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
 .chev {
   flex: 0 0 12px;
   transition: transform 120ms ease;
