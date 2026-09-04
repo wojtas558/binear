@@ -1,5 +1,4 @@
 import {
-  Fragment,
   forwardRef,
   useCallback,
   useEffect,
@@ -78,6 +77,7 @@ import {
   StatusIcon,
   ListIcon,
   BoardIcon,
+  ChartIcon,
   DirIcon,
   RefreshIcon,
   ViewsIcon,
@@ -105,7 +105,9 @@ import {
   UNASSIGNED_ID,
   UNASSIGNED_LABEL,
 } from './taskView';
+import { Picker, type Anchor, type Option } from './Picker';
 import { Board } from './Board';
+import { Dashboard } from './Dashboard';
 import { CommandPalette, type Command } from './CommandPalette';
 import { applyTheme, loadTheme, watchSystemTheme, THEMES, type Theme } from './theme';
 import { applyFont, loadFont, FONTS, type Font } from './font';
@@ -147,7 +149,7 @@ type PickerKind =
   | 'parent'
   | 'epic'
   | 'tags';
-type ViewMode = 'list' | 'board';
+type ViewMode = 'list' | 'board' | 'charts';
 
 /*
  * Filtry w stylu Linear: pasek nad lista, do ktorego dokladasz warunki. Kazdy
@@ -300,8 +302,6 @@ interface Settings {
   shownEmpty: string[];
   /** Szerokosc panelu szczegolow w px — ustawiana chwytem na jego lewej krawedzi. */
   detailWidth: number;
-  /** Selektor zakresu jako karuzela (true) albo zwykla rozwijana lista (false). */
-  scopeCarousel: boolean;
 }
 
 const DETAIL_MIN = 360;
@@ -320,7 +320,6 @@ const DEFAULT_SETTINGS: Settings = {
   showEmpty: false,
   shownEmpty: [],
   detailWidth: 520,
-  scopeCarousel: true,
 };
 
 /**
@@ -362,6 +361,12 @@ interface SavedView {
   withUnassigned: boolean;
   showDone: boolean;
   showEmpty: boolean;
+  /**
+   * Zapisywany dla ZGODNOSCI ze starymi widokami w localStorage, ale juz NIE
+   * uzywany: widok opisuje, CO jest na ekranie, a lista/tablica/wykresy to tylko
+   * sposob rysowania tego samego. Zastosowanie widoku nie przerzuca wiec trybu,
+   * a dwa widoki rozniace sie wylacznie trybem to po prostu ten sam widok.
+   */
   viewMode: ViewMode;
 }
 
@@ -393,7 +398,16 @@ function viewFingerprint(v: Omit<SavedView, 'id' | 'name'>): string {
     withUnassigned: v.withUnassigned,
     showDone: v.showDone,
     showEmpty: v.showEmpty,
-    viewMode: v.viewMode,
+    /*
+     * `viewMode` CELOWO nie wchodzi do odcisku. Widok zapisany opisuje, CO jest
+     * na ekranie (filtry, grupowanie, sortowanie, zakres) — a lista, tablica i
+     * wykresy to tylko sposob rysowania tego samego zestawu. Gdy `viewMode`
+     * liczyl sie do tozsamosci, przelaczenie z listy na tablice przestawialo
+     * pasek na "Własny", chociaz nic w doborze zadan sie nie zmienilo.
+     *
+     * Zapisany widok NADAL pamieta swoj tryb i przywraca go przy zastosowaniu —
+     * chodzi wylacznie o to, ze pozniejsza zmiana trybu nie unieważnia widoku.
+     */
   });
 }
 
@@ -438,12 +452,6 @@ const rawProjectLabel = (n: number) => `Otwórz projekt #${n}`;
 const PROJECT_ROLE: Record<string, string> = { A: 'właściciel', E: 'moderator' };
 
 /** Punkt zaczepienia popovera — wiersz listy albo miejsce klikniecia prawym. */
-interface Anchor {
-  left: number;
-  top: number;
-  bottom: number;
-}
-
 /*
  * "Status" i "Etap" to w Bitriksie DWA NIEZALEZNE pola i latwo je pomylic:
  *  - Status  = wbudowane pole zadania (W oczekiwaniu / W toku / Zakonczone / …).
@@ -1278,185 +1286,6 @@ function dateTime(iso: string | null): string {
   return `${shortDate(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-// ─── Picker ──────────────────────────────────────────────────────────────────
-
-interface Option {
-  value: string;
-  label: string;
-  icon?: ReactNode;
-  photo?: string | null;
-  /** Dopisek po prawej — dzis typ projektu ("scrum", "archiwum"). */
-  hint?: string;
-  /** Kreska NAD ta pozycja — dzis oddziela zalogowanego uzytkownika od reszty osob. */
-  divider?: boolean;
-  /** Klucz zakladki (segments) w Pickerze — dzis "sprint" / "outside" dla rodzica. */
-  group?: string;
-}
-
-function Picker({
-  title,
-  options,
-  anchor,
-  emptyLabel,
-  rawLabel,
-  freeLabel,
-  placeholder = 'Filtruj…',
-  segments,
-  multi = false,
-  selected,
-  onToggle,
-  onPick,
-  onClose,
-}: {
-  title: string;
-  options: Option[];
-  anchor: Anchor;
-  /** Co pokazac, gdy nie ma z czego wybierac. Domyslnie zwykle "Brak opcji". */
-  emptyLabel?: string;
-  /**
-   * Pozwala oddac wartosc, ktorej nie ma na liscie, o ile wpisano sam numer.
-   * Przy projektach to jedyne wyjscie, gdy webhook nie widzi grup roboczych —
-   * identyfikator grupy stoi w adresie Bitriksa (`/workgroups/group/451/`).
-   */
-  rawLabel?: (n: number) => string;
-  /**
-   * Jak `rawLabel`, ale dla DOWOLNEGO tekstu — pozwala oddac wartosc, ktorej nie ma
-   * na liscie (dzis: zalozenie nowego tagu wprost z pola szukania).
-   */
-  freeLabel?: (text: string) => string;
-  /** Podpowiedz w polu; przy story pointach to nie "Filtruj", tylko "wpisz liczbę". */
-  placeholder?: string;
-  /** Zakladki filtrujace opcje po `Option.group`; pusty klucz = pokaz wszystkie. */
-  segments?: { key: string; label: string }[];
-  /**
-   * Tryb wielokrotny (filtry): klik/Enter PRZELACZA pozycje i NIE zamyka popovera —
-   * mozna zaznaczyc kilka wartosci naraz. Zamyka dopiero tlo albo Escape.
-   * Zaznaczone dostaja ptaszek po prawej. Bez tego picker dziala po staremu:
-   * jeden wybor i zamkniecie.
-   */
-  multi?: boolean;
-  selected?: string[];
-  onToggle?: (value: string) => void;
-  onPick: (value: string) => void;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [cursor, setCursor] = useState(0);
-  const [seg, setSeg] = useState(segments?.[0]?.key ?? '');
-  const sel = useMemo(() => new Set(selected ?? []), [selected]);
-  /*
-   * Bezpiecznik otwarcia: menu wyskakuje TUZ pod klikanym przyciskiem, wiec szybki
-   * „doklik" (ten sam ruch, ktory otworzyl menu) trafial w pierwsza pozycje, zanim
-   * kursor w ogole ruszyl w strone celu — stad „klikam Tag, wychodzi Osoba". Przez
-   * pierwsze ~140 ms po otwarciu ignorujemy klik w pozycje; swiadomy, wycelowany klik
-   * i tak trwa dluzej, wiec go nie blokujemy. (Klawiatura/Enter dziala od razu.)
-   */
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setArmed(true), 140);
-    return () => clearTimeout(t);
-  }, []);
-  /** W trybie wielokrotnym wybor przelacza pozycje i zostawia popover otwarty. */
-  const choose = (value: string) => (multi ? onToggle?.(value) : onPick(value));
-
-  const shown = useMemo(() => {
-    // Filtr zakladki: pusty klucz nie zawęża; opcje bez `group` (np. "—") widac zawsze.
-    const bySeg = seg ? options.filter((o) => o.group == null || o.group === seg) : options;
-
-    const q = query.trim().toLowerCase();
-    const hits = q ? bySeg.filter((o) => o.label.toLowerCase().includes(q)) : bySeg;
-    const typed = query.trim();
-    const withRaw =
-      rawLabel && /^\d+$/.test(q) && Number(q) > 0 && !hits.some((o) => o.value === q)
-        ? [{ value: q, label: rawLabel(Number(q)) }, ...hits]
-        : // Dowolny tekst spoza listy — np. zupelnie nowy tag zakladany w locie.
-          freeLabel && typed && !bySeg.some((o) => o.label.toLowerCase() === q)
-          ? [{ value: typed, label: freeLabel(typed) }, ...hits]
-          : hits;
-
-    // Nie renderujemy setek pozycji naraz — reszta jest osiagalna przez szukanie.
-    return withRaw.slice(0, 200);
-  }, [options, query, rawLabel, freeLabel, seg]);
-
-  useEffect(() => setCursor(0), [query, seg]);
-
-  // Popover nie moze wyjechac poza ekran przy wierszach na dole listy.
-  const width = 260;
-  const height = Math.min(340, 92 + shown.length * 30 + (segments ? 32 : 0));
-  const left = Math.min(anchor.left + 32, window.innerWidth - width - 12);
-  const top =
-    anchor.bottom + height > window.innerHeight ? Math.max(12, anchor.top - height - 4) : anchor.bottom + 4;
-
-  return (
-    <>
-      <div className="picker-backdrop" onClick={onClose} />
-      <div className="picker" style={{ left, top, width }}>
-        <div className="picker-title">{title}</div>
-        {segments && (
-          <div className="picker-segments">
-            {segments.map((s) => (
-              <button
-                key={s.key}
-                className={`segment${seg === s.key ? ' segment-active' : ''}`}
-                onClick={() => setSeg(s.key)}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-        )}
-        <input
-          className="picker-input"
-          /* type=search — inaczej menedzery hasel biora to pole za login i wchodza z podpowiedzia. */
-          type="search"
-          autoFocus
-          value={query}
-          placeholder={placeholder}
-          spellCheck={false}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              onClose();
-            } else if (e.key === 'ArrowDown') {
-              e.preventDefault();
-              setCursor((c) => Math.min(c + 1, shown.length - 1));
-            } else if (e.key === 'ArrowUp') {
-              e.preventDefault();
-              setCursor((c) => Math.max(c - 1, 0));
-            } else if (e.key === 'Enter') {
-              e.preventDefault();
-              const opt = shown[cursor];
-              if (opt) choose(opt.value);
-            }
-          }}
-        />
-        <div className="picker-list">
-          {shown.length === 0 && <div className="picker-empty">{emptyLabel ?? 'Brak opcji'}</div>}
-          {shown.map((o, i) => (
-            <Fragment key={o.value}>
-              {/* Kreska tylko MIEDZY pozycjami — na samej gorze listy nie ma czego dzielic. */}
-              {o.divider && i > 0 && <div className="picker-sep" />}
-              <button
-                className={`picker-item${i === cursor ? ' picker-item-active' : ''}${
-                  multi && sel.has(o.value) ? ' picker-item-on' : ''
-                }`}
-                onMouseEnter={() => setCursor(i)}
-                onClick={() => armed && choose(o.value)}
-              >
-                {o.photo !== undefined ? <Avatar name={o.label} photo={o.photo} /> : o.icon}
-                <span className="picker-label">{o.label}</span>
-                {o.hint && <span className="palette-hint">{o.hint}</span>}
-                {multi && <span className="picker-check">{sel.has(o.value) && <CheckIcon />}</span>}
-              </button>
-            </Fragment>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-}
-
 // ─── Widoki (zapisane) ───────────────────────────────────────────────────────
 
 /**
@@ -1597,58 +1426,32 @@ function ViewsMenu({
 // ─── Wybor zakresu (Sprint / Poza / Wszystkie) ───────────────────────────────
 
 /**
- * Selektor zakresu jako pionowa KARUZELA, w ktorej WYBRANA pozycja JEST przyciskiem
- * (zostaje w pasku). Po otwarciu poprzednia pozycja wisi NAD przyciskiem, a nastepna
- * POD nim — przygaszone. Kolko myszy obraca kolo (jeden krok na „zabkowanie"), tez na
- * zwinietym przycisku. Klik w sasiada wybiera go (staje sie przyciskiem-srodkiem).
+ * Selektor zakresu (Sprint / Poza sprintem / Wszystkie) — zwykla lista rozwijana:
+ * przycisk z biezaca wartoscia, pod nim opcje z ptaszkiem przy wybranej.
+ *
+ * Byla tu kiedys karuzela (sasiedzi nad i pod przyciskiem, obracana kolkiem myszy).
+ * Wyleciala: kolko kradlo przewijanie strony, a "co jest teraz wybrane" trzeba bylo
+ * wyczytac z ulozenia elementow zamiast z ptaszka.
  */
 function ScopePicker({
   scope,
   scopes,
   counts,
   activeSprint,
-  carousel,
   onPick,
 }: {
   scope: Scope;
   scopes: typeof SCOPES;
   counts: Record<Scope, number>;
   activeSprint: { name: string; dateStart: string | null; dateEnd: string | null } | null;
-  /** true = karuzela (sasiedzi nad/pod przyciskiem); false = zwykla lista rozwijana. */
-  carousel: boolean;
   onPick: (s: Scope) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const n = scopes.length;
   const sel = Math.max(
     0,
     scopes.findIndex((s) => s.key === scope),
   );
   const cur = scopes[sel] ?? scopes[0];
-  const prev = scopes[(sel - 1 + n) % n];
-  const next = scopes[(sel + 1) % n];
-
-  // Kolko: jeden krok na „zabkowanie". Natywny listener (passive:false), zeby
-  // zablokowac przewijanie strony. `selRef` trzyma biezaca pozycje bez przepinania.
-  const selRef = useRef(sel);
-  selRef.current = sel;
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    let acc = 0;
-    const onWheel = (e: WheelEvent) => {
-      if (n < 2) return;
-      e.preventDefault();
-      acc += e.deltaY;
-      if (Math.abs(acc) < 24) return;
-      const dir = acc > 0 ? 1 : -1;
-      acc = 0;
-      onPick(scopes[(selRef.current + dir + n) % n].key);
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [scopes, onPick, n]);
 
   const dates = (key: Scope) =>
     key === 'sprint' && activeSprint ? (
@@ -1657,31 +1460,13 @@ function ScopePicker({
   const labelFor = (s: { key: Scope; label: string }) =>
     s.key === 'sprint' && activeSprint ? activeSprint.name : s.label;
 
-  // Sasiad (nad/pod przyciskiem) — przygaszony, klik go wybiera. Pokazujemy tylko gdy
-  // jest wiecej niz jeden zakres i faktycznie rozny od srodka.
-  const flank = (s: { key: Scope; label: string }, where: 'up' | 'down') => (
-    <button
-      className={`scope-flank scope-flank-${where}`}
-      onClick={() => onPick(s.key)}
-      title={`Zakres: ${labelFor(s)}`}
-    >
-      <span className="scope-picker-label">{labelFor(s)}</span>
-      {dates(s.key)}
-      <span className="segment-count">{counts[s.key]}</span>
-    </button>
-  );
-
-  const showFlanks = open && carousel && n > 1;
-
   return (
-    <div className={`scope-picker-wrap${open ? ' scope-open' : ''}`} ref={wrapRef}>
+    <div className={`scope-picker-wrap${open ? ' scope-open' : ''}`}>
       {open && <div className="picker-backdrop" onClick={() => setOpen(false)} />}
-
-      {showFlanks && flank(prev, 'up')}
 
       <button
         className={`scope-picker${open ? ' scope-picker-open' : ''}`}
-        title="Zakres — kliknij, aby wybrać, albo przewiń kółkiem"
+        title="Zakres"
         onClick={() => setOpen((o) => !o)}
       >
         <span className="scope-picker-label">{labelFor(cur)}</span>
@@ -1690,10 +1475,7 @@ function ScopePicker({
         <ChevronIcon open={open} />
       </button>
 
-      {showFlanks && flank(next, 'down')}
-
-      {/* Zwykla lista rozwijana (gdy karuzela wylaczona) — pod przyciskiem, z ptaszkiem. */}
-      {open && !carousel && (
+      {open && (
         <div className="scope-menu" role="listbox">
           {scopes.map((s) => (
             <button
@@ -3273,6 +3055,9 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ['/'], label: 'Filtruj zadania' },
   { keys: [MOD, 'F'], label: 'Filtruj zadania — zamiast wyszukiwarki przeglądarki' },
   { keys: ['R'], label: 'Odśwież dane z Bitriksa' },
+  { keys: ['X'], label: 'Wyczyść filtry i wyszukiwanie' },
+  { keys: ['V'], label: 'Zapisane widoki — potem 1…9 wybiera widok' },
+  { keys: ['1', '2', '3'], label: 'Lista / Tablica / Wykresy' },
   { keys: ['W'], label: 'Sprint — wrzuć do sprintu albo do backlogu' },
   { keys: ['M'], label: 'Etap w sprincie' },
   { keys: ['A'], label: 'Osoba odpowiedzialna' },
@@ -3442,7 +3227,6 @@ function ViewMenu({
     unassigned: boolean;
     done: boolean;
     empty: boolean;
-    carousel: boolean;
     filtersOn: boolean;
     theme: Theme;
     font: Font;
@@ -3465,7 +3249,6 @@ function ViewMenu({
     done: () => void;
     empty: () => void;
     toggleColumn: (name: string) => void;
-    carousel: () => void;
     clearFilters: () => void;
     reload: () => void;
     palette: () => void;
@@ -3479,7 +3262,8 @@ function ViewMenu({
   const rowClass = 'ds-row';
   // Tablica to zawsze kanban po etapach — grupowanie i podgrupowanie jej nie dotycza,
   // wiec na tablicy oba wiersze sa wyszarzone i nieklikalne (patrz .ds-row-off).
-  const boardMode = state.view === 'board';
+  // Wykresy, tak jak tablica, nie maja czego grupowac — oba wiersze wyszarzone.
+  const boardMode = state.view !== 'list';
   const groupRow = `${rowClass}${boardMode ? ' ds-row-off' : ''}`;
 
   // Panel „Kolumny/Grupy" wyskakuje jako OSOBNY panel obok (panel w panelu), nie sekcja.
@@ -3527,6 +3311,14 @@ function ViewMenu({
             onClick={() => on.view('board')}
           >
             <BoardIcon /> Tablica
+          </button>
+          <button
+            role="tab"
+            aria-selected={state.view === 'charts'}
+            className={`ds-tab${state.view === 'charts' ? ' ds-tab-on' : ''}`}
+            onClick={() => on.view('charts')}
+          >
+            <ChartIcon /> Wykresy
           </button>
         </div>
 
@@ -3617,7 +3409,6 @@ function ViewMenu({
         {check('Tylko moje', state.mine, on.mine)}
         {check('+ nieprzypisane', state.unassigned, on.unassigned, !state.mine)}
         {check('Pokaż zakończone', state.done, on.done)}
-        {check('Karuzela zakresu', state.carousel, on.carousel)}
 
         <div className="menu-sep" />
         {/* „Kolumny/Grupy" otwiera OSOBNY panel obok — w dolnej sekcji, obok akcji. */}
@@ -3968,7 +3759,7 @@ export default function App() {
   /** Zapisane widoki (globalne, localStorage) i otwarte menu „Widoki". */
   const [views, setViews] = useState<SavedView[]>(loadViews);
   /** `hover: true` = menu wyskoczylo samo, bez klikniecia (nie kradnie wtedy focusu). */
-  const [viewsMenu, setViewsMenu] = useState<(Anchor & { hover?: boolean }) | null>(null);
+  const [viewsMenu, setViewsMenu] = useState<(Anchor & { hover?: boolean; kb?: boolean }) | null>(null);
   /*
    * Widoki otwieraja sie na NAJECHANIE, ale z dwoma opoznieniami, bez ktorych takie
    * menu jest nie do zycia: krotka zwloka przed otwarciem (przejazd myszy obok
@@ -4009,7 +3800,6 @@ export default function App() {
   const [showDone, setShowDone] = useState(saved.showDone);
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
   const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
-  const [scopeCarousel, setScopeCarousel] = useState(saved.scopeCarousel);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
   const [groupBy, setGroupBy] = useState<GroupBy>(saved.groupBy);
@@ -4506,7 +4296,7 @@ export default function App() {
   );
 
   /** Klucz zwijania podgrupy musi byc unikalny w obrebie calej listy. */
-  const subKey = (groupKey: string, sub: string) => `${groupKey} ${sub}`;
+  const subKey = (groupKey: string, sub: string) => `${groupKey}\u0000${sub}`;
 
   // Plaska lista widocznych zadan — po niej chodzi kursor klawiatury.
   // Musi odpowiadac temu, co faktycznie widac, wiec liczy sie ze zwinieciem
@@ -4647,14 +4437,13 @@ export default function App() {
       showEmpty,
       shownEmpty,
       detailWidth,
-      scopeCarousel,
     };
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, showEmpty, shownEmpty, detailWidth, scopeCarousel]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, showEmpty, shownEmpty, detailWidth]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -4706,7 +4495,6 @@ export default function App() {
     setWithUnassigned(v.withUnassigned);
     setShowDone(v.showDone);
     setShowEmpty(v.showEmpty);
-    setViewMode(v.viewMode);
     // Menu zostaje otwarte — mozna przeklikiwac widoki i patrzec na wynik bez
     // ponownego otwierania listy. Zamyka je klikniecie poza (backdrop) albo Esc.
   }, []);
@@ -4895,7 +4683,18 @@ export default function App() {
       }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
 
-      const current = flat[cursor];
+      /*
+       * Wykresy nie maja wierszy. Kursor listy nadal gdzies wskazuje, wiec bez
+       * tego Enter otwieral panel LOSOWEGO zadania - tego, na ktorym kursor stal
+       * przed przelaczeniem widoku. To samo dotyczy j/k, strzalek i klawiszy akcji
+       * (W/M/A/P/S): wszystkie dzialaja na `current`, wiec na wykresach musi byc
+       * pusty. Klawisze globalne (widoki, filtry, odswiezenie, sciagawka) zostaja.
+       */
+      const rowless = viewMode === 'charts';
+      const current = rowless ? undefined : flat[cursor];
+
+      if (rowless && ['j', 'k', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key))
+        return;
 
       if (e.key === '/') {
         e.preventDefault();
@@ -5215,6 +5014,12 @@ export default function App() {
         section: 'Widok',
         label: 'Tablica (kanban sprintu)',
         run: () => setViewMode('board'),
+      },
+      {
+        id: 'view-charts',
+        section: 'Widok',
+        label: 'Wykresy (spalanie i prędkość zespołu)',
+        run: () => setViewMode('charts'),
       },
       ...scopes.map((s) => ({
         id: `scope-${s.key}`,
@@ -5711,7 +5516,7 @@ export default function App() {
           >
             {/* Ikona niesie biezacy widok — po usunieciu przelacznika z paska
                 to jedyne miejsce, w ktorym widac, czy jestes na liscie czy tablicy. */}
-            {viewMode === 'board' ? <BoardIcon /> : <ListIcon />}
+            {viewMode === 'board' ? <BoardIcon /> : viewMode === 'charts' ? <ChartIcon /> : <ListIcon />}
             <span className="display-label">Grupuj:</span>
             {GROUPS.find((g) => g.key === groupBy)?.label ?? '—'}
             {subGroupBy && (
@@ -5759,7 +5564,6 @@ export default function App() {
             scopes={scopes}
             counts={scopeCounts}
             activeSprint={activeSprint}
-            carousel={scopeCarousel}
             onPick={setScope}
           />
 
@@ -5916,7 +5720,9 @@ export default function App() {
           onDragEnd={onDragEnd}
           onDragCancel={() => setDraggingId(null)}
         >
-        {viewMode === 'board' ? (
+        {viewMode === 'charts' ? (
+          <Dashboard groupId={groupId} people={people} />
+        ) : viewMode === 'board' ? (
           <Board
             tasks={boardTasks}
             stages={boardStages}
@@ -6201,7 +6007,7 @@ export default function App() {
             onToggle={(value) => toggleCondValue(cond.id, value)}
             onPick={() => {}}
             onClose={() => {
-              // Porzucony, pusty warunek (np. „+ Filtr" bez wyboru) nie zostaje wiszacy.
+              // Porzucony, pusty warunek (np. "+ Filtr" bez wyboru) nie zostaje wiszacy.
               if (!cond.values.length) removeCondition(cond.id);
               setFilterPick(null);
             }}
@@ -6274,7 +6080,6 @@ export default function App() {
             unassigned: withUnassigned,
             done: showDone,
             empty: showEmpty,
-            carousel: scopeCarousel,
             filtersOn: anyFilter(filters),
             theme,
             font,
@@ -6299,7 +6104,6 @@ export default function App() {
             done: () => setShowDone((v) => !v),
             empty: () => setShowEmpty((v) => !v),
             toggleColumn,
-            carousel: () => setScopeCarousel((v) => !v),
             clearFilters: () => setFilters(EMPTY_FILTERS),
             reload: () => void reload(),
             palette: () => setPaletteOpen(true),

@@ -132,6 +132,8 @@ export interface Sprint {
   name: string;
   dateStart: string | null;
   dateEnd: string | null;
+  /** `active` / `completed` / `planned` — wykres predkosci bierze tylko domkniete. */
+  status: string;
 }
 
 /** Epik scruma — nadrzedny "temat" grupujacy zadania ponad sprintami. */
@@ -482,10 +484,183 @@ export async function fetchActiveSprint(groupId: number): Promise<Sprint | null>
       name: str(s.name),
       dateStart: str(s.dateStart) || null,
       dateEnd: str(s.dateEnd) || null,
+      status: str(s.status),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * WSZYSTKIE sprinty grupy — wykres predkosci potrzebuje kilku ostatnich, nie tylko
+ * biezacego. Ten sam filtr UPPER_CASE co w `fetchActiveSprint`: `groupId` pisane
+ * malymi literami po cichu oddaje pusta liste.
+ */
+export async function fetchSprints(groupId: number): Promise<Sprint[]> {
+  /*
+   * Metoda stronicuje po 50, ale - inaczej niz reszta REST-u - NIE oddaje ani
+   * `next`, ani `total` (sprawdzone: start=0 daje 50 pozycji i next=null,
+   * start=50 kolejne 16). Petla oparta na `next`, jak w `fetchProjects`, urwie
+   * sie wiec po pierwszej stronie i zostawi 50 NAJSTARSZYCH sprintow, czyli
+   * dokladnie nie te, o ktore chodzi - biezacy jest na koncu. Przewijamy sami
+   * o dlugosc strony i konczymy na stronie krotszej niz pelna.
+   *
+   * Blad LECI DALEJ, nie zamienia sie w pusta liste. Przy `catch { return [] }`
+   * dashboard mowil "Ten projekt nie ma jeszcze sprintow" takze wtedy, gdy portal
+   * odrzucil zapytanie (QUERY_LIMIT_EXCEEDED) - czyli podawal falszywa przyczyne.
+   * Lepiej pokazac prawdziwy komunikat niz uspokajajace klamstwo.
+   */
+  const PAGE = 50;
+  const raw: any[] = [];
+  for (let start = 0, page = 0; page < 20; page++) {
+    const chunk = await call<any[]>('tasks.api.scrum.sprint.list', {
+      filter: { GROUP_ID: groupId },
+      start,
+    });
+    const got = chunk ?? [];
+    raw.push(...got);
+    if (got.length < PAGE) break;
+    start += PAGE;
+  }
+
+  return raw
+    .map((s) => ({
+      id: Number(s.id),
+      name: str(s.name),
+      dateStart: str(s.dateStart) || null,
+      dateEnd: str(s.dateEnd) || null,
+      status: str(s.status),
+    }))
+    .filter((s) => Number.isFinite(s.id) && s.dateStart)
+    .sort((a, b) => String(a.dateStart).localeCompare(String(b.dateStart)));
+}
+
+/** Zadanie sprintu w ujeciu wykresow: tyle, ile trzeba, zeby je „spalic". */
+export interface SprintTask {
+  id: number;
+  storyPoints: number | null;
+  /** Kiedy zadanie zostalo domkniete (null = wciaz otwarte). */
+  closedAt: string | null;
+  /**
+   * Kiedy zadanie PIERWSZY RAZ trafilo do akceptacji (status 4).
+   *
+   * `closedAt` sie do tego nie nadaje: Bitrix NADPISUJE date zamkniecia przy
+   * kazdym kolejnym domknieciu, wiec zadanie oddane do sprawdzenia 20 sierpnia,
+   * a wdrozone 1 wrzesnia, ma tam 1 wrzesnia. Przy liczeniu akceptacji jako
+   * zrobionej spalaloby sie o tydzien za pozno — suma dobra, dzien zly.
+   */
+  reviewAt: string | null;
+  /** Kto odpowiada — wykres da sie zawezic do jednej osoby. */
+  responsibleId: number | null;
+  responsibleName: string | null;
+  /**
+   * Czy zadanie jest NAPRAWDE gotowe, czyli stoi w kolumnie typu FINISH.
+   *
+   * Nie wystarczy `closedAt`: Bitrix stempluje date zamkniecia juz przy statusie 4
+   * ("Czeka na kontrolę"), wiec wszystko z "Do zatwierdzenia / PR" wygladaloby na
+   * zrobione — w Sprincie 65 to 100 z 254 SP. Wlasny wykres Bitriksa spala tylko
+   * kolumne FINISH (258 -> 190, czyli dokladnie 68 SP z "Wdrożone"), i to jest
+   * uczciwsze: praca czekajaca na akceptacje nie jest dostarczona.
+   */
+  done: boolean;
+}
+
+/**
+ * Zadania JEDNEGO sprintu razem ze story pointami.
+ *
+ * UWAGA na filtr: `SPRINT_ID` (UPPER_CASE) zwraca zadania sprintu, ale `sprintId`
+ * jest po cichu IGNOROWANY i oddaje cala grupe — sprawdzone na zywo: 14 zadan
+ * wobec 1135. To ta sama pulapka co `GROUP_ID` w `sprint.list` i `epic.list`.
+ *
+ * Moment domkniecia bierzemy z `closedDate` samego zadania, a nie z dziennika
+ * zmian: dziennik kosztuje jedno wywolanie NA ZADANIE, a `closedDate` przychodzi
+ * gratis z lista. Cena jest taka, ze zadanie domkniete i ponownie otwarte pokaze
+ * tylko OSTATNIE domkniecie — na wykresie spalania to rzadki przypadek brzegowy.
+ */
+export async function fetchSprintTasks(sprintId: number): Promise<SprintTask[]> {
+  /*
+   * STRONICOWANIE JEST OBOWIAZKOWE. `tasks.task.list` oddaje najwyzej 50 pozycji
+   * na strone, a sprint spokojnie miewa ich wiecej (Sprint 65 = 63). Bez petli
+   * suma story pointow liczy sie z pierwszej piecdziesiatki i wychodzi ZANIZONA,
+   * cicho: nie ma bledu, jest po prostu mniejsza liczba niz w Bitriksie.
+   */
+  const tasks: any[] = [];
+  for (let start = 0, page = 0; page < 40; page++) {
+    const res = await call<{ tasks: any[] }>('tasks.task.list', {
+      filter: { SPRINT_ID: sprintId },
+      select: ['ID', 'CLOSED_DATE', 'RESPONSIBLE_ID', 'STAGE_ID'],
+      start,
+    }).catch(() => ({ tasks: [] as any[] }));
+
+    const chunk = res?.tasks ?? [];
+    tasks.push(...chunk);
+    if (chunk.length < 50) break;
+    start += 50;
+  }
+
+  const ids = tasks.map((t) => Number(t.id)).filter(Number.isFinite);
+  if (!ids.length) return [];
+
+  const meta = await fetchScrumMeta(ids);
+
+  /*
+   * Moment oddania do akceptacji czytamy z dziennika zmian — tylko dla zadan
+   * ZAMKNIETYCH, bo otwarte jeszcze nigdzie nie trafily. To jedno wywolanie na
+   * zadanie, pakowane po 50 w batch (w Sprincie 65 okolo 38 zadan = jeden
+   * dodatkowy round-trip). Blad pojedynczego zadania nie moze wywalic wykresu,
+   * wiec przy braku wpisu zostaje `closedAt`.
+   */
+  const closedIds = tasks.filter((t) => t.closedDate ?? t.CLOSED_DATE).map((t) => Number(t.id));
+  const reviewAt = new Map<number, string>();
+  if (closedIds.length) {
+    /*
+     * Kazde zadanie osobnym batchem-jednoelementowym? Nie — ale `callBatch` rzuca
+     * na PIERWSZYM bledzie w paczce i gubi to, co juz zebral. Jedno zadanie bez
+     * dostepu do historii kasowaloby wtedy daty oddania do akceptacji dla CALEGO
+     * sprintu i cala krzywa cicho przesuwalaby sie o kilka dni. Dzielimy wiec na
+     * mniejsze paczki: awaria psuje najwyzej swoja czesc.
+     */
+    const logs: any[] = [];
+    for (let i = 0; i < closedIds.length; i += 20) {
+      const part = closedIds.slice(i, i + 20);
+      const got = await callBatch(
+        part.map((id) => ({ method: 'tasks.task.history.list', params: { taskId: id } })),
+      ).catch(() => part.map(() => null));
+      logs.push(...got);
+    }
+
+    logs.forEach((log, i) => {
+      const rows: any[] = log?.list ?? [];
+      const first = rows
+        .filter((r) => str(r?.field) === 'STATUS' && str(r?.value?.to) === '4')
+        .map((r) => str(r.createdDate))
+        .filter(Boolean)
+        .sort()[0];
+      if (first) reviewAt.set(closedIds[i], first);
+    });
+  }
+
+  // Etapy TEGO sprintu — kazdy sprint ma wlasny komplet o tych samych nazwach,
+  // wiec „gotowe" trzeba rozstrzygnac po typie kolumny, nie po jej nazwie czy id.
+  const finish = new Set(
+    (await fetchStages([sprintId]).catch(() => []))
+      .filter((st) => st.type === 'FINISH')
+      .map((st) => st.id),
+  );
+
+  return tasks.map((t) => ({
+    id: Number(t.id),
+    storyPoints: meta.get(Number(t.id))?.storyPoints ?? null,
+    // Te same trzy warianty klucza co w `normalizeTask` — `tasks.task.list` oddaje
+    // raz `responsibleId`, raz `RESPONSIBLE_ID`, a przy rozwinietym polu tylko
+    // `responsible.id`. Wezsze odczytanie dziala, dopoki Bitrix nie zmieni ksztaltu
+    // odpowiedzi, i wtedy CICHO gasi cala liste osob na wykresie.
+    closedAt: str(t.closedDate ?? t.CLOSED_DATE) || null,
+    reviewAt: reviewAt.get(Number(t.id)) ?? null,
+    responsibleId: relId(t.responsibleId ?? t.RESPONSIBLE_ID ?? t.responsible?.id),
+    responsibleName: str(t.responsible?.name ?? t.responsibleName) || null,
+    done: finish.has(relId(t.stageId ?? t.STAGE_ID) ?? -1),
+  }));
 }
 
 /**

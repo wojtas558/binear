@@ -49,6 +49,8 @@
   --t-micro: 11px;
   --t-mini: 12px;
   --t-small: 13px;
+  /* Stopien "regular" byl OPISANY w skali powyzej, ale nigdy nie zdefiniowany. */
+  --t-regular: 15px;
   --t-large: 18px;
 
   /*
@@ -490,6 +492,7 @@ b {
   --t-micro: 10px;
   --t-mini: 11px;
   --t-small: 12px;
+  --t-regular: 14px;
   --t-large: 16px;
 }
 
@@ -1270,56 +1273,13 @@ input[type='search']::-webkit-search-decoration {
   color: var(--fg-dim);
 }
 
-/* Przycisk zostaje na wierzchu tla, gdy karuzela otwarta. */
+/* Przycisk zostaje na wierzchu tla, gdy lista otwarta. */
 .scope-picker-wrap.scope-open .scope-picker {
   position: relative;
   z-index: 31;
 }
 
-/* Sasiedzi karuzeli: poprzedni NAD przyciskiem, nastepny POD. Ta sama szerokosc co
-   przycisk (min-width:100%), przygaszeni, unosza sie z cieniem panelu. */
-.scope-flank {
-  position: absolute;
-  left: 0;
-  z-index: 30;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
-  width: 100%;
-  height: 28px;
-  padding: 0 var(--s2) 0 var(--s3);
-  color: var(--fg-muted);
-  /* To samo wypelnienie co otwarty przycisk (--bg-active), zeby trojka czytala sie
-     jako jeden spojny slupek, a sasiedzi mieli WYRAZNE tlo (a nie ledwo widoczne). */
-  background: var(--bg-active);
-  border-radius: var(--s2);
-  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
-  white-space: nowrap;
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.scope-flank:hover {
-  color: var(--fg);
-  background: var(--bg-hover);
-}
-
-.scope-flank .scope-picker-label {
-  font-weight: var(--w-normal);
-}
-
-.scope-flank-up {
-  bottom: calc(100% + 4px);
-}
-
-.scope-flank-down {
-  top: calc(100% + 4px);
-}
-
-.scope-flank .segment-count {
-  margin-left: auto;
-}
-
-/* Zwykla lista rozwijana (karuzela wylaczona) — pod przyciskiem. */
+/* Lista zakresow pod przyciskiem. */
 .scope-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -3924,4 +3884,479 @@ a.mention:hover {
   }
 }
 
+/* ── Wykresy sprintu ─────────────────────────────────────────────────────────
+ *
+ * Zasada kolorow jest ta sama co w reszcie arkusza: JEDEN akcent niesie dane,
+ * a wszystko, co jest tylko odniesieniem (linia idealna, slupek planu), zostaje
+ * przygaszone. Dzieki temu na obu wykresach oko od razu lapie to, co naprawde
+ * sie wydarzylo, i nie musi rozstrzygac miedzy dwoma rownie mocnymi kolorami.
+ */
 
+.dash {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s4);
+}
+
+.dash-empty {
+  padding: var(--s6) var(--s4);
+  color: var(--fg-muted);
+}
+
+.dash-card {
+  border: 1px solid var(--border);
+  border-radius: var(--s2);
+  background: var(--bg-panel);
+  padding: var(--s4);
+}
+
+.dash-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+.dash-head h2 {
+  margin: 0;
+  font-size: var(--t-small);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+}
+
+.dash-sub {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+/* Liczby nad wykresem — wartosc prowadzi, etykieta schodzi pod nia i w cien. */
+.dash-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s5);
+  margin-bottom: var(--s4);
+}
+
+.dash-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash-stat-value {
+  font-size: var(--t-large);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-stat-label {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+/*
+ * Wykres skaluje sie z szerokoscia karty, ale ma SUFIT: bez niego na szerokim
+ * ekranie viewBox rozciaga sie na caly wiersz i jeden wykres zjada cala wysokosc
+ * okna razem z podpisami osi urosnietymi do rozmiaru naglowka.
+ */
+/* Kontener mierzony przez ResizeObserver — z niego bierze sie szerokosc viewBoxa. */
+.chart-box {
+  width: 100%;
+}
+
+.chart {
+  display: block;
+  overflow: visible;
+}
+
+.chart-empty {
+  padding: var(--s5) 0;
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+}
+
+/* Podzialka ma byc obecna, ale nie ma z niczym konkurowac. */
+.chart-grid line {
+  stroke: var(--border);
+  stroke-width: 1;
+  /* Siatka jest odniesieniem, nie trescia — ma byc widoczna dopiero, gdy jej
+     poszukasz. Pelna krycie na szerokim wykresie robilo z niej krate. */
+  opacity: 0.7;
+}
+
+.chart-grid text,
+.chart-x {
+  fill: var(--fg-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Linia idealna to odniesienie, nie pomiar — przerywana i przygaszona. */
+.line-ideal {
+  fill: none;
+  stroke: var(--fg-dim);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.line-real {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/*
+ * Projekcja osoby przy porownaniu kilku linii: ten sam kolor co jej dane, ale
+ * cienka, przerywana i przygaszona. Ma dawac punkt odniesienia katem oka, a nie
+ * konkurowac z linia rzeczywista — przy szesciu osobach to szesc dodatkowych
+ * linii i tylko ta roznica sily trzyma wykres czytelnym.
+ */
+.line-plan {
+  fill: none;
+  stroke-width: 1.25;
+  stroke-dasharray: 3 4;
+  opacity: 0.4;
+}
+
+/*
+ * Punkty posrednie: male i wypelnione TLEM KARTY z obwodka w kolorze linii —
+ * dzieki temu linia wchodzi w kropke, zamiast przez nia przechodzic, i szereg
+ * dni czyta sie jako jeden ciag, a nie jako korale.
+ */
+.dot-real {
+  fill: var(--bg-panel);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* DZIS — jedyny punkt wypelniony, z obwodka tla, zeby odcial sie od pola. */
+.dot-now {
+  fill: var(--accent);
+  stroke: var(--bg-panel);
+  stroke-width: 2;
+}
+
+.dot-label {
+  fill: var(--fg);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.area-real {
+  stroke: none;
+}
+
+.chart-legend {
+  display: flex;
+  gap: var(--s4);
+  margin-top: var(--s2);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.legend-mark {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+/* Przy kilku osobach kolor niesie znaczenie, wiec znacznik jest grubszy —
+   2px kreska w cudzym kolorze ginie obok nazwiska. */
+.chart-legend .legend-mark[style] {
+  height: 3px;
+  width: 14px;
+}
+
+.legend-mark.legend-ideal {
+  background: repeating-linear-gradient(
+    to right,
+    var(--fg-dim) 0 4px,
+    transparent 4px 7px
+  );
+}
+
+/* Ograniczenie danych stoi pod wykresami, nie w tooltipie — ma byc przeczytane. */
+.dash-note {
+  margin: 0;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  max-width: 70ch;
+}
+
+/* ── Odczyt pod kursorem ─────────────────────────────────────────────────── */
+
+/* Pionowa prowadnica: mocniejsza od siatki, slabsza od danych. */
+.hover-guide {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+/* Punkt linii idealnej pod kursorem - przygaszony, bo to tylko odniesienie. */
+.dot-ideal {
+  fill: var(--bg-panel);
+  stroke: var(--fg-dim);
+  stroke-width: 2;
+}
+
+/* Odczyt siedzi u GORY wykresu, nie przy kropce: nie skacze pionowo razem
+   z linia i nigdy nie zaslania samych danych. */
+/* Kursor sygnalizuje, ze wykres da sie badac. */
+.chart {
+  cursor: crosshair;
+}
+
+/* ── Filtr osoby na wykresie ─────────────────────────────────────────────── */
+
+.person-wrap {
+  position: relative;
+}
+
+.person-btn,
+.person-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font: inherit;
+  font-size: var(--t-micro);
+  color: var(--fg-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.person-btn {
+  height: 28px;
+  padding: 0 var(--s2);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--s1);
+}
+
+.person-btn:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+/* Kropka zastepuje awatar przy "Caly zespol" — to samo miejsce w rzedzie,
+   wiec nazwy nie skacza w poziomie miedzy pozycjami. */
+.person-all {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.person-name {
+  white-space: nowrap;
+}
+
+.person-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 31;
+  min-width: 240px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--s1);
+  background: var(--bg-panel);
+  border-radius: var(--s2);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+}
+
+.person-opt {
+  width: 100%;
+  padding: var(--s1) var(--s2);
+  border-radius: var(--s1);
+  text-align: left;
+}
+
+.person-opt:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.person-opt-on {
+  color: var(--fg);
+}
+
+.person-check {
+  flex: 0 0 14px;
+  display: inline-flex;
+  color: var(--accent);
+}
+
+/* Story pointy dosuniete do prawej — kolumna liczb czyta sie sama. */
+.person-sp {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Przelacznik "Wliczaj do zatwierdzenia" - pigulka o ksztalcie filtra osoby. */
+.chip-toggle {
+  margin-left: auto;
+  /* Naglowek karty wyrownuje po LINII BAZOWEJ (dla tytulu i podtytulu), ale
+     kontrolki musza stac srodkiem: przycisk osoby ma awatar, wiec jego baseline
+     wypada gdzie indziej niz czystego tekstu i pigulka siadala nizej. */
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  height: 28px;
+  padding: 0 var(--s2);
+  font: inherit;
+  font-size: var(--t-micro);
+  /* WYLACZONY to nadal aktywna kontrolka, a nie wyszarzony przycisk. Przy
+     --fg-dim wygladal na zablokowany obok sasiedniego filtra osoby; roznice
+     miedzy stanami niesie akcent i ptaszek, nie gasniecie napisu. */
+  color: var(--fg-secondary);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--s1);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip-toggle:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+/* Wlaczony niesie akcent - to jedyny stan, ktory zmienia liczby na karcie. */
+.chip-toggle-on {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/*
+ * Miejsce na ptaszek rezerwujemy ZAWSZE i dokladnie tyle, ile ikona ma naprawde
+ * (11px) - przy 12px z warunkowym renderowaniem przycisk zmienial szerokosc przy
+ * kazdym kliknieciu i przycinal ikone.
+ */
+.chip-toggle-mark {
+  flex: 0 0 11px;
+  width: 11px;
+  height: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.chip-toggle-mark-off {
+  visibility: hidden;
+}
+
+.person-wrap {
+  margin-left: var(--s3);
+  align-self: center;
+}
+
+/* Facepile w przycisku osob: awatar musi wypelnic caly krazek stosu. */
+.person-btn .filter-chip-stack .filter-chip-vicon .avatar {
+  width: 100%;
+  height: 100%;
+  font-size: 9px;
+}
+
+/*
+ * Karta odczytu pod kursorem. Zwykly div, nie tekst w SVG: potrzebuje tla,
+ * odstepow i kilku wierszy jeden pod drugim, a tego wszystkiego w SVG trzeba by
+ * pozycjonowac recznie (i tak nachodzilo na siatke oraz na same linie).
+ */
+/* Podpowiedz pod lista pickera - oddzielona kreska, cichsza od pozycji. */
+.picker-foot {
+  margin-top: var(--s1);
+  padding: var(--s2);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  border-top: 1px solid var(--border);
+}
+
+.picker-foot kbd {
+  font-size: var(--t-micro);
+}
+
+/* ── Odczyt pod kursorem ─────────────────────────────────────────────────── */
+
+/*
+ * Podpis nie dostaje ramki ani karty — tak czytal sie najlepiej. Tlo robi mu
+ * OBWODKA W KOLORZE PANELU rysowana POD literami (`paint-order: stroke`): tekst
+ * przestaje zlewac sie z siatka i z liniami, a wykres nie zyskuje kolejnego
+ * prostokata. Prostokat trzeba by tez wymierzyc, czego w SVG zrobic sie nie da
+ * bez liczenia szerokosci tekstu.
+ */
+/*
+ * Wieksze niz podpisy osi z rozmyslu. Zanim viewBox zaczal odpowiadac pikselom
+ * 1:1, caly wykres byl rozciagany okolo dwukrotnie i te 11px wygladalo jak 22px.
+ * Po naprawie tekst wrocil do prawdziwego rozmiaru i zrobil sie za drobny na
+ * wykresie szerokim na poltora tysiaca pikseli — odczyt jest tu TRESCIA, nie
+ * opisem tla, wiec dostaje wlasny, wiekszy stopien.
+ */
+.hover-label,
+.hover-value,
+.hover-plan {
+  font-size: var(--t-mini);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke fill;
+  stroke: var(--bg-panel);
+  /* Grubsza obwodka = wiekszy odstep miedzy litera a tym, co pod nia. Ponizej
+     ~5px tekst wciaz dotykal siatki i linii; wiecej zaczyna zlepiac sasiednie
+     glify, bo obwodka rosnie w OBIE strony od konturu. */
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+/* Sama wartosc o stopien wyzej niz podpisy obok — to ona jest tu odpowiedzia. */
+.hover-value {
+  font-size: var(--t-regular);
+}
+
+.hover-label {
+  fill: var(--fg-dim);
+}
+
+.hover-value {
+  fill: var(--fg);
+  font-weight: var(--w-medium);
+}
+
+.hover-plan {
+  fill: var(--fg-dim);
+}
+
+/* Data pod numerem dnia - cichsza od samego podpisu, to tylko doprecyzowanie. */
+.chart-date {
+  fill: var(--fg-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+/* Cienka kreska miedzy statystykami w SP a tymi liczonymi w sztukach. */
+.dash-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 2px calc(var(--s5) - var(--s4));
+  background: var(--border);
+  opacity: 0.6;
+}

@@ -192,6 +192,17 @@ export function BoardIcon() {
   );
 }
 
+/** Wykresy sprintu — slupki rosnace, czytelne w 16px bez zadnych detali. */
+export function ChartIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+      <rect x="1.5" y="9" width="3.5" height="5.5" rx="1.2" fill="currentColor" />
+      <rect x="6.25" y="5.5" width="3.5" height="9" rx="1.2" fill="currentColor" />
+      <rect x="11" y="1.5" width="3.5" height="13" rx="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Strzalka kierunku sortowania — w gore dla rosnaco, w dol dla malejaco. */
 export function DirIcon({ dir }: { dir: 'asc' | 'desc' }) {
   return (
@@ -450,11 +461,45 @@ export function SearchIcon() {
   );
 }
 
-/** Stabilny odcien z nazwy — ten sam tag ma zawsze ten sam kolor, w liscie i na tablicy. */
-export function tagHue(name: string): string {
+/**
+ * Stabilny odcien (0-359) z nazwy. Jedna implementacja na cala aplikacje —
+ * wczesniej ten sam kod stal w dwoch miejscach: raz w `tagHue`, raz wprost
+ * w `Avatar`, przez co zmiana w jednym nie ruszala drugiego.
+ */
+function nameHash(name: string): number {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 360;
-  return `hsl(${hash} 52% 55%)`;
+  return hash;
+}
+
+/** Stabilny odcien z nazwy — ten sam tag ma zawsze ten sam kolor, w liscie i na tablicy. */
+export function tagHue(name: string): string {
+  return `hsl(${nameHash(name)} 52% 55%)`;
+}
+
+/*
+ * Odcien OSOBY. Osobno od tagow, bo ludzie i etykiety to dwa niezalezne zbiory —
+ * przesuniecie jednego nie ma prawa przemalowac drugiego.
+ *
+ * Obrot o 143 stopnie jest DOBRANY, nie przypadkowy: surowy hash sadzal czesc
+ * zespolu w okolicach zolci i oliwki (Wojciech Szyper wypadal na 57 stopniach),
+ * a te barwy na ciemnym tle czytaja sie jak ostrzezenie, nie jak czyjs kolor.
+ * Po obrocie ta sama osoba ladauje na 200 stopniach, czyli w blekicie, a reszta
+ * zespolu rozklada sie po zieleniach, fioletach i rozach.
+ */
+const PERSON_SHIFT = 143;
+
+export function personHue(name: string): number {
+  return (nameHash(name) + PERSON_SHIFT) % 360;
+}
+
+/**
+ * Kolor LINII osoby na wykresie. Ten sam odcien co jej awatar, ale jasniejszy
+ * i bardziej nasycony: awatar to ciemny krazek pod jasnymi inicjalami (42%/38%),
+ * a kreska o tych parametrach ginie na ciemnym tle wykresu.
+ */
+export function personColor(name: string): string {
+  return `hsl(${personHue(name)} 52% 55%)`;
 }
 
 export function Avatar({ name, photo }: { name: string | null; photo?: string | null }) {
@@ -483,9 +528,9 @@ export function Avatar({ name, photo }: { name: string | null; photo?: string | 
     .map((p) => p[0]?.toUpperCase() ?? '')
     .join('');
 
-  // Stabilny odcien z nazwy — ten sam czlowiek zawsze ma ten sam kolor.
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 360;
+  // Ten sam odcien, ktory dostaje linia tej osoby na wykresie — dzieki temu
+  // twarz w legendzie i jej kreska to jeden kolor, bez sprawdzania w tabelce.
+  const hash = personHue(name);
 
   return (
     <span
