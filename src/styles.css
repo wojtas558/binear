@@ -4099,6 +4099,167 @@ a.mention:hover {
   max-width: 70ch;
 }
 
+/* Moneta story pointa na chipie filtra — cyfra zamiast ikony, jak w .row-sp. */
+.filter-chip-points {
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Popover zakresu story pointow: dwa pola obok siebie, bez listy wartosci. */
+.range-menu {
+  padding: var(--s2);
+}
+
+.range-row {
+  display: flex;
+  gap: var(--s2);
+  padding: var(--s1) 0;
+}
+
+.range-field {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.range-field span {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.range-field .picker-input {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.range-hint {
+  padding: var(--s1) var(--s1) 0;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+/* Zakres na chipie czyta sie jak liczba, nie jak etykieta kategorii. */
+.filter-chip-range {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Skrot "tylko bez oszacowania" w popoverze zakresu — wiersz, nie przycisk-akcent. */
+.range-none {
+  display: block;
+  width: 100%;
+  margin-top: var(--s1);
+  padding: var(--s2);
+  text-align: left;
+  font: inherit;
+  font-size: var(--t-mini);
+  color: var(--fg-secondary);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--s1) var(--s1);
+  cursor: pointer;
+}
+
+.range-none:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/*
+ * Suwak zakresu o DWOCH kciukach. Natywnego widgetu na to nie ma, wiec kladziemy
+ * dwa `input[type=range]` jeden na drugim: klawiatura, focus i czytniki ekranu
+ * dzialaja wtedy same z siebie, a my dorysowujemy tylko tor i wypelnienie.
+ *
+ * Sedno sztuczki to pointer-events: SAM input jest przezroczysty dla myszy
+ * (inaczej gorny przykrylby dolny na calej dlugosci i jeden kciuk bylby nie do
+ * zlapania), a wlacza je z powrotem dopiero sam kciuk.
+ */
+.range-slider {
+  position: relative;
+  height: 24px;
+  margin: var(--s2) var(--s1) var(--s1);
+}
+
+.range-track,
+.range-fill {
+  position: absolute;
+  top: 50%;
+  height: 3px;
+  border-radius: 2px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.range-track {
+  left: 0;
+  right: 0;
+  background: var(--border-strong);
+}
+
+.range-fill {
+  background: var(--accent);
+}
+
+.range-slider input[type='range'] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  background: none;
+  appearance: none;
+  -webkit-appearance: none;
+  pointer-events: none;
+}
+
+.range-slider input[type='range']::-webkit-slider-thumb {
+  pointer-events: auto;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--fg);
+  border: 2px solid var(--bg-panel);
+  cursor: grab;
+}
+
+.range-slider input[type='range']::-moz-range-thumb {
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--fg);
+  border: 2px solid var(--bg-panel);
+  cursor: grab;
+}
+
+.range-slider input[type='range']:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Numer klawisza przy zapisanym widoku - ten sam zeton co skroty w menu. */
+.view-key {
+  flex: 0 0 auto;
+  min-width: 16px;
+  margin-left: auto;
+  padding: 1px 4px;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  text-align: center;
+  background: var(--bg-active);
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Odczyt pod kursorem ─────────────────────────────────────────────────── */
 
 /* Pionowa prowadnica: mocniejsza od siatki, slabsza od danych. */

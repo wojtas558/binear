@@ -163,14 +163,14 @@ type ViewMode = 'list' | 'board' | 'charts';
  * jeden sprint. Filtr osoby trzyma id — konto-zaslepke zbijamy do UNASSIGNED_ID,
  * dzieki czemu jeden warunek "Nieprzypisane" lapie i braki, i zaslepke.
  */
-type FilterField = 'assignee' | 'priority' | 'stage' | 'status' | 'tag' | 'epic';
+type FilterField = 'assignee' | 'priority' | 'stage' | 'status' | 'tag' | 'epic' | 'points';
 
 /**
  * Operatory jak w Linearze. Wymiary jednowartosciowe (osoba/priorytet/status/etap —
  * zadanie ma jedna wartosc) dostaja `is`/`isNot`; tag jest wielowartosciowy, wiec ma
  * `anyOf`/`allOf`/`noneOf`. Pusty zestaw wartosci nie zawezaja niczego.
  */
-type FilterOp = 'is' | 'isNot' | 'anyOf' | 'allOf' | 'noneOf';
+type FilterOp = 'is' | 'isNot' | 'anyOf' | 'allOf' | 'noneOf' | 'between';
 
 /** Jeden warunek paska. Ten sam wymiar moze wystapic wiele razy (np. tag = X ORAZ tag ≠ Y). */
 interface Condition {
@@ -189,6 +189,7 @@ const FILTER_FIELDS: { field: FilterField; label: string }[] = [
   { field: 'stage', label: 'Etap' },
   { field: 'status', label: 'Status' },
   { field: 'epic', label: 'Epik' },
+  { field: 'points', label: 'Story points' },
   { field: 'tag', label: 'Tag' },
 ];
 
@@ -207,8 +208,34 @@ const MULTI_FIELDS = new Set<FilterField>(['tag']);
  */
 const NO_TAGS = '\u0000';
 
+/*
+ * Story pointy to jedyny wymiar LICZBOWY, wiec jako jedyny dostaje progi.
+ * ZAKRES skladamy z dwoch warunkow (>= 3 ORAZ <= 8) zamiast osobnego widzetu od
+ * min-max: pasek i tak laczy warunki przez ORAZ i od poczatku dopuszcza ten sam
+ * wymiar wiele razy, wiec zakres wychodzi z mechanizmu, ktory juz jest.
+ */
+/**
+ * To samo co NO_TAGS, ale dla story pointow: „Bez oszacowania” — zadanie, ktoremu
+ * nikt nie nadal pointow. Osobna stala, bo to osobny wymiar i osobne znaczenie;
+ * znak jest ten sam, a wymiary nigdy nie mieszaja sie w jednym warunku.
+ *
+ * Wazne: zadanie bez oszacowania NIE wpada w zaden zakres liczbowy. „co najmniej 1”
+ * ma znaczyc „oszacowane na co najmniej 1”, a nie „cokolwiek” — brak oszacowania
+ * to brak danych, nie zero.
+ */
+const NO_POINTS = '\u0000';
+
+const isRange = (field: FilterField, op: FilterOp) => field === 'points' && op === 'between';
+
 const opsFor = (field: FilterField): FilterOp[] =>
-  MULTI_FIELDS.has(field) ? ['anyOf', 'allOf', 'noneOf'] : ['is', 'isNot'];
+  MULTI_FIELDS.has(field)
+    ? ['anyOf', 'allOf', 'noneOf']
+    : field === 'points'
+      ? // Zakres PIERWSZY, bo `defaultOp` bierze poczatek listy: story pointy to
+        // skala liczbowa, wiec „od-do" jest tu zwyklym przypadkiem, a wybor
+        // pojedynczych wartosci wyjatkiem.
+        ['between', 'is', 'isNot']
+      : ['is', 'isNot'];
 
 const defaultOp = (field: FilterField): FilterOp => opsFor(field)[0];
 
@@ -225,7 +252,21 @@ function opLabel(op: FilterOp, many: boolean): string {
       return 'wszystkie z';
     case 'noneOf':
       return 'żaden z';
+    case 'between':
+      return 'w zakresie';
   }
+}
+
+/**
+ * Podpis zakresu na chipie. Granica otwarta czyta sie jako nierownosc, nie jako
+ * puste miejsce: samo "od 3" to "3+", samo "do 8" to "≤ 8".
+ */
+function rangeLabel(values: string[]): string {
+  const [from = '', to = ''] = values;
+  if (from && to) return `${from}–${to} SP`;
+  if (from) return `${from}+ SP`;
+  if (to) return `≤ ${to} SP`;
+  return 'dowolny';
 }
 
 // Stabilne id warunku — wystarczy monotoniczny licznik na czas zycia karty.
@@ -1240,6 +1281,28 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>):
     }
   }
 
+  if (c.field === 'points') {
+    const sp = t.storyPoints;
+
+    // Progi: bierzemy JEDNA granice (picker jest przy nich jednokrotny). Zadanie
+    // bez oszacowania odpada z obu — patrz NO_POINTS.
+    if (c.op === 'between') {
+      const lo = Number(c.values[0]);
+      const hi = Number(c.values[1]);
+      const hasLo = c.values[0] !== '' && Number.isFinite(lo);
+      const hasHi = c.values[1] !== '' && Number.isFinite(hi);
+      if (!hasLo && !hasHi) return true; // niedokonczony zakres nie zawezaja
+      if (sp === null) return false;
+      if (hasLo && sp < lo) return false;
+      if (hasHi && sp > hi) return false;
+      return true;
+    }
+
+    const key = sp === null ? NO_POINTS : String(sp);
+    const inSet = c.values.includes(key);
+    return c.op === 'isNot' ? !inSet : inSet;
+  }
+
   // Wymiary jednowartosciowe: wyliczamy klucz zadania (osoba po id, reszta wprost)
   // i sprawdzamy przynaleznosc; `isNot` odwraca wynik.
   const key =
@@ -1286,6 +1349,7 @@ function dateTime(iso: string | null): string {
   return `${shortDate(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+
 // ─── Widoki (zapisane) ───────────────────────────────────────────────────────
 
 /**
@@ -1306,6 +1370,180 @@ function GroupPoints({ tasks }: { tasks: Task[] }) {
   );
 }
 
+/**
+ * Popover zakresu story pointow: dwa pola liczbowe "od" i "do".
+ *
+ * Osobny komponent, bo `Picker` jest z natury LISTA wartosci, a zakres to dwie
+ * liczby, ktore nie musza wystapic w danych ("od 3 do 8" ma dzialac tez wtedy,
+ * gdy nikt nie oszacowal zadania na 7). Chrom (tlo + ramka) jest ten sam, wiec
+ * z zewnatrz zachowuje sie jak kazdy inny popover paska filtrow.
+ *
+ * Obie granice sa OPCJONALNE: samo "od" znaczy "co najmniej", samo "do" —
+ * "co najwyzej". Puste oba = warunek nie zawezaja niczego.
+ */
+function RangeMenu({
+  anchor,
+  scale,
+  from,
+  to,
+  onChange,
+  onUnestimated,
+  onClose,
+}: {
+  anchor: Anchor;
+  /** Rosnaca lista story pointow OBECNYCH w danych — patrz komentarz o skali nizej. */
+  scale: number[];
+  from: string;
+  to: string;
+  onChange: (from: string, to: string) => void;
+  /** Przejscie na "tylko bez oszacowania" — to NIE jest zakres, wiec zmienia operator. */
+  onUnestimated: () => void;
+  onClose: () => void;
+}) {
+  const width = 268;
+  const left = Math.min(anchor.left, window.innerWidth - width - 12);
+  const top = Math.min(anchor.bottom + 4, window.innerHeight - 190);
+
+  /*
+   * Suwak chodzi po INDEKSACH skali, nie po samej liczbie pointow.
+   *
+   * Estymaty nie sa rozlozone rowno: w tym portalu to 1..10, potem 12, 16, 20,
+   * 24, 32, 40 i 120. Na osi liniowej 1-120 wszystko, czego uzywa sie naprawde,
+   * scisnelo by sie w pierwszych ~8% toru, a jeden odstajacy rekord decydowalby
+   * o czulosci calej reszty. Po indeksach kazdy stopien skali dostaje tyle samo
+   * miejsca, a podpisy i tak pokazuja prawdziwe liczby.
+   */
+  const last = Math.max(0, scale.length - 1);
+  const idxOf = (v: string, fallback: number) => {
+    if (v === '') return fallback;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    // Najblizszy istniejacy stopien — granica wpisana recznie (np. 7) nie musi
+    // pokrywac sie ze skala, a kciuk musi gdzies stanac.
+    let best = fallback;
+    let dist = Infinity;
+    scale.forEach((sv, i) => {
+      const d = Math.abs(sv - n);
+      if (d < dist) {
+        dist = d;
+        best = i;
+      }
+    });
+    return best;
+  };
+
+  /*
+   * Pozycja kciukow W TRAKCIE ciagniecia siedzi lokalnie i NIE rusza filtra.
+   * Filtr przelicza sie dopiero po puszczeniu (pointerup/keyup): przy 1136
+   * zadaniach kazdy piksel przeciagniecia oznaczalby pelne przefiltrowanie,
+   * przegrupowanie i przerysowanie listy, wiec suwak szarpalby sie pod palcem.
+   * Sam suwak i podpisy chodza plynnie, bo czytaja ten lokalny stan.
+   */
+  const [drag, setDrag] = useState<[number, number] | null>(null);
+
+  const lo = drag ? drag[0] : idxOf(from, 0);
+  const hi = drag ? drag[1] : idxOf(to, last);
+
+  // Pelen rozstaw = brak ograniczenia, wiec zapisujemy granice otwarte — inaczej
+  // chip krzyczalby "1-120 SP" o filtrze, ktory niczego nie odsiewa.
+  const openLo = (i: number) => (i === 0 ? '' : String(scale[i]));
+  const openHi = (i: number) => (i === last ? '' : String(scale[i]));
+
+  // Kciuki nie moga sie minac — para zawsze idzie posortowana.
+  const move = (a: number, b: number) => setDrag([Math.min(a, b), Math.max(a, b)]);
+
+  const commit = () => {
+    if (!drag) return;
+    onChange(openLo(drag[0]), openHi(drag[1]));
+    // Czyscimy dopiero PO zapisie: nastepny render czyta juz te same wartosci
+    // z propsow, wiec kciuk nie mrugnie w stara pozycje.
+    setDrag(null);
+  };
+
+  const pct = (i: number) => (last === 0 ? 0 : (i / last) * 100);
+  const clean = (v: string) => v.replace(/[^0-9]/g, '');
+
+  return (
+    <>
+      <div className="picker-backdrop" onClick={onClose} />
+      <div className="picker range-menu" style={{ left, top, width }}>
+        <div className="picker-title">Story points</div>
+
+        {scale.length > 1 && (
+          <div className="range-slider">
+            <span className="range-track" />
+            <span
+              className="range-fill"
+              style={{ left: `${pct(lo)}%`, right: `${100 - pct(hi)}%` }}
+            />
+            {/* Dwa natywne suwaki na sobie: klawiatura i czytniki ekranu dostaja
+                je za darmo, a nakladanie zalatwia pointer-events w arkuszu. */}
+            <input
+              type="range"
+              min={0}
+              max={last}
+              value={lo}
+              aria-label="Story points od"
+              onChange={(e) => move(Number(e.target.value), hi)}
+              onPointerUp={commit}
+              onKeyUp={commit}
+              onBlur={commit}
+            />
+            <input
+              type="range"
+              min={0}
+              max={last}
+              value={hi}
+              aria-label="Story points do"
+              onChange={(e) => move(lo, Number(e.target.value))}
+              onPointerUp={commit}
+              onKeyUp={commit}
+              onBlur={commit}
+            />
+          </div>
+        )}
+
+        <div className="range-row">
+          <label className="range-field">
+            <span>od</span>
+            <input
+              className="picker-input"
+              inputMode="numeric"
+              /* W trakcie ciagniecia pole pokazuje to, co WLASNIE zostanie
+                 zapisane — inaczej podpis stoi na starej wartosci do puszczenia. */
+              value={drag ? openLo(drag[0]) : from}
+              placeholder={scale.length ? String(scale[0]) : ''}
+              onChange={(e) => onChange(clean(e.target.value), to)}
+              onKeyDown={(e) => e.key === 'Enter' && onClose()}
+            />
+          </label>
+          <label className="range-field">
+            <span>do</span>
+            <input
+              className="picker-input"
+              inputMode="numeric"
+              value={drag ? openHi(drag[1]) : to}
+              placeholder={scale.length ? String(scale[last]) : ''}
+              onChange={(e) => onChange(from, clean(e.target.value))}
+              onKeyDown={(e) => e.key === 'Enter' && onClose()}
+            />
+          </label>
+        </div>
+
+        {/*
+          Skrot do zadan BEZ oszacowania. Musi byc tutaj, bo zakres jest domyslnym
+          operatorem story pointow, a brak oszacowania nie miesci sie w zadnym
+          zakresie (patrz NO_POINTS) - bez tego przycisku trzeba by wiedziec, ze
+          trzeba najpierw przelaczyc operator na "to".
+        */}
+        <button type="button" className="range-none" onClick={onUnestimated}>
+          Tylko bez oszacowania
+        </button>
+      </div>
+    </>
+  );
+}
+
 function ViewsMenu({
   anchor,
   views,
@@ -1315,6 +1553,7 @@ function ViewsMenu({
   onSave,
   onClose,
   autoFocusInput = true,
+  showKeys = false,
   hover = false,
   onHoverIn,
   onHoverOut,
@@ -1328,6 +1567,8 @@ function ViewsMenu({
   onClose: () => void;
   /** Menu otwarte najechaniem NIE zabiera focusu — inaczej kradnie klawiature mimochodem. */
   autoFocusInput?: boolean;
+  /** Pokaz numery klawiszy 1-9 przy widokach (menu otwarte z klawiatury). */
+  showKeys?: boolean;
   /** Otwarte najechaniem — bez tla na caly ekran (patrz nizej). */
   hover?: boolean;
   /** Kursor wrocil nad menu — odwolaj zaplanowane zamkniecie. */
@@ -1402,10 +1643,14 @@ function ViewsMenu({
         </div>
         <div className="picker-list">
           {views.length === 0 && <div className="picker-empty">Brak zapisanych widoków</div>}
-          {views.map((v) => (
+          {views.map((v, i) => (
             <div key={v.id} className={`view-item${v.id === activeId ? ' view-item-on' : ''}`}>
               <button className="view-apply" onClick={() => onApply(v)}>
                 <span className="picker-label">{v.name}</span>
+                {/* Numer klawisza tylko przy pierwszych dziewieciu - dalej nie ma juz
+                    cyfry, wiec podpowiedz bylaby klamstwem. Chowamy go tez, gdy menu
+                    otwarto klikiem w pole nazwy: cyfry naleza wtedy do pola. */}
+                {i < 9 && showKeys && <span className="view-key">{i + 1}</span>}
                 {v.id === activeId && (
                   <span className="picker-check">
                     <CheckIcon />
@@ -2096,6 +2341,7 @@ function Comments({
   chatId,
   ready,
   me,
+  people,
   onError,
 }: {
   taskId: number;
@@ -2104,6 +2350,8 @@ function Comments({
   /** Szczegoly zadania juz doszly (albo sie nie udaly) — dopiero wtedy znamy `chatId`. */
   ready: boolean;
   me: number | null;
+  /** Osoby do wzmianek `@` — te same, co w filtrze i pickerze osoby. */
+  people: Person[];
   onError: (m: string) => void;
 }) {
   // Start od CACHE (detailCache.ts): stare komentarze widac od razu, bez "Wczytywanie…".
@@ -2117,6 +2365,42 @@ function Comments({
    * pracy. Trzymamy oba warianty (pelny i przyciety), zeby wybor byl natychmiastowy.
    */
   const [bigTime, setBigTime] = useState<{ rawMs: number; workMs: number } | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  /*
+   * Wzmianka `@`. `at` to pozycja malpy w tekscie, `query` — to, co po niej
+   * dopisano. Trzymamy jedno i drugie, bo po wyborze osoby trzeba podmienic
+   * DOKLADNIE ten fragment, a nie pierwsze lepsze "@" w komentarzu.
+   */
+  const [mention, setMention] = useState<{ at: number; query: string; anchor: Anchor } | null>(null);
+  /*
+   * Kto zostal wstawiony. Bitrix oczekuje w tresci `[USER=id]Imie[/USER]`, ale
+   * pokazywanie tego w polu byloby okrutne — w polu stoi zwykle "@Imie", a na
+   * BBCode zamieniamy dopiero przy wysylce, po tej mapie. Gdy ktos rozjedzie
+   * nazwe recznie, wzmianka po prostu zostanie tekstem. Zaden komentarz sie
+   * przez to nie zepsuje.
+   */
+  const [mentioned, setMentioned] = useState<Person[]>([]);
+
+  /**
+   * Pozycja malpy, ktora uzytkownik ODRZUCIL (Escape / klik w tlo).
+   *
+   * Bez tego lista wracala przy kazdym nastepnym klawiszu: kasowanie slowa
+   * backspace'em to zwykla zmiana tekstu, a `@Woj` wciaz stoi przed kursorem,
+   * wiec detekcja odpalala sie od nowa. Pamietamy WYLACZNIE indeks — gdy malpa
+   * przesunie sie albo zniknie, odrzucenie samo traci waznosc.
+   */
+  const dismissedAt = useRef<number | null>(null);
+
+  /*
+   * Zamkniecie listy. Focusu NIE trzeba przywracac: picker dostaje filtr z
+   * zewnatrz (`externalQuery`), nie ma wlasnego pola i nigdy nie zabiera kursora
+   * z pola komentarza. Wczesniej byl tu efekt oddajacy focus po odmontowaniu —
+   * zbedny, odkad nie ma czego oddawac.
+   */
+  const closeMention = useCallback((dismissAt?: number) => {
+    if (dismissAt !== undefined) dismissedAt.current = dismissAt;
+    setMention(null);
+  }, []);
   // Pytanie pojawia sie pod polem komentarza, czesto pod krawedzia panelu —
   // przewijamy je w pole widzenia, zeby nie trzeba bylo szukac go recznie.
   const askRef = useRef<HTMLDivElement>(null);
@@ -2185,8 +2469,22 @@ function Comments({
     if (!text || !me || sending) return;
     setSending(true);
     try {
-      await addComment(taskId, text, me);
+      /*
+       * Bitrix rozpoznaje wzmianke jako `[USER=id]Imie[/USER]` — samo "@Imie" jest
+       * dla niego zwyklym tekstem i nikogo nie powiadomi. Podmieniamy dopiero tutaj,
+       * zeby w polu stalo czytelne "@Imie", a nie znacznik. Dluzsze nazwy najpierw:
+       * inaczej "@Damian" zjadloby poczatek "@Damian Chwiejczak".
+       */
+      const body = [...mentioned]
+        .sort((a, b) => b.name.length - a.name.length)
+        .reduce(
+          (acc, p) => acc.split(`@${p.name}`).join(`[USER=${p.id}]${p.name}[/USER]`),
+          text,
+        );
+
+      await addComment(taskId, body, me);
       setDraft('');
+      setMentioned([]);
       load();
     } catch (e) {
       onError(`Nie udało się dodać komentarza: ${e instanceof Error ? e.message : String(e)}`);
@@ -2226,18 +2524,101 @@ function Comments({
       })}
 
       <textarea
+        ref={inputRef}
         className="comment-input"
         value={draft}
-        placeholder={me ? 'Napisz komentarz… (Ctrl+Enter wysyła)' : 'Brak identyfikatora użytkownika'}
+        placeholder={me ? 'Napisz komentarz… (@ wspomina osobę, Ctrl+Enter wysyła)' : 'Brak identyfikatora użytkownika'}
         disabled={!me || sending}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          const value = e.target.value;
+          setDraft(value);
+
+          /*
+           * Szukamy malpy NAJBLIZSZEJ kursorowi i tylko w biezacym "slowie":
+           * po spacji wzmianka sie konczy, a adres e-mail w tekscie nie ma
+           * otwierac listy osob (stad wymog spacji/poczatku linii przed `@`).
+           */
+          const caret = e.target.selectionStart ?? value.length;
+          const at = value.lastIndexOf('@', caret - 1);
+          const query = at === -1 ? '' : value.slice(at + 1, caret);
+          const opensWord = at === 0 || /\s/.test(value[at - 1] ?? '');
+
+          if (at === -1 || !opensWord || /\s/.test(query)) {
+            dismissedAt.current = null;
+            setMention(null);
+            return;
+          }
+          // Ta sama malpa, ktora juz odrzucono — nie otwieramy jej ponownie,
+          // dopoki uzytkownik nie napisze nowej.
+          if (dismissedAt.current === at) return;
+          /*
+           * Kotwice liczymy TYLKO przy otwieraniu listy. Mierzona przy kazdej
+           * literze sprawiala, ze panel drgal razem z pisaniem; pole i tak nie
+           * zmienia polozenia, wiec nie ma czego przeliczac.
+           */
+          setMention((prev) =>
+            prev
+              ? { ...prev, query, at }
+              : (() => {
+                  const r = e.target.getBoundingClientRect();
+                  return { at, query, anchor: { left: r.left, top: r.top, bottom: r.top } };
+                })(),
+          );
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             void send();
           }
+          if (e.key === 'Escape' && mention) {
+            e.preventDefault();
+            closeMention(mention.at);
+          }
         }}
       />
+
+      {mention && (
+        <Picker
+          title="Wspomnij osobę"
+          anchor={mention.anchor}
+          /* Filtrem jest to, co wpisano PO malpie — picker nie ma wlasnego pola
+             i nie zabiera kursora, wiec komentarz pisze sie jednym ciagiem. */
+          externalQuery={mention.query}
+          /* Zawsze NAD polem — dolna krawedz stoi w miejscu, lista rosnie w gore
+             i nigdy nie zaslania pisanego tekstu. */
+          above
+          options={people
+            .filter((p) => p.id !== UNASSIGNED_ID)
+            .map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }))}
+          emptyLabel="Brak osób"
+          onPick={(value) => {
+            const p = people.find((x) => x.id === Number(value));
+            if (!p) {
+              closeMention(mention.at);
+              return;
+            }
+            setMention(null);
+            // Podmieniamy dokladnie fragment "@to-co-wpisano" na "@Imie " i
+            // stawiamy kursor za nim, zeby dalo sie pisac dalej bez klikania.
+            const before = draft.slice(0, mention.at);
+            const after = draft.slice(mention.at + 1 + mention.query.length);
+            const insert = `@${p.name} `;
+            setDraft(`${before}${insert}${after}`);
+            setMentioned((m) => (m.some((x) => x.id === p.id) ? m : [...m, p]));
+            dismissedAt.current = null;
+            requestAnimationFrame(() => {
+              const el = inputRef.current;
+              if (!el) return;
+              const pos = before.length + insert.length;
+              el.focus();
+              el.setSelectionRange(pos, pos);
+            });
+          }}
+          /* Zamkniecie z KAZDEJ drogi (Escape w liscie, klik w tlo) wraca kursorem
+             na koniec tego, co wpisano po malpie — pisze sie dalej bez klikania. */
+          onClose={() => closeMention(mention.at)}
+        />
+      )}
       {bigTime && (
         <div className="worktime-ask" ref={askRef}>
           <p>
@@ -2472,6 +2853,7 @@ function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) =
 
 function DetailPanel({
   task,
+  people,
   stageName,
   sprintName,
   epic,
@@ -2494,6 +2876,8 @@ function DetailPanel({
   onError,
 }: {
   task: Task;
+  /** Osoby projektu — do wzmianek `@` w komentarzu. */
+  people: Person[];
   stageName: string;
   sprintName: string;
   /** Epik zadania — do pola w panelu; `null`, gdy bez epika lub projekt bez scruma. */
@@ -2999,6 +3383,7 @@ function DetailPanel({
           chatId={detail?.chatId ?? null}
           ready={detail !== null || detailError}
           me={me}
+          people={people}
           onError={onError}
         />
       </div>
@@ -3756,6 +4141,8 @@ export default function App() {
   const [filterPick, setFilterPick] = useState<{ condId: string; anchor: Anchor } | null>(null);
   /** Otwarte menu operatora (to / to nie / dowolny z…) dla jednego warunku. */
   const [opMenu, setOpMenu] = useState<{ condId: string; anchor: Anchor } | null>(null);
+  /** Przycisk „Widok:" w pasku — skrot `v` wiesza menu dokladnie pod nim. */
+  const viewsBtnRef = useRef<HTMLButtonElement>(null);
   /** Zapisane widoki (globalne, localStorage) i otwarte menu „Widoki". */
   const [views, setViews] = useState<SavedView[]>(loadViews);
   /** `hover: true` = menu wyskoczylo samo, bez klikniecia (nie kradnie wtedy focusu). */
@@ -3815,6 +4202,13 @@ export default function App() {
     setFilterPick({ condId: id, anchor });
   }, []);
 
+  /** Podmien CALY zestaw wartosci warunku — przy progach wybor jest jednokrotny. */
+  const setCondValues = useCallback(
+    (condId: string, values: string[]) =>
+      setFilters((f) => f.map((c) => (c.id === condId ? { ...c, values } : c))),
+    [],
+  );
+
   /** Przelacz jedna wartosc w konkretnym warunku (klik w pozycje popovera). */
   const toggleCondValue = useCallback(
     (condId: string, value: string) =>
@@ -3836,7 +4230,30 @@ export default function App() {
   /** Zmien operator warunku (menu na chipie). */
   const setCondOp = useCallback(
     (condId: string, op: FilterOp) =>
-      setFilters((f) => f.map((c) => (c.id === condId ? { ...c, op } : c))),
+      setFilters((f) =>
+        f.map((c) => {
+          if (c.id !== condId) return c;
+          /*
+           * Wejscie w zakres zasiewa granice tym, co juz bylo wybrane: po "to jedno
+           * z: 2 SP, 5 SP" zostaje zakres 2-5, a nie puste pola. "Bez oszacowania"
+           * odpada, bo nie jest liczba i nie moze byc granica.
+           */
+          if (isRange(c.field, op)) {
+            const nums = c.values
+              .filter((v) => v !== NO_POINTS && v !== '' && Number.isFinite(Number(v)))
+              .map(Number)
+              .sort((x, y) => x - y);
+            const from = nums.length ? String(nums[0]) : '';
+            const to = nums.length > 1 ? String(nums[nums.length - 1]) : '';
+            return { ...c, op, values: [from, to] };
+          }
+          // Wyjscie z zakresu w liste wartosci: puste granice nie sa wartosciami.
+          if (isRange(c.field, c.op)) {
+            return { ...c, op, values: c.values.filter((v) => v !== '') };
+          }
+          return { ...c, op };
+        }),
+      ),
     [],
   );
 
@@ -4034,6 +4451,16 @@ export default function App() {
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pl'));
   }, [tasks]);
 
+  /**
+   * Story pointy OBECNE w danych, rosnaco - skala suwaka zakresu. Bierzemy ja z
+   * zadan, a nie z wymyslonej listy, bo kazdy zespol szacuje inaczej.
+   */
+  const pointsScale = useMemo(() => {
+    const seen = new Set<number>();
+    for (const t of tasks) if (t.storyPoints !== null) seen.add(t.storyPoints);
+    return [...seen].sort((a, b) => a - b);
+  }, [tasks]);
+
   /** Etykieta pojedynczej wartosci filtra — do podpisu chipa. */
   const filterValueLabel = useCallback(
     (field: FilterField, value: string): string => {
@@ -4046,6 +4473,7 @@ export default function App() {
       if (field === 'epic')
         return value === '0' ? 'Bez epika' : (epicNames.get(Number(value))?.name ?? `#${value}`);
       if (field === 'tag' && value === NO_TAGS) return 'Bez tagów';
+      if (field === 'points') return value === NO_POINTS ? 'Bez oszacowania' : `${value} SP`;
       return value; // etap i tag — wartoscia jest sama nazwa
     },
     [people, labels, epicNames],
@@ -4101,6 +4529,8 @@ export default function App() {
         return c ? `#${c}` : 'var(--fg-dim)';
       }
       if (field === 'tag') return value === NO_TAGS ? 'var(--fg-dim)' : tagHue(value);
+      // Story pointy nie maja wlasnego koloru — to skala liczbowa, nie kategoria.
+      if (field === 'points') return 'var(--fg)';
       if (field === 'epic') {
         const e = epicNames.get(Number(value));
         return value === '0' ? 'var(--fg-dim)' : e?.color ? `#${e.color}` : tagHue(e?.name ?? value);
@@ -4128,10 +4558,12 @@ export default function App() {
     (field: FilterField, v: string, i: number): ReactNode => {
       const color = filterValueColor(field, v);
       const hasIcon = field === 'status' || field === 'stage';
-      const tinted = hasIcon || field === 'tag' || field === 'epic' || field === 'priority';
+      const tinted =
+        hasIcon || field === 'tag' || field === 'epic' || field === 'priority' || field === 'points';
       // Priorytet ma WLASNY, kolorowy znak (slupki), wiec jego moneta jest tylko lekko
       // podbarwiona (28%), zeby slupki zostaly czytelne; reszta (pierscien/tag) 55%.
-      const tintPct = field === 'priority' ? 28 : 55;
+      // Story pointy niosa CYFRE, wiec tlo musi zejsc jeszcze nizej niz przy priorytecie.
+      const tintPct = field === 'points' ? 14 : field === 'priority' ? 28 : 55;
       return (
         <span
           className="filter-chip-vicon"
@@ -4149,6 +4581,11 @@ export default function App() {
             filterValueIcon(field, v)
           ) : field === 'tag' || field === 'epic' ? (
             <span className="filter-chip-tagcore" style={{ background: color }} />
+          ) : field === 'points' ? (
+            /* Story point NIE ma ikony — jest liczba, wiec liczba jest znakiem.
+               W facepile („2" „3" „5") to jedyne, co odroznia monety od siebie;
+               bez tego wpadalyby w golasy `filterValueIcon('priority')` ponizej. */
+            <span className="filter-chip-points">{v === NO_POINTS ? '–' : v}</span>
           ) : (
             filterValueIcon('priority', v)
           )}
@@ -4210,6 +4647,28 @@ export default function App() {
       }
       return opts;
     }
+    if (field === 'points') {
+
+      /*
+       * Wartosci bierzemy Z DANYCH, nie z wymyslonej skali: kazdy zespol szacuje
+       * inaczej (Fibonacci, koszulki przeliczone na liczby, cokolwiek), a lista
+       * ktorej nie ma w zadnym zadaniu to same puste wyniki.
+       */
+      const seen = new Map<number, number>();
+      for (const t of tasks) {
+        if (t.storyPoints === null) continue;
+        seen.set(t.storyPoints, (seen.get(t.storyPoints) ?? 0) + 1);
+      }
+      const values = [...seen.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([sp, count]) => ({ value: String(sp), label: `${sp} SP`, hint: String(count) }));
+
+      const missing = tasks.filter((t) => t.storyPoints === null).length;
+      return [
+        { value: NO_POINTS, label: 'Bez oszacowania', hint: String(missing) },
+        ...values,
+      ];
+    }
     if (field === 'epic') {
       const dot = (c: string) => <span className="tag-dot" style={{ background: c }} />;
       return [
@@ -4235,7 +4694,7 @@ export default function App() {
         icon: <span className="tag-dot" style={{ background: tagHue(tag) }} />,
       })),
     ];
-  }, [filters, filterPick, people, labels, stages, sprintId, stageMeta, allTags, epics]);
+  }, [filters, filterPick, people, labels, stages, sprintId, stageMeta, allTags, epics, tasks]);
 
   /*
    * Klucze pustych grup dla danej osi — tylko etap i status maja skonczony, znany
@@ -4478,6 +4937,18 @@ export default function App() {
     return views.find((v) => viewFingerprint(v) === fp)?.id ?? null;
   }, [views, viewSnapshot]);
 
+  /**
+   * Zdjecie CALEGO zawezenia listy: filtry + wyszukiwanie. Jedna definicja na
+   * dwa wejscia - przycisk "x" w pasku i skrot `x` - zeby nie rozjechaly sie
+   * w tym, co dokladnie czyszcza.
+   */
+  const clearAllFilters = useCallback(() => {
+    setFilters(EMPTY_FILTERS);
+    setQuery('');
+    // SearchBox trzyma wlasny draft, wiec sam `setQuery` zostawilby w polu tekst.
+    searchRef.current?.setValue('');
+  }, []);
+
   const applyView = useCallback((v: SavedView) => {
     // Swieze id warunkow, zeby nie kolidowaly z licznikiem `condSeq` biezacej sesji.
     setFilters(v.filters.map((c) => ({ ...c, id: newCondId() })));
@@ -4645,6 +5116,33 @@ export default function App() {
         if (e.key === 'Escape') setHelpOpen(false);
         return;
       }
+      /*
+       * Otwarte "Widoki": cyfra 1-9 stosuje widok o tym numerze. Chord jest tu
+       * WIDOCZNY, a nie zapamietany - `v` najpierw pokazuje liste z numerami,
+       * wiec nie trzeba niczego wiedziec z gory ani zdazyc przed timeoutem.
+       * Gdy focus siedzi w polu nazwy (menu otwarte klikiem), cyfry nalezą do
+       * pola - inaczej nie dalo by sie nazwac widoku "Sprint 65".
+       */
+      if (viewsMenu) {
+        const inField =
+          e.target instanceof HTMLElement &&
+          (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+        if (e.key === 'Escape') {
+          clearViewsTimer();
+          setViewsMenu(null);
+          return;
+        }
+        if (!inField && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          const n = Number(e.key);
+          if (Number.isInteger(n) && n >= 1 && n <= 9 && views[n - 1]) {
+            e.preventDefault();
+            applyView(views[n - 1]);
+            clearViewsTimer();
+            setViewsMenu(null);
+          }
+        }
+        return;
+      }
       if (picker) return; // popover ma wlasna obsluge klawiatury
       if (menu || viewMenu) {
         if (e.key === 'Escape') {
@@ -4710,6 +5208,37 @@ export default function App() {
         if (current) setOpenId(current.id);
       } else if (e.key === 'r') {
         void reload();
+      } else if (e.key === '1' || e.key === '2' || e.key === '3') {
+        /*
+         * Widok listy / tablicy / wykresow pod cyframi w KOLEJNOSCI ZAKLADEK
+         * z panelu widoku. Osobny klawisz tylko dla wykresow bylby wyjatkiem bez
+         * reguly - skoro widoki sa trzy, wszystkie trzy dostaja swoja cyfre.
+         */
+        e.preventDefault();
+        setViewMode((['list', 'board', 'charts'] as const)[Number(e.key) - 1]);
+      } else if (e.key === 'v') {
+        /*
+         * Menu kotwiczymy do PRZYCISKU, nie do srodka ekranu: to samo miejsce,
+         * co po kliknieciu, wiec klawisz i mysz otwieraja jedno i to samo, a nie
+         * dwa rozne panele. Bez przycisku (waski pasek) skrot po prostu milczy.
+         */
+        const el = viewsBtnRef.current;
+        if (!el) return;
+        e.preventDefault();
+        clearViewsTimer();
+        const r = el.getBoundingClientRect();
+        // `kb` = otwarte z klawiatury: NIE zabieramy focusu do pola nazwy, bo
+        // inaczej cyfry wpadalyby w "Zapisz biezacy widok" zamiast wybierac widok.
+        setViewsMenu({ left: r.left - 32, top: r.bottom + 4, bottom: r.bottom + 4, kb: true });
+      } else if (e.key === 'x') {
+        /*
+         * To samo, co "x" w pasku: filtry ORAZ wyszukiwanie. Rozdzielanie tych
+         * dwoch myli — z paska widac jedno zawezenie listy, wiec jeden gest ma je
+         * zdejmowac w calosci. Pole szukania czyscimy przez `setValue`, bo trzyma
+         * wlasny stan (niekontrolowany input), a sam `setQuery` zostawilby w nim
+         * tekst przy pustym juz filtrze.
+         */
+        clearAllFilters();
       } else if (e.key === '?') {
         e.preventDefault();
         setHelpOpen(true);
@@ -4768,6 +5297,12 @@ export default function App() {
     marked,
     targetsFor,
     confirm,
+    clearAllFilters,
+    clearViewsTimer,
+    viewsMenu,
+    views,
+    applyView,
+    viewMode,
   ]);
 
   const applyStage = useCallback(
@@ -5587,8 +6122,9 @@ export default function App() {
 
           {/* Przelacznik zapisanych widokow — po LEWEJ, przed grupa filtrow. */}
           <button
+            ref={viewsBtnRef}
             className="views-btn"
-            title="Zapisane widoki"
+            title="Zapisane widoki (V)"
             onMouseEnter={(e) => openViewsSoon(e.currentTarget)}
             onMouseLeave={closeViewsSoon}
             onClick={(e) => {
@@ -5610,11 +6146,7 @@ export default function App() {
             <button
               className={`filter-clear-x${clearCollapsed ? ' filter-clear-x-min' : ''}`}
               title="Wyczyść wszystkie (filtry i wyszukiwanie)"
-              onClick={() => {
-                setFilters(EMPTY_FILTERS);
-                setQuery('');
-                searchRef.current?.setValue('');
-              }}
+              onClick={clearAllFilters}
             >
               <CloseIcon />
               <span className="filter-clear-x-label">Wyczyść wszystkie</span>
@@ -5651,7 +6183,13 @@ export default function App() {
                       });
                     }}
                   >
-                    {c.values.length === 1 ? (
+                    {isRange(c.field, c.op) ? (
+                      /* Zakres to JEDNA wartosc do przeczytania ("3-8"), a nie dwie
+                         monety obok siebie: facepile sugerowalaby wybor z listy. */
+                      <span className="filter-chip-val">
+                        <span className="filter-chip-range">{rangeLabel(c.values)}</span>
+                      </span>
+                    ) : c.values.length === 1 ? (
                       // Jedna wartosc: ta sama moneta (tlo POD ikona) co w facepile + podpis.
                       <span className="filter-chip-val">
                         <span className="filter-chip-stack">{filterToken(c.field, c.values[0], 0)}</span>
@@ -5855,6 +6393,7 @@ export default function App() {
       {openTask && (
         <DetailPanel
           task={openTask}
+          people={people}
           stageName={(openTask.stageId && stageNames.get(openTask.stageId)) || 'Poza sprintem'}
           sprintName={sprintLabel(openTask)}
           epic={epicOf(openTask)}
@@ -5965,7 +6504,8 @@ export default function App() {
           onDelete={deleteView}
           onSave={saveView}
           /* Otwarte najechaniem: nie zabieramy focusu i pilnujemy kursora nad menu. */
-          autoFocusInput={!viewsMenu.hover}
+          autoFocusInput={!viewsMenu.hover && !viewsMenu.kb}
+          showKeys={!!viewsMenu.kb}
           hover={!!viewsMenu.hover}
           onHoverIn={clearViewsTimer}
           onHoverOut={closeViewsSoon}
@@ -5996,6 +6536,31 @@ export default function App() {
         // Wartosci otwartego warunku — pobieramy go po id, zeby chip i popover byly zawsze zgodne.
         const cond = filterPick && filters.find((c) => c.id === filterPick.condId);
         if (!filterPick || !cond) return null;
+        // Prog to JEDNA granica, wiec picker przestaje byc wielokrotny: dwie
+        // granice naraz nie zawezalyby niczego sensownie (a matchCondition i tak
+        // czyta tylko pierwsza). Zakres sklada sie z dwoch osobnych warunkow.
+        // Zakres ma wlasny popover (dwa pola), nie liste wartosci.
+        if (isRange(cond.field, cond.op)) {
+          return (
+            <RangeMenu
+              anchor={filterPick.anchor}
+              scale={pointsScale}
+              from={cond.values[0] ?? ''}
+              to={cond.values[1] ?? ''}
+              onChange={(from, to) => setCondValues(cond.id, [from, to])}
+              onUnestimated={() => {
+                setCondOp(cond.id, 'is');
+                setCondValues(cond.id, [NO_POINTS]);
+                setFilterPick(null);
+              }}
+              onClose={() => {
+                // Zakres bez zadnej granicy to warunek, ktory niczego nie robi.
+                if (!(cond.values[0] || cond.values[1])) removeCondition(cond.id);
+                setFilterPick(null);
+              }}
+            />
+          );
+        }
         return (
           <Picker
             multi
