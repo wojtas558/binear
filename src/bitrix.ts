@@ -496,6 +496,44 @@ export async function fetchActiveSprint(groupId: number): Promise<Sprint | null>
  * biezacego. Ten sam filtr UPPER_CASE co w `fetchActiveSprint`: `groupId` pisane
  * malymi literami po cichu oddaje pusta liste.
  */
+/**
+ * WSZYSCY aktywni pracownicy portalu, a nie tylko ci, ktorzy trafili do zadan.
+ * Lista osob budowana z zadan pokazuje kilkunascie nazwisk z jednego projektu,
+ * co wystarcza do FILTROWANIA (po kims bez zadan i tak nie ma czego filtrowac),
+ * ale nie do wzmianek `@` - tam trzeba dosiegnac calej firmy, takze kogos, kto
+ * nie ma u nas ani jednego zadania.
+ *
+ * `FILTER[ACTIVE]` zalatwia sie po stronie portalu: z 158 kont 93 to osoby juz
+ * NIEAKTYWNE (byli pracownicy). Bez tego filtra dwie trzecie listy wzmianek to
+ * ludzie, ktorych nie ma juz w firmie.
+ *
+ * `USER_TYPE` odsiewamy dodatkowo u siebie - dzis kazde konto na tym portalu to
+ * `employee`, ale konta zewnetrzne (extranet, e-mail, boty) nie maja czego szukac
+ * we wzmiankach, gdyby kiedys sie pojawily.
+ */
+export async function fetchEmployees(): Promise<Person[]> {
+  const PAGE = 50;
+  const raw: any[] = [];
+  for (let start = 0, page = 0; page < 20; page++) {
+    const chunk = await call<any[]>('user.get', { FILTER: { ACTIVE: 'Y' }, start });
+    const got = chunk ?? [];
+    raw.push(...got);
+    if (got.length < PAGE) break;
+    start += PAGE;
+  }
+
+  return raw
+    .filter((u) => str(u.USER_TYPE) === 'employee')
+    .map((u) => ({
+      id: Number(u.ID),
+      // Czesc kont to skrzynki dzialow ("Lakiernia", "Zwroty i wymiany") - maja samo
+      // imie i zadnego nazwiska. Zostaja: wspomnienie dzialu jest sensowne.
+      name: [str(u.NAME), str(u.LAST_NAME)].filter(Boolean).join(' ').trim() || `#${u.ID}`,
+      photo: photoUrl(u.PERSONAL_PHOTO),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+}
+
 export async function fetchSprints(groupId: number): Promise<Sprint[]> {
   /*
    * Metoda stronicuje po 50, ale - inaczej niz reszta REST-u - NIE oddaje ani

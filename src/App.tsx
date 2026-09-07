@@ -48,6 +48,7 @@ import {
   updateEpic,
   updateTags,
   updateTask,
+  fetchEmployees,
   type AppConfig,
   type Comment,
   type Epic,
@@ -89,7 +90,6 @@ import {
   CheckIcon,
   CloseIcon,
   CommentIcon,
-  CopyIcon,
   ExternalIcon,
   ElsewhereIcon,
   TrashIcon,
@@ -106,6 +106,7 @@ import {
   UNASSIGNED_LABEL,
 } from './taskView';
 import { Picker, type Anchor, type Option } from './Picker';
+import { TaskCode } from './TaskCode';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { CommandPalette, type Command } from './CommandPalette';
@@ -1604,11 +1605,22 @@ function ViewsMenu({
         Wersja hover zamyka sie zjechaniem kursora, wiec lapacz klikniec jest zbedny.
       */}
       {!hover && <div className="picker-backdrop" onClick={onClose} />}
+      {/*
+        Kursor pilnujemy WYLACZNIE w trybie hover. Menu otwarte KLIKIEM nie ma
+        prawa reagowac na ruch myszy: zamyka je klik w tlo, Esc albo wybor widoku.
+
+        Wczesniej te dwa uchwyty wisialy zawsze i menu otwarte klikiem znikalo od
+        przypadkowego `mouseleave` — wystarczylo przejechac nad polem nazwy. Tlo
+        na caly ekran, przelaczany `disabled` na inpucie i 4-pikselowa szpara
+        miedzy przyciskiem a panelem daja kilka roznych sposobow, zeby taki
+        `mouseleave` powstal, wiec zamiast lapac je po kolei odbieramy trybowi
+        klikanemu cala te sciezke.
+      */}
       <div
         className="picker"
         style={{ left, top, width }}
-        onMouseEnter={onHoverIn}
-        onMouseLeave={onHoverOut}
+        onMouseEnter={hover ? onHoverIn : undefined}
+        onMouseLeave={hover ? onHoverOut : undefined}
       >
         <div className="picker-title">Widoki</div>
         <div
@@ -1674,9 +1686,12 @@ function ViewsMenu({
  * Selektor zakresu (Sprint / Poza sprintem / Wszystkie) — zwykla lista rozwijana:
  * przycisk z biezaca wartoscia, pod nim opcje z ptaszkiem przy wybranej.
  *
- * Byla tu kiedys karuzela (sasiedzi nad i pod przyciskiem, obracana kolkiem myszy).
- * Wyleciala: kolko kradlo przewijanie strony, a "co jest teraz wybrane" trzeba bylo
- * wyczytac z ulozenia elementow zamiast z ptaszka.
+ * Byla tu kiedys karuzela (sasiedzi nad i pod przyciskiem). Wyleciala, bo "co jest
+ * teraz wybrane" trzeba bylo wyczytac z ulozenia elementow zamiast z ptaszka.
+ *
+ * KOLKO ZOSTAJE. To byl osobny mechanizm od samego ukladu i jedyny sposob, zeby
+ * przeskoczyc zakres bez otwierania listy — zdjete razem z karuzela tylko dlatego,
+ * ze siedzialo w tym samym komponencie.
  */
 function ScopePicker({
   scope,
@@ -1692,11 +1707,47 @@ function ScopePicker({
   onPick: (s: Scope) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const n = scopes.length;
   const sel = Math.max(
     0,
     scopes.findIndex((s) => s.key === scope),
   );
   const cur = scopes[sel] ?? scopes[0];
+
+  /*
+   * Kolko myszy przeskakuje zakres — jeden krok na „zabkowanie", takze na
+   * ZWINIETYM przycisku, wiec da sie zmienic sprint bez otwierania listy.
+   *
+   * Listener natywny z `passive: false`, bo tylko taki moze zatrzymac przewijanie
+   * strony; React montuje `onWheel` jako pasywny i `preventDefault` nic tam nie
+   * daje. Przy jednym zakresie nie ruszamy niczego — wtedy kolko nalezy do strony.
+   *
+   * `acc` zbiera deltaY do progu, bo gladzik sypie dziesiatkami drobnych zdarzen
+   * i bez tego jeden ruch palcem przewijalby przez wszystkie zakresy naraz.
+   *
+   * `selRef` trzyma biezaca pozycje, zeby listener nie przepinal sie przy kazdej
+   * zmianie zakresu — inaczej `addEventListener`/`removeEventListener` chodzilyby
+   * w kolko przy samym przewijaniu.
+   */
+  const selRef = useRef(sel);
+  selRef.current = sel;
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    let acc = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (n < 2) return;
+      e.preventDefault();
+      acc += e.deltaY;
+      if (Math.abs(acc) < 24) return;
+      const dir = acc > 0 ? 1 : -1;
+      acc = 0;
+      onPick(scopes[(selRef.current + dir + n) % n].key);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [scopes, onPick, n]);
 
   const dates = (key: Scope) =>
     key === 'sprint' && activeSprint ? (
@@ -1706,7 +1757,7 @@ function ScopePicker({
     s.key === 'sprint' && activeSprint ? activeSprint.name : s.label;
 
   return (
-    <div className={`scope-picker-wrap${open ? ' scope-open' : ''}`}>
+    <div className={`scope-picker-wrap${open ? ' scope-open' : ''}`} ref={wrapRef}>
       {open && <div className="picker-backdrop" onClick={() => setOpen(false)} />}
 
       <button
@@ -1986,39 +2037,6 @@ function TagStrip({
           </div>,
           document.body,
         )}
-    </span>
-  );
-}
-
-/**
- * Kod zadania z przyciskiem kopiowania. Kopiujemy sam kod (IT-749), bo to jego
- * wkleja sie w nazwe galezi, tytul PR-a i commit — czyli w to, po czym
- * `bitrix_sync.py` rozpoznaje zadanie.
- */
-function TaskCode({ code, onCopied }: { code: string; onCopied: (text: string) => void }) {
-  const [done, setDone] = useState(false);
-
-  return (
-    <span className="row-code">
-      {code}
-      <button
-        className="copy-btn"
-        title={`Kopiuj ${code}`}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={(e) => {
-          e.stopPropagation();
-          void navigator.clipboard
-            .writeText(code)
-            .then(() => {
-              setDone(true);
-              setTimeout(() => setDone(false), 1200);
-              onCopied(code);
-            })
-            .catch(() => onCopied(''));
-        }}
-      >
-        {done ? <CheckIcon /> : <CopyIcon />}
-      </button>
     </span>
   );
 }
@@ -4393,6 +4411,31 @@ export default function App() {
     });
   }, [tasks, me]);
 
+  /*
+   * Ksiazka adresowa CALEJ firmy - osobno od `people`, ktore powstaje z zadan.
+   * Te dwie listy odpowiadaja na dwa rozne pytania: `people` na "po kim moge
+   * filtrowac" (po kims bez zadan nie ma sensu), roster na "kogo moge wspomniec"
+   * (kazdego). Sciagamy raz, przy starcie, i tylko do wzmianek.
+   */
+  const [roster, setRoster] = useState<Person[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void fetchEmployees()
+      .then((list) => alive && setRoster(list))
+      // Cicho: bez rosteru wzmianki nadal dzialaja, tylko na wezszej liscie.
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /*
+   * Roster, a gdy go nie ma - lista z zadan. Nie SUMA obu: kto odszedl z firmy,
+   * ten wypada z `FILTER[ACTIVE]`, ale jego stare zadania zostaja, wiec suma
+   * wracalaby z byłymi pracownikami dokladnie tam, gdzie ich nie chcemy.
+   */
+  const mentionPeople = roster.length ? roster : people;
+
   const sprintId = activeSprint?.id ?? null;
 
   // Przelaczniki dzialaja niezaleznie od zakresu, zeby liczniki przy zakresach
@@ -6126,7 +6169,22 @@ export default function App() {
             className="views-btn"
             title="Zapisane widoki (V)"
             onMouseEnter={(e) => openViewsSoon(e.currentTarget)}
-            onMouseLeave={closeViewsSoon}
+            /*
+             * Zjechanie kursorem zamyka TYLKO menu otwarte najechaniem.
+             *
+             * Po kliknieciu menu przestaje byc "hover" i dostaje pelnoekranowa
+             * przeslone, ktora natychmiast przykrywa przycisk — przegladarka
+             * wystawia wtedy `mouseleave`, choc mysz nawet nie drgnela. Menu
+             * gaslo samo 260 ms po kliknieciu, przeslona znikala razem z nim,
+             * spod niej szedl `mouseenter` i menu wracalo: stad mrugniecie
+             * przy kazdym kliknieciu w juz otwarta liste.
+             *
+             * Menu otwarte KLIKIEM ma sie zamykac klikiem (w przeslone), Esc
+             * albo wyborem widoku — nie tym, ze mysz odjechala.
+             */
+            onMouseLeave={() => {
+              if (!viewsMenu || viewsMenu.hover) closeViewsSoon();
+            }}
             onClick={(e) => {
               // Klik dziala jak dawniej: otwiera od razu (i ustawia focus w polu nazwy).
               clearViewsTimer();
@@ -6273,6 +6331,9 @@ export default function App() {
             marked={marked}
             newIds={newIds}
             parentLabels={parentLabels}
+            onCopied={(code) =>
+              toast(code ? `Skopiowano ${code}` : 'Nie udało się skopiować do schowka')
+            }
             onOpen={(id, e) => clickRow(e, id)}
             onMenu={(id, anchor) => {
               setCursor(flat.findIndex((x) => x.id === id));
@@ -6393,7 +6454,7 @@ export default function App() {
       {openTask && (
         <DetailPanel
           task={openTask}
-          people={people}
+          people={mentionPeople}
           stageName={(openTask.stageId && stageNames.get(openTask.stageId)) || 'Poza sprintem'}
           sprintName={sprintLabel(openTask)}
           epic={epicOf(openTask)}

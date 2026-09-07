@@ -108,6 +108,29 @@ export interface Series {
   points: BurndownPoint[];
 }
 
+/**
+ * Przechyl liczby "plan" ku zieleni albo czerwieni: zieleni, gdy zostalo MNIEJ
+ * niz przewiduje plan (idziemy szybciej), czerwieni, gdy wiecej.
+ *
+ * To nie jest kolor sam w sobie, tylko DOCIAGNIECIE szarosci — mieszamy
+ * `--fg-dim` z przygaszonym odcieniem, wiec punktem wyjscia w kazdym motywie
+ * zostaje jego wlasna szarosc, a liczba nigdy nie krzyczy glosniej niz linie,
+ * ktore opisuje. Odcien i nasycenie jak u osob (52%/55%), nie czysty zielony.
+ *
+ * Miara to odchylka w stosunku do CALEGO zakresu serii, nie do planu na dany
+ * dzien. Pod koniec sprintu plan schodzi do zera i przy nim kazda roznica byla
+ * by procentowo ogromna — jedno zalegle zadanie swiecilo by wtedy na pelna
+ * czerwien. Pelny przechyl nalezy sie dopiero roznicy rzedu 20% zakresu.
+ */
+function paceFill(actual: number, plan: number, scope: number): string {
+  const gap = plan - actual; // dodatni = zostalo mniej niz w planie, czyli szybciej
+  const t = Math.min(1, Math.abs(gap) / Math.max(scope * 0.2, 1));
+  // Ponizej progu roznica jest szumem, a ledwo widoczny przechyl czytalby sie
+  // jak brud na tekscie, nie jak informacja.
+  if (t < 0.05) return 'var(--fg-dim)';
+  return `color-mix(in oklab, hsl(${gap > 0 ? 145 : 5} 52% 55%) ${Math.round(t * 65)}%, var(--fg-dim))`;
+}
+
 export function BurndownChart({ series }: { series: Series[] }) {
   // Hooki musza stac PRZED jakimkolwiek `return` — inaczej przy sprincie bez dni
   // roboczych React dostaje inna liczbe hookow niz przy pelnym i wywala liste.
@@ -340,7 +363,11 @@ export function BurndownChart({ series }: { series: Series[] }) {
                     <tspan className="hover-value" dx="6">
                       {Math.round(tip.rows[0]?.v ?? 0)} SP
                     </tspan>
-                    <tspan className="hover-plan" dx="6">
+                    <tspan
+                      className="hover-plan"
+                      dx="6"
+                      style={{ fill: paceFill(tip.rows[0]?.v ?? 0, tip.plan, days[0]?.ideal ?? 0) }}
+                    >
                       plan {tip.plan}
                     </tspan>
                   </text>
@@ -361,7 +388,13 @@ export function BurndownChart({ series }: { series: Series[] }) {
                         textAnchor={anchor}
                       >
                         {s.label} · {Math.round(v)} SP
-                        <tspan className="hover-plan" dx="6">
+                        {/* Zakres liczymy z WLASNEJ serii — przy wspolnym kazdy,
+                            kto ma malo pointow, zostawalby na zawsze szary. */}
+                        <tspan
+                          className="hover-plan"
+                          dx="6"
+                          style={{ fill: paceFill(v, plan, s.points[0]?.ideal ?? 0) }}
+                        >
                           plan {Math.round(plan)}
                         </tspan>
                       </text>

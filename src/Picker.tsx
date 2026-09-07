@@ -6,7 +6,7 @@
  * sam powod, dla ktorego wczesniej wyjechalo stad `taskView.ts` dla tablicy.
  */
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Avatar, CheckIcon } from './icons';
 
@@ -111,6 +111,9 @@ export function Picker({
   const query = controlled ? externalQuery : ownQuery;
   const setQuery = setOwnQuery;
   const [cursor, setCursor] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  /** Czy kursor przesunela KLAWIATURA — patrz efekt przewijania nizej. */
+  const byKey = useRef(false);
   const [seg, setSeg] = useState(segments?.[0]?.key ?? '');
   const sel = useMemo(() => new Set(selected ?? []), [selected]);
   /*
@@ -148,7 +151,40 @@ export function Picker({
     return withRaw.slice(0, 200);
   }, [options, query, rawLabel, freeLabel, seg]);
 
-  useEffect(() => setCursor(0), [query, seg]);
+  useEffect(() => {
+    setCursor(0);
+    // Po przefiltrowaniu lista jest INNA — zostawienie jej przewinietej pokazywaloby
+    // srodek nowego zestawu, a kursor stoi przeciez na pierwszej pozycji.
+    listRef.current?.scrollTo({ top: 0 });
+  }, [query, seg]);
+
+  /*
+   * Kursor klawiatury musi zostawac W KADRZE. Lista ma wlasny pasek przewijania,
+   * wiec bez tego strzalka w dol schodzila ponizej dolnej krawedzi i zaznaczenie
+   * po prostu znikalo — dalej dzialalo, tylko nie bylo go widac.
+   *
+   * Przewijamy TYLKO po klawiaturze. Kursor przestawia takze `onMouseEnter`, a
+   * doprzewijanie przy myszy przesuwaloby wiersze pod wskaznikiem, co wywolywaloby
+   * kolejny `mouseenter` — lista uciekalaby spod kursora.
+   *
+   * Pozycje szukamy po klasie, nie po indeksie: separatory (`picker-sep`) sa
+   * osobnymi dziecmi, wiec `children[cursor]` wskazywaloby nie ten wiersz.
+   */
+  useEffect(() => {
+    if (!byKey.current) return;
+    byKey.current = false;
+
+    const list = listRef.current;
+    const item = list?.querySelector<HTMLElement>('.picker-item-active');
+    if (!list || !item) return;
+
+    // Liczymy na prostokatach ekranowych, a nie na `offsetTop`: ten ostatni jest
+    // wzgledem najblizszego pozycjonowanego przodka, ktory nie musi byc lista.
+    const box = list.getBoundingClientRect();
+    const row = item.getBoundingClientRect();
+    if (row.top < box.top) list.scrollTop -= box.top - row.top;
+    else if (row.bottom > box.bottom) list.scrollTop += row.bottom - box.bottom;
+  }, [cursor]);
 
   /*
    * Sterowanie z klawiatury, gdy filtr przychodzi Z ZEWNATRZ.
@@ -168,9 +204,11 @@ export function Picker({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        byKey.current = true;
         setCursor((c) => Math.min(c + 1, shown.length - 1));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        byKey.current = true;
         setCursor((c) => Math.max(c - 1, 0));
       } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
         const opt = shown[cursor];
@@ -242,9 +280,11 @@ export function Picker({
               onClose();
             } else if (e.key === 'ArrowDown') {
               e.preventDefault();
+              byKey.current = true;
               setCursor((c) => Math.min(c + 1, shown.length - 1));
             } else if (e.key === 'ArrowUp') {
               e.preventDefault();
+              byKey.current = true;
               setCursor((c) => Math.max(c - 1, 0));
             } else if (e.key === 'Enter') {
               e.preventDefault();
@@ -255,7 +295,7 @@ export function Picker({
           }}
         />
         )}
-        <div className="picker-list">
+        <div className="picker-list" ref={listRef}>
           {shown.length === 0 && <div className="picker-empty">{emptyLabel ?? 'Brak opcji'}</div>}
           {shown.map((o, i) => (
             <Fragment key={o.value}>

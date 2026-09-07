@@ -4,6 +4,7 @@ import type { Epic, Stage, Task } from './bitrix';
 import { Avatar, CommentIcon, ParentIcon, PriorityIcon, tagHue } from './icons';
 import { shortDate, isUnassigned, sumPoints } from './taskView';
 import { colDropId, dragId } from './dnd';
+import { TaskCode } from './TaskCode';
 
 /**
  * Tablica = kanban sprintu z Bitriksa, nie wlasny wymysl: kolumny to etapy
@@ -32,6 +33,7 @@ export function Board({
   epicOf,
   onOpen,
   onMenu,
+  onCopied,
 }: {
   tasks: Task[];
   stages: Stage[];
@@ -50,6 +52,8 @@ export function Board({
   /** Epik zadania — karta pokazuje ta sama plakietke co wiersz listy (parytet widokow). */
   epicOf: (t: Task) => Epic | null;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
+  /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
+  onCopied: (code: string) => void;
 }) {
   const byStage = new Map<number, Task[]>();
   for (const t of tasks) {
@@ -88,6 +92,7 @@ export function Board({
           epicOf={epicOf}
           onOpen={onOpen}
           onMenu={onMenu}
+          onCopied={onCopied}
         />
       )}
 
@@ -107,6 +112,7 @@ export function Board({
           epicOf={epicOf}
           onOpen={onOpen}
           onMenu={onMenu}
+          onCopied={onCopied}
         />
       ))}
     </div>
@@ -127,6 +133,7 @@ function BoardColumn({
   epicOf,
   onOpen,
   onMenu,
+  onCopied,
 }: {
   title: string;
   color: string | null;
@@ -142,6 +149,8 @@ function BoardColumn({
   parentLabels: Map<number, string>;
   epicOf: (t: Task) => Epic | null;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
+  /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
+  onCopied: (code: string) => void;
 }) {
   const { setNodeRef, isOver, active } = useDroppable({
     id: colDropId(stageId ?? -1),
@@ -177,6 +186,7 @@ function BoardColumn({
             epic={epicOf(t)}
             onOpen={onOpen}
             onMenu={onMenu}
+            onCopied={onCopied}
           />
         ))}
 
@@ -199,6 +209,7 @@ function BoardCard({
   epic,
   onOpen,
   onMenu,
+  onCopied,
 }: {
   task: Task;
   draggable: boolean;
@@ -212,6 +223,8 @@ function BoardCard({
   epic: Epic | null;
   onOpen: (id: number, e: ReactMouseEvent) => void;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
+  /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
+  onCopied: (code: string) => void;
 }) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
     id: dragId(t.id),
@@ -240,7 +253,7 @@ function BoardCard({
       }}
     >
       <div className="card-top">
-        <span className="row-code">{t.code ?? `#${t.id}`}</span>
+        <TaskCode code={t.code ?? `#${t.id}`} onCopied={onCopied} />
         {/* Bez pierscienia etapu — kolumna, w ktorej lezy karta, JEST etapem. */}
         <PriorityIcon priority={t.priority} />
         <span className="card-spacer" />

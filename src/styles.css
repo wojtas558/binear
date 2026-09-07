@@ -2031,6 +2031,8 @@ input[type='search']::-webkit-search-decoration {
 }
 
 .row:hover .copy-btn,
+/* Karta nie jest `.row`, wiec bez tego przycisk zostawal ukryty na tablicy. */
+.card:hover .copy-btn,
 .detail-head .copy-btn {
   display: inline-flex;
 }
