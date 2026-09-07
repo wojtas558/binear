@@ -14,7 +14,7 @@ const CAP = 80;
  * Jeden lekki cache LRU per rodzaj danych (szczegoly, komentarze). Klucz = id zadania,
  * wartosc = dane + znacznik czasu ostatniego zapisu (do wyrzucania najstarszych).
  */
-function makeCache<T>(storageKey: string) {
+function makeCache<T>(storageKey: string, usable: (value: T) => boolean) {
   type Entry = { value: T; ts: number };
   let store: Record<string, Entry> | null = null;
 
@@ -30,7 +30,20 @@ function makeCache<T>(storageKey: string) {
 
   return {
     get(id: number): T | null {
-      return load()[id]?.value ?? null;
+      const value = load()[id]?.value ?? null;
+      /*
+       * Druga linia obrony przy numerze wersji: wpis, ktoremu brakuje pol dzisiejszego
+       * ksztaltu, traktujemy jak PUDLO w cache, a nie jak dane. Podniesienie `.vN`
+       * zalatwia sprawe tylko wtedy, gdy sie o nim pamieta — a nie pamieta sie zawsze
+       * (ten plik ma juz na koncie dwie awarie z tego powodu). Koszt pudla to jedno
+       * pobranie, koszt przeoczenia to wywalony panel u uzytkownika.
+       */
+      if (value === null) return null;
+      try {
+        return usable(value) ? value : null;
+      } catch {
+        return null;
+      }
     },
     set(id: number, value: T): void {
       const s = load();
@@ -53,8 +66,34 @@ function makeCache<T>(storageKey: string) {
   };
 }
 
-const details = makeCache<TaskDetail>('binear.details.v1');
-const comments = makeCache<Comment[]>('binear.comments.v1');
+/*
+ * KONCOWKA `.vN` W KLUCZU TO NIE OZDOBA. Cache czyta `JSON.parse` i rzutuje wynik na
+ * typ, wiec TypeScript go NIE sprawdza: wpisy zapisane przed zmiana ksztaltu typu
+ * wracaja bez nowych pol i wywalaja widok dopiero w przegladarce, u kogos, kto ma
+ * stary localStorage. Zmieniasz `TaskDetail` albo `Comment` — PODNIES numer, wtedy
+ * stare wpisy przestaja byc czytane i dociagaja sie na nowo (to tylko cache).
+ *
+ * v2 komentarzy: doszlo pole `files` (zalaczniki z czatu).
+ */
+const details = makeCache<TaskDetail>(
+  'binear.details.v2',
+  // v2: doszlo `attachments` (pliki doczepione do zadania).
+  (d) => Array.isArray(d?.attachments),
+);
+const comments = makeCache<Comment[]>(
+  'binear.comments.v2',
+  // v2: doszlo `files` (zalaczniki komentarza z czatu).
+  (list) => Array.isArray(list) && list.every((c) => Array.isArray(c?.files)),
+);
+
+/* Klucz po podniesieniu wersji nie zniknie sam, a to nawet kilkaset kilobajtow
+   martwych komentarzy w localStorage. Sprzatamy przy pierwszym imporcie modulu. */
+try {
+  localStorage.removeItem('binear.comments.v1');
+  localStorage.removeItem('binear.details.v1');
+} catch {
+  // tryb prywatny / brak dostepu — nie ma czego sprzatac
+}
 
 export const getCachedDetail = (id: number) => details.get(id);
 export const setCachedDetail = (id: number, detail: TaskDetail) => details.set(id, detail);

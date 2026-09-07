@@ -79,6 +79,7 @@ import {
   ListIcon,
   BoardIcon,
   ChartIcon,
+  ClipIcon,
   DirIcon,
   RefreshIcon,
   ViewsIcon,
@@ -2354,6 +2355,237 @@ function TaskRow({
 
 // ─── Komentarze ──────────────────────────────────────────────────────────────
 
+/**
+ * Podglad obrazka na pelnym ekranie. Otwiera sie z komentarza i chodzi po WSZYSTKICH
+ * obrazkach watku, nie tylko po tym jednym — skoro sie juz oglada, to zwykle po kolei.
+ *
+ * Renderowany portalem do `body`: panel zadania ma wlasne przewijanie i `overflow`,
+ * wiec podglad zostawiony w srodku dalby sie przyciac wlasnym rodzicem.
+ */
+export interface PreviewItem {
+  key: string;
+  name: string;
+  /** Gotowy adres. Komentarze biora `/api/file/`, zalaczniki `/api/attach/` — to
+      dwie rozne metody Bitriksa, wiec podglad dostaje juz rozstrzygniety adres. */
+  src: string;
+}
+
+function Lightbox({
+  files,
+  index,
+  onIndex,
+  onClose,
+}: {
+  files: PreviewItem[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+}) {
+  const file = files[index];
+
+  /*
+   * Powiekszenie. `zoom` 1 = obrazek wpasowany w ekran (nie skala 1:1 pikseli),
+   * `pan` to przesuniecie w pikselach EKRANU, nakladane przed skalowaniem.
+   *
+   * Lustra w refach, bo obsluga kolka jest natywnym listenerem (patrz nizej) i bez
+   * nich czytalaby stan z domkniecia sprzed pierwszego renderu.
+   */
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  zoomRef.current = zoom;
+  panRef.current = pan;
+
+  const boxRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const drag = useRef<{ x: number; y: number; ox: number; oy: number; moved: boolean } | null>(null);
+  /*
+   * Po `pointerup` przegladarka wystawia jeszcze `click` — ten sam gest jest wiec
+   * i przeciagnieciem, i klikiem. Bez tej flagi kazde przesuniecie powiekszonego
+   * obrazka konczylo sie powrotem do wpasowania, bo klik przelacza powiekszenie.
+   *
+   * Prog 4 px, a nie "jakikolwiek ruch": mysz drgnie o piksel przy samym nacisnieciu
+   * przycisku i zwykly klik przestalby dzialac.
+   */
+  const dragged = useRef(false);
+
+  // Nowe zdjecie zaczyna od wpasowanego — inaczej przewijalibysmy strzalkami w slepo
+  // po srodku poprzedniego kadru.
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [index]);
+
+  /*
+   * Przy 1 nie ma czego przesuwac. Wyzej ograniczamy przesuw do tego, co faktycznie
+   * wystaje poza ekran (plus mala tolerancja), zeby nie dalo sie wyciagnac obrazka
+   * calkiem poza kadr i zostac z czarna plansza.
+   */
+  const clampPan = (z: number, p: { x: number; y: number }) => {
+    const el = imgRef.current;
+    if (!el || z <= 1) return { x: 0, y: 0 };
+    const r = el.getBoundingClientRect();
+    const w = (r.width / zoomRef.current) * z;
+    const h = (r.height / zoomRef.current) * z;
+    const mx = Math.max(0, (w - window.innerWidth) / 2 + 24);
+    const my = Math.max(0, (h - window.innerHeight) / 2 + 24);
+    return { x: Math.min(mx, Math.max(-mx, p.x)), y: Math.min(my, Math.max(-my, p.y)) };
+  };
+
+  /*
+   * Kolko przybliza W PUNKT POD KURSOREM, a nie w srodek kadru: przy czytaniu zrzutu
+   * ekranu celuje sie w konkretne miejsce, wiec to ono ma zostac nieruchome.
+   *
+   * Listener natywny z `passive: false` — React montuje `onWheel` jako pasywny i
+   * `preventDefault` nic tam nie daje, wiec strona przewijalaby sie pod podgladem.
+   */
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const z = zoomRef.current;
+      const next = Math.min(8, Math.max(1, z * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+      if (next === z) return;
+      const p = panRef.current;
+      const cx = e.clientX - window.innerWidth / 2;
+      const cy = e.clientY - window.innerHeight / 2;
+      const moved = { x: cx - (cx - p.x) * (next / z), y: cy - (cy - p.y) * (next / z) };
+      setPan(clampPan(next, moved));
+      setZoom(next);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  /*
+   * Podglad jest MODALNY: przechwytujemy klawiature w fazie capture i zatrzymujemy
+   * zdarzenie, zeby skroty aplikacji (j/k, x, v, 1-3, Enter otwierajacy zadanie) nie
+   * strzelaly w tle do listy, ktorej i tak nie widac. Kombinacje z Ctrl/Cmd puszczamy
+   * dalej — to skroty przegladarki, nie nasze.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === 'ArrowRight' && files.length > 1) {
+        e.preventDefault();
+        onIndex((index + 1) % files.length);
+      } else if (e.key === '0') {
+        e.preventDefault();
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+      } else if (e.key === 'ArrowLeft' && files.length > 1) {
+        e.preventDefault();
+        onIndex((index - 1 + files.length) % files.length);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [index, files.length, onIndex, onClose]);
+
+  if (!file) return null;
+
+  const step = (d: number) => (e: ReactMouseEvent) => {
+    // Klik w strzalke nie moze dolecziec do tla, bo tlo zamyka podglad.
+    e.stopPropagation();
+    onIndex((index + d + files.length) % files.length);
+  };
+
+  return createPortal(
+    <div
+      className="lightbox"
+      ref={boxRef}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={file.name}
+    >
+      <div className="lightbox-bar" onClick={(e) => e.stopPropagation()}>
+        <span className="lightbox-name">{file.name}</span>
+        {zoom !== 1 && <span className="lightbox-zoom">{Math.round(zoom * 100)}%</span>}
+        {files.length > 1 && (
+          <span className="lightbox-count">
+            {index + 1} / {files.length}
+          </span>
+        )}
+        <button className="lightbox-act" onClick={onClose} title="Zamknij (Esc)">
+          <CloseIcon />
+        </button>
+      </div>
+
+      {files.length > 1 && (
+        <button className="lightbox-nav lightbox-prev" onClick={step(-1)} title="Poprzedni (←)">
+          <ChevronIcon open={false} />
+        </button>
+      )}
+
+      {/* Klik w SAM obrazek nie zamyka — zamyka dopiero klik obok niego. */}
+      <img
+        ref={imgRef}
+        className={`lightbox-img${zoom > 1 ? ' lightbox-img-zoomed' : ''}`}
+        src={file.src}
+        alt={file.name}
+        draggable={false}
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          // Bez animacji w trakcie ciagniecia — inaczej obrazek wlecze sie za kursorem.
+          transition: drag.current ? 'none' : 'transform 90ms ease-out',
+        }}
+        onPointerDown={(e) => {
+          if (zoom === 1) return;
+          e.stopPropagation();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          drag.current = { x: e.clientX, y: e.clientY, ox: pan.x, oy: pan.y, moved: false };
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (!d) return;
+          const dx = e.clientX - d.x;
+          const dy = e.clientY - d.y;
+          if (Math.abs(dx) > 4 || Math.abs(dy) > 4) d.moved = true;
+          setPan(clampPan(zoom, { x: d.ox + dx, y: d.oy + dy }));
+        }}
+        onPointerUp={(e) => {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          dragged.current = drag.current?.moved ?? false;
+          drag.current = null;
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          // Koniec przeciagania, nie klik — zostawiamy powiekszenie w spokoju.
+          if (dragged.current) {
+            dragged.current = false;
+            return;
+          }
+          // Klik przelacza wpasowanie <-> 2.5x w PUNKT, w ktory sie kliknelo. Kolko
+          // daje plynna regulacje, ale najczestsza potrzeba to "pokaz mi ten fragment".
+          if (zoom !== 1) {
+            setZoom(1);
+            setPan({ x: 0, y: 0 });
+            return;
+          }
+          const cx = e.clientX - window.innerWidth / 2;
+          const cy = e.clientY - window.innerHeight / 2;
+          setPan(clampPan(2.5, { x: -cx * 1.5, y: -cy * 1.5 }));
+          setZoom(2.5);
+        }}
+      />
+
+      {files.length > 1 && (
+        <button className="lightbox-nav lightbox-next" onClick={step(1)} title="Następny (→)">
+          <ChevronIcon open={false} />
+        </button>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
 function Comments({
   taskId,
   chatId,
@@ -2374,6 +2606,15 @@ function Comments({
 }) {
   // Start od CACHE (detailCache.ts): stare komentarze widac od razu, bez "Wczytywanie…".
   const [comments, setComments] = useState<Comment[] | null>(() => getCachedComments(taskId));
+  /* Indeks w galerii CALEGO watku, nie w jednym komentarzu — patrz `Lightbox`. */
+  const [preview, setPreview] = useState<number | null>(null);
+  const gallery = useMemo<PreviewItem[]>(
+    () =>
+      (comments ?? [])
+        .flatMap((c) => c.files.filter((f) => f.image))
+        .map((f) => ({ key: String(f.id), name: f.name, src: `/api/file/${f.id}` })),
+    [comments],
+  );
   const [failed, setFailed] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -2536,10 +2777,67 @@ function Comments({
             <strong>{unassigned ? UNASSIGNED_LABEL : c.authorName}</strong>
             <span className="row-meta">{dateTime(c.date)}</span>
           </div>
-          <div className="comment-body">{renderDescription(c.text)}</div>
+          {c.text && <div className="comment-body">{renderDescription(c.text)}</div>}
+          {c.files.length > 0 && (
+            <div className="comment-files">
+              {c.files.map((f) =>
+                f.image ? (
+                  /*
+                   * Bajty ida przez `/api/file/<id>`, nigdy prost z Bitriksa: tamte
+                   * adresy albo niosa token webhooka, albo wymagaja sesji w portalu.
+                   *
+                   * `width`/`height` z Bitriksa daja przegladarce proporcje z gory,
+                   * wiec watek nie podskakuje, gdy obrazek sie doczyta. Klik otwiera
+                   * pelny rozmiar w nowej karcie — tez przez proxy.
+                   */
+                  /*
+                   * Zostaje <a href>, mimo ze klik obsluguje podglad: srodkowy przycisk
+                   * i Ctrl+klik nadal otwieraja karte, tak jak przy kazdym innym
+                   * odnosniku. Przechwytujemy WYLACZNIE zwykly klik.
+                   */
+                  <a
+                    key={f.id}
+                    className="comment-img"
+                    href={`/api/file/${f.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={f.name}
+                    onClick={(e) => {
+                      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+                      e.preventDefault();
+                      setPreview(gallery.findIndex((g) => g.key === String(f.id)));
+                    }}
+                  >
+                    <img
+                      src={`/api/file/${f.id}`}
+                      alt={f.name}
+                      loading="lazy"
+                      width={f.width ?? undefined}
+                      height={f.height ?? undefined}
+                    />
+                  </a>
+                ) : (
+                  <a
+                    key={f.id}
+                    className="comment-file"
+                    href={`/api/file/${f.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ClipIcon />
+                    {f.name}
+                  </a>
+                ),
+              )}
+            </div>
+          )}
         </article>
         );
       })}
+
+      {preview !== null && gallery.length > 0 && (
+        <Lightbox files={gallery} index={preview} onIndex={setPreview} onClose={() => setPreview(null)} />
+      )}
 
       <textarea
         ref={inputRef}
@@ -2930,6 +3228,13 @@ function DetailPanel({
   const [detail, setDetail] = useState<TaskDetail | null>(() => getCachedDetail(task.id));
   const [detailError, setDetailError] = useState(false);
 
+  /*
+   * Podglad obrazkow Z OPISU. Trzymamy komplet (lista + pozycja) w jednym stanie, bo
+   * przy obrazku spoza zalacznikow galeria sklada sie tylko z niego — sam indeks nie
+   * mialby wtedy do czego wskazywac.
+   */
+  const [preview, setPreview] = useState<{ items: PreviewItem[]; index: number } | null>(null);
+
   useEffect(() => {
     let stale = false;
     const cached = getCachedDetail(task.id);
@@ -2945,6 +3250,16 @@ function DetailPanel({
       stale = true;
     };
   }, [task.id]);
+
+  /* Wszystkie obrazki zadania — takze te doczepione, a nie wstawione w opis; skoro
+     podglad juz jest, ma po czym chodzic strzalkami. */
+  const descGallery = useMemo<PreviewItem[]>(
+    () =>
+      (detail?.attachments ?? [])
+        .filter((a) => a.image)
+        .map((a) => ({ key: String(a.id), name: a.name, src: `/api/attach/${a.id}` })),
+    [detail],
+  );
 
   // Kazda wersja detali (swieza z Bitriksa albo po optymistycznej edycji) ląduje w
   // cache — dzieki temu ponowne otwarcie pokazuje ostatni znany stan, nie sprzed edycji.
@@ -3308,7 +3623,28 @@ function DetailPanel({
           </section>
         )}
 
-        <div className="desc">
+        {/*
+          Klik w obrazek z opisu otwiera ten sam podglad, co w komentarzach. Lapiemy
+          go DELEGACJA na kontenerze, a nie uchwytem na samym <img>: obrazki rysuje
+          `renderDescription`, ktory jest zwyklym parserem tekstu i nie ma prawa
+          wiedziec niczego o podgladzie.
+        */}
+        <div
+          className="desc"
+          onClick={(e) => {
+            const el = e.target as HTMLElement;
+            if (!(el instanceof HTMLImageElement) || !el.classList.contains('desc-img')) return;
+            const src = el.getAttribute('src') ?? '';
+            const i = descGallery.findIndex((g) => g.src === src);
+            // Obrazek spoza listy zalacznikow (sciezka awaryjna) tez ma sie powiekszac —
+            // wtedy galeria sklada sie z niego jednego.
+            setPreview(
+              i >= 0
+                ? { items: descGallery, index: i }
+                : { items: [{ key: src, name: el.getAttribute('alt') || '', src }], index: 0 },
+            );
+          }}
+        >
           {detailError && <p className="desc-dim">Nie udało się pobrać szczegółów.</p>}
           {!detailError && detail === null && <p className="desc-dim">Wczytywanie…</p>}
           {/* Opis idzie przez parser markdown/BB — najbardziej „obcy" input w calej
@@ -3317,12 +3653,32 @@ function DetailPanel({
           {detail &&
             (detail.description.trim() ? (
               <ErrorBoundary where="opis zadania">
-                {renderDescription(detail.description)}
+                {renderDescription(detail.description, (objectId) => {
+                  /*
+                   * Opis wskazuje obrazek numerem obiektu na Dysku, a bajty wydaje
+                   * dopiero rekord DOCZEPIENIA — stad przeklad przez `attachments`.
+                   * Gdy zadanie nie ma pasujacego doczepienia (obrazek z innego
+                   * zadania, plik usuniety), probujemy jeszcze zwyklej sciezki
+                   * dyskowej: dla czesci plikow dziala, a gdy nie — renderer
+                   * pokaze "[obrazek niedostępny]" zamiast polamanej ikonki.
+                   */
+                  const a = detail.attachments.find((x) => x.objectId === objectId);
+                  return a ? `/api/attach/${a.id}` : `/api/file/${objectId}`;
+                })}
               </ErrorBoundary>
             ) : (
               <p className="desc-dim">Brak opisu.</p>
             ))}
         </div>
+
+        {preview && (
+          <Lightbox
+            files={preview.items}
+            index={preview.index}
+            onIndex={(i) => setPreview((p) => (p ? { ...p, index: i } : p))}
+            onClose={() => setPreview(null)}
+          />
+        )}
 
         {/* Pola rzadko uzywane — pokazujemy je tylko, gdy zadanie faktycznie je ma. */}
         {detail && detail.checklist.length > 0 && (

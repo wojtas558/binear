@@ -815,6 +815,19 @@ function checklistGroups(v: unknown): ChecklistGroup[] {
   return groups;
 }
 
+/**
+ * Zalacznik zadania. `id` to identyfikator DOCZEPIENIA (`UF_TASK_WEBDAV_FILES`),
+ * `objectId` — pliku na Dysku. Potrzebne oba: bajty ciagniemy po `id`
+ * (`/api/attach/<id>`), ale opis odwoluje sie do obrazkow po `objectId`
+ * (`[DISK FILE ID=n437269]`), wiec bez tej pary nie da sie ich skojarzyc.
+ */
+export interface TaskAttachment {
+  id: number;
+  objectId: number;
+  name: string;
+  image: boolean;
+}
+
 export interface TaskDetail {
   description: string;
   /** Wspolwykonawcy i obserwatorzy zadania — pola specyficzne dla Bitriksa. */
@@ -828,6 +841,8 @@ export interface TaskDetail {
   timeEstimate: number;
   /** Story pointy scruma — `null` gdy nieoszacowane lub projekt bez scruma. */
   storyPoints: number | null;
+  /** Pliki doczepione do zadania — takze te wstawione w opis. */
+  attachments: TaskAttachment[];
   /** Czat zadania — dzisiejsze komentarze leza tam, nie na forum (patrz `fetchComments`). */
   chatId: number | null;
 }
@@ -856,12 +871,50 @@ function people(v: unknown): Person[] {
  */
 export async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
   const [res, scrum] = await Promise.all([
-    call<any>('tasks.task.get', { taskId }),
+    /*
+     * `select` jest tu KONIECZNE. Bez niego `tasks.task.get` oddaje swoj domyslny
+     * zestaw pol, w ktorym NIE MA zadnego pola uzytkownika — `ufTaskWebdavFiles`
+     * wraca jako `undefined`, lista zalacznikow wychodzi pusta i obrazki wstawione
+     * w opis nie maja sie z czym skojarzyc. `*` dokłada wszystko, co bylo do tej
+     * pory, wiec reszta pobrania zostaje bez zmian.
+     */
+    call<any>('tasks.task.get', { taskId, select: ['*', 'UF_TASK_WEBDAV_FILES'] }),
     // Story pointy leza na scrumowym bycie zadania, nie na samym zadaniu.
     // Projekt bez scruma odpowie bledem — wtedy zostaje `null` (brak oszacowania).
     call<any>('tasks.api.scrum.task.get', { id: taskId }).catch(() => null),
   ]);
   const t = res?.task ?? {};
+
+  /*
+   * Zadanie oddaje SAME identyfikatory doczepien; nazwa i typ pliku wymagaja
+   * osobnego pytania. Idzie jednym batchem, a niepowodzenie kosztuje zalaczniki,
+   * nie cale zadanie — opis i komentarze maja sie pokazac tak czy owak.
+   */
+  const attachIds = (Array.isArray(t.ufTaskWebdavFiles) ? t.ufTaskWebdavFiles : [])
+    .map((v: unknown) => Number(v))
+    .filter((n: number) => Number.isFinite(n) && n > 0);
+
+  let attachments: TaskAttachment[] = [];
+  if (attachIds.length) {
+    try {
+      const raw = await callBatch(attachIds.map((id: number) => ({ method: 'disk.attachedObject.get', params: { id } })));
+      attachments = raw
+        .map((r: any, i: number) => {
+          const o = Array.isArray(r) ? r[0] : r;
+          if (!o?.OBJECT_ID) return null;
+          const name = str(o.NAME);
+          return {
+            id: attachIds[i],
+            objectId: Number(o.OBJECT_ID),
+            name,
+            image: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name),
+          };
+        })
+        .filter((a): a is TaskAttachment => a !== null);
+    } catch {
+      // brak zalacznikow nie moze zablokowac otwarcia zadania
+    }
+  }
 
   return {
     description: str(t.description),
@@ -875,6 +928,7 @@ export async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
     timeEstimate: Number(t.timeEstimate ?? 0),
     storyPoints: storyPointValue(scrum?.storyPoints),
     chatId: relId(t.chatId),
+    attachments,
   };
 }
 
@@ -892,6 +946,22 @@ export async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
  * `newCommentsCount: 2`, a panel pokazywal "Brak komentarzy" — bo zadanie nie ma
  * forum, a komentarz siedzial w czacie.
  */
+/**
+ * Zalacznik komentarza. `id` to identyfikator pliku na Dysku — bajty ciagniemy
+ * przez `/api/file/<id>`, bo kazdy adres, ktory Bitrix podaje wprost, albo niesie
+ * token webhooka, albo wymaga sesji w portalu (patrz komentarz przy tej trasie
+ * w `server/bxProxy.ts`).
+ */
+export interface CommentFile {
+  id: number;
+  name: string;
+  /** Obrazki rysujemy w tresci; reszta zostaje odnosnikiem z nazwa pliku. */
+  image: boolean;
+  /** Proporcje z Bitriksa — miniatura rezerwuje miejsce, wiec watek nie skacze. */
+  width: number | null;
+  height: number | null;
+}
+
 export interface Comment {
   id: number;
   authorId: number;
@@ -901,6 +971,7 @@ export interface Comment {
   date: string | null;
   /** Numery z obu zrodel moga sie powtorzyc, wiec klucz Reacta sklada sie z obu pol. */
   source: 'forum' | 'chat';
+  files: CommentFile[];
 }
 
 const stamp = (iso: string | null): number => {
@@ -923,6 +994,9 @@ async function fetchForumComments(taskId: number): Promise<Comment[]> {
     text: str(c.POST_MESSAGE),
     date: str(c.POST_DATE) || null,
     source: 'forum' as const,
+    // Forum trzyma zalaczniki w `ATTACHED_OBJECTS` (identyfikatory doczepienia, nie
+    // plikow) — inna sciezka niz czat, wiec na razie zostaje pusto.
+    files: [],
   }));
 }
 
@@ -974,6 +1048,24 @@ async function fetchChatComments(chatId: number): Promise<Comment[]> {
     photos.set(id, photoUrl((u as any).avatar));
   }
 
+  /*
+   * `files` bywa slownikiem, a bywa tablica — zaleznie od wersji portalu. Bierzemy
+   * wartosci w obu przypadkach, zamiast zakladac jedno i gasnac przy drugim.
+   */
+  const rawFiles = (res?.files ?? {}) as Record<string, any> | any[];
+  const byFile = new Map<number, CommentFile>();
+  for (const f of Array.isArray(rawFiles) ? rawFiles : Object.values(rawFiles)) {
+    const id = Number((f as any)?.id);
+    if (!Number.isFinite(id)) continue;
+    byFile.set(id, {
+      id,
+      name: str((f as any).name) || `plik ${id}`,
+      image: str((f as any).type) === 'image',
+      width: Number((f as any).image?.width) || null,
+      height: Number((f as any).image?.height) || null,
+    });
+  }
+
   return Object.values((res?.messages ?? {}) as Record<string, any>)
     .filter(Boolean)
     .map((m: any) => {
@@ -986,6 +1078,13 @@ async function fetchChatComments(chatId: number): Promise<Comment[]> {
         text: str(m.text),
         date: str(m.date) || null,
         source: 'chat' as const,
+        /*
+         * Pliki przychodza OBOK wiadomosci, we wspolnym worku `files`; wiadomosc
+         * trzyma same numery w `params.FILE_ID`. Zero dodatkowych zapytan.
+         */
+        files: ((m.params?.FILE_ID ?? []) as unknown[])
+          .map((id) => byFile.get(Number(id)))
+          .filter((f): f is CommentFile => Boolean(f)),
       };
     })
     /*
@@ -994,7 +1093,11 @@ async function fetchChatComments(chatId: number): Promise<Comment[]> {
      * wielokrotnie wiecej niz prawdziwych komentarzy i bez tego filtra dyskusja
      * ginie w dzienniku zmian.
      */
-    .filter((c) => c.authorId !== 0 && c.text);
+    /*
+     * ...ale komentarz z SAMYM obrazkiem ma pusty tekst i wypadal tu razem z nimi,
+     * czyli nie bylo go widac w ogole — nie "bez zdjecia", tylko wcale.
+     */
+    .filter((c) => c.authorId !== 0 && (c.text || c.files.length > 0));
 }
 
 /**

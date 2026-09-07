@@ -63,6 +63,24 @@ function bbToMarkdown(s: string): string {
       )
       // bloki kodu
       .replace(/\[code[^\]]*\]([\s\S]*?)\[\/code\]/gi, (_m, body) => `\n\`\`\`\n${String(body).trim()}\n\`\`\`\n`)
+      /*
+       * Obrazek WSTAWIONY W OPIS. Bitrix zapisuje go jako `[DISK FILE ID=n437269
+       * WIDTH=600 HEIGHT=366]` — to NIE jest `[img]` i dlatego przez lata szedl
+       * jako goly tekst: znacznika nikt nie zdejmowal ani nie zamienial.
+       *
+       * Zamieniamy na wlasna linie `BXIMG:id:w:h`, bo ten renderer nie zna obrazkow
+       * markdown, a te wstawki i tak stoja w opisie samodzielnie. Sam identyfikator
+       * NIE wystarczy do pobrania pliku — to numer obiektu na Dysku, a bajty wydaje
+       * dopiero rekord doczepienia; kojarzy je `resolveImage` (patrz nizej).
+       */
+      .replace(
+        /\[DISK FILE ID=n?(\d+)([^\]]*)\]/gi,
+        (_m, id: string, rest: string) => {
+          const w = /WIDTH=(\d+)/i.exec(rest)?.[1] ?? '';
+          const h = /HEIGHT=(\d+)/i.exec(rest)?.[1] ?? '';
+          return `\nBXIMG:${id}:${w}:${h}\n`;
+        },
+      )
       // znaczniki bez odpowiednika w markdown — zdejmujemy sam znacznik, tresc zostaje
       .replace(/\[\/?(img|color[^\]]*|size[^\]]*|table|tr|td|th|font[^\]]*|center|left|right)\]/gi, '')
   );
@@ -254,7 +272,16 @@ const cells = (line: string) =>
     .split('|')
     .map((c) => c.trim());
 
-export function renderDescription(raw: string): ReactNode[] {
+/**
+ * `resolveImage` zamienia numer obiektu z opisu na adres, spod ktorego da sie wziac
+ * bajty. Podaje go wolajacy, bo tylko on wie, jakie zalaczniki ma OTWARTE zadanie.
+ * Brak funkcji albo brak dopasowania = zostaje sama nazwa pliku, nigdy polamany
+ * obrazek.
+ */
+export function renderDescription(
+  raw: string,
+  resolveImage?: (objectId: number) => string | null,
+): ReactNode[] {
   const lines = normalize(raw).split('\n');
   const out: ReactNode[] = [];
   let k = 0;
@@ -293,6 +320,31 @@ export function renderDescription(raw: string): ReactNode[] {
           <code>{body.join('\n')}</code>
         </pre>,
       );
+      continue;
+    }
+
+    const im = line.match(/^BXIMG:(\d+):(\d*):(\d*)$/);
+    if (im) {
+      const objectId = Number(im[1]);
+      const src = resolveImage?.(objectId) ?? null;
+      out.push(
+        src ? (
+          <img
+            key={key()}
+            className="desc-img"
+            src={src}
+            alt=""
+            loading="lazy"
+            width={im[2] ? Number(im[2]) : undefined}
+            height={im[3] ? Number(im[3]) : undefined}
+          />
+        ) : (
+          <p key={key()} className="desc-dim">
+            [obrazek niedostępny]
+          </p>
+        ),
+      );
+      i++;
       continue;
     }
 

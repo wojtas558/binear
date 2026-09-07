@@ -152,6 +152,115 @@ export function bxProxy(mode: string): Plugin {
         }
       });
 
+      /**
+       * Plik z Dysku Bitriksa, przepuszczony przez SERWER. `/api/file/<id>` oddaje
+       * same bajty, wiec da sie go wstawic wprost w `<img src>`.
+       *
+       * Dlaczego nie linkowac do Bitriksa bezposrednio — obie drogi sa nie do uzycia
+       * w przegladarce, kazda z innego powodu:
+       *  - `DOWNLOAD_URL` z `disk.file.get` prowadzi przez `/rest/<uid>/<token>/`,
+       *    czyli NIESIE TOKEN WEBHOOKA. Wstawienie go w `src` oddaloby przegladarce
+       *    pelny dostep do portalu — dokladnie to, czemu zapobiega cale to proxy.
+       *  - `urlShow` z `im.dialog.messages.get` tokenu nie ma (jest podpis), ale bez
+       *    sesji w Bitriksie oddaje 302 na logowanie. Dzialaloby tylko zalogowanym.
+       *
+       * Sciezka przyjmuje WYLACZNIE liczbe. To nie jest allowlista metod jak nizej,
+       * tylko jedno, waskie przejscie: identyfikator pliku i nic wiecej.
+       */
+      server.middlewares.use('/api/file/', async (req, res) => {
+        const id = (req.url || '').replace(/^\//, '').split('?')[0];
+        if (!/^\d+$/.test(id)) {
+          res.statusCode = 400;
+          return res.end('zly identyfikator pliku');
+        }
+        if (!webhook) {
+          res.statusCode = 500;
+          return res.end('BITRIX_WEBHOOK nie jest ustawiony');
+        }
+
+        try {
+          const meta = await fetch(`${webhook}/disk.file.get.json`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: `id=${id}`,
+          }).then((r) => r.json());
+
+          const url = meta?.result?.DOWNLOAD_URL;
+          if (!url) {
+            res.statusCode = 404;
+            return res.end('nie ma takiego pliku');
+          }
+
+          const file = await fetch(url);
+          if (!file.ok || !file.body) {
+            res.statusCode = file.status || 502;
+            return res.end('Bitrix odmowil pliku');
+          }
+
+          res.statusCode = 200;
+          res.setHeader('content-type', file.headers.get('content-type') ?? 'application/octet-stream');
+          const len = file.headers.get('content-length');
+          if (len) res.setHeader('content-length', len);
+          // Bajty pliku sie nie zmieniaja — `id` wskazuje konkretna wersje.
+          res.setHeader('cache-control', 'private, max-age=3600');
+          res.end(Buffer.from(await file.arrayBuffer()));
+        } catch (err) {
+          res.statusCode = 502;
+          res.end(err instanceof Error ? err.message : String(err));
+        }
+      });
+
+      /**
+       * Zalacznik zadania. Osobna trasa od `/api/file/`, bo to INNA przestrzen
+       * identyfikatorow i inna metoda:
+       *  - `/api/file/<id>`  -> `disk.file.get`, plik na Dysku (tak przychodza pliki z czatu),
+       *  - `/api/attach/<id>` -> `disk.attachedObject.get`, rekord DOCZEPIENIA pliku do zadania.
+       *
+       * Rozdzial nie jest kosmetyczny: `disk.file.get` oddaje ACCESS_DENIED dla plikow,
+       * ktore webhookowy uzytkownik widzi wylacznie POPRZEZ zadanie (sprawdzone na
+       * 437269 i 438225), a `disk.attachedObject.get` dla tych samych plikow dziala.
+       * Zgadywanie po jednym identyfikatorze konczyloby sie polowa martwych obrazkow.
+       */
+      server.middlewares.use('/api/attach/', async (req, res) => {
+        const id = (req.url || '').replace(/^\//, '').split('?')[0];
+        if (!/^\d+$/.test(id)) {
+          res.statusCode = 400;
+          return res.end('zly identyfikator zalacznika');
+        }
+        if (!webhook) {
+          res.statusCode = 500;
+          return res.end('BITRIX_WEBHOOK nie jest ustawiony');
+        }
+
+        try {
+          const meta = await fetch(`${webhook}/disk.attachedObject.get.json`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: `id=${id}`,
+          }).then((r) => r.json());
+
+          const url = meta?.result?.DOWNLOAD_URL;
+          if (!url) {
+            res.statusCode = 404;
+            return res.end('nie ma takiego zalacznika');
+          }
+
+          const file = await fetch(url);
+          if (!file.ok) {
+            res.statusCode = file.status || 502;
+            return res.end('Bitrix odmowil pliku');
+          }
+
+          res.statusCode = 200;
+          res.setHeader('content-type', file.headers.get('content-type') ?? 'application/octet-stream');
+          res.setHeader('cache-control', 'private, max-age=3600');
+          res.end(Buffer.from(await file.arrayBuffer()));
+        } catch (err) {
+          res.statusCode = 502;
+          res.end(err instanceof Error ? err.message : String(err));
+        }
+      });
+
       server.middlewares.use('/api/bx/', async (req, res) => {
         const send = (status: number, payload: unknown) => {
           res.statusCode = status;

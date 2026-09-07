@@ -4523,3 +4523,208 @@ a.mention:hover {
   background: var(--border);
   opacity: 0.6;
 }
+
+/* Zalaczniki komentarza. Miniatury w rzedzie, ktory sie zawija — jeden obrazek ma
+   wygladac jak obrazek, a nie jak siatka o jednym polu. */
+.comment-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+
+/* Wysokosc ograniczona, szerokosc idzie za proporcjami: zrzut ekranu 1139x432 bez
+   tego zajmowalby caly panel i spychal reszte watku poza ekran. */
+.comment-img {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  line-height: 0;
+}
+
+.comment-img img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+
+.comment-img:hover {
+  border-color: var(--border-strong);
+}
+
+.comment-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: var(--s1) var(--s2);
+  color: var(--fg-dim);
+  font-size: var(--t-mini);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.comment-file:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+/* ─── Podglad obrazka z komentarza ─────────────────────────────────────────── */
+
+/* Ciemniej niz tlo aplikacji w KAZDYM motywie, wiec kolor wprost, nie z tokenu:
+   ma byc widac, ze to warstwa nad wszystkim, takze w motywie jasnym. */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px var(--s5) var(--s5);
+  background: rgb(0 0 0 / 0.72);
+  backdrop-filter: blur(3px);
+  animation: lightbox-in 120ms ease-out;
+  /* Powiekszony obrazek wychodzi poza kadr — ma byc PRZYCIETY, a nie rozpychac
+     stronę paskami przewijania pod spodem. */
+  overflow: hidden;
+  /* Kolko obsluguje powiekszenie, wiec strona pod spodem nie ma sie przewijac. */
+  overscroll-behavior: contain;
+}
+
+@keyframes lightbox-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Obrazek dostaje cala wolna przestrzen, ale nigdy wiecej niz ma pikseli — zrzut
+   ekranu rozciagniety powyzej 100% robi sie miekki i czyta gorzej niz w oknie. */
+.lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius);
+  box-shadow: 0 12px 48px rgb(0 0 0 / 0.5);
+  cursor: zoom-in;
+  /* Zoom ma powiekszac PIKSELE, a nie je wygladzac: przy zrzucie ekranu rozmyty
+     tekst jest dokladnie tym, czego sie nie chce zobaczyc z bliska. */
+  image-rendering: crisp-edges;
+  /* Przeciaganie obrazka nie moze uruchamiac natywnego "przenies obrazek". */
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.lightbox-img-zoomed {
+  cursor: grab;
+}
+
+.lightbox-img-zoomed:active {
+  cursor: grabbing;
+}
+
+.lightbox-bar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  color: rgb(255 255 255 / 0.82);
+  font-size: var(--t-small);
+}
+
+.lightbox-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Aktualne powiekszenie — pokazywane dopiero, gdy sie czyms rozni od wpasowania. */
+.lightbox-zoom {
+  padding: 0 var(--s1);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* Licznik i zamkniecie ida w prawo; `auto` na liczniku dziala tez wtedy, gdy
+   obrazek jest jeden i licznika w ogole nie ma. */
+.lightbox-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.lightbox-act {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--s1);
+  color: inherit;
+  border-radius: var(--radius);
+}
+
+.lightbox-count + .lightbox-act {
+  margin-left: 0;
+}
+
+.lightbox-bar > .lightbox-act:only-of-type {
+  margin-left: auto;
+}
+
+.lightbox-act:hover {
+  background: rgb(255 255 255 / 0.14);
+}
+
+/* Strzalki przy KRAWEDZIACH ekranu, nie przy obrazku: obrazek bywa raz waski
+   i wysoki, raz szeroki i niski, wiec przyklejone do niego skakalyby przy kazdej
+   zmianie zdjecia. */
+.lightbox-nav {
+  position: fixed;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: rgb(255 255 255 / 0.82);
+  background: rgb(0 0 0 / 0.35);
+  border-radius: 50%;
+  transform: translateY(-50%);
+}
+
+.lightbox-nav:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+
+.lightbox-prev {
+  left: var(--s3);
+  rotate: 90deg;
+}
+
+.lightbox-next {
+  right: var(--s3);
+  rotate: -90deg;
+}
+
+/* Miniatura zachowuje sie teraz jak przycisk powiekszenia, wiec i kursor taki. */
+.comment-img {
+  cursor: zoom-in;
+}
+
+/* Obrazek wstawiony w OPIS zadania. Szerokosc panelu jest mala i zmienna, wiec
+   atrybuty width/height z Bitriksa sluza tylko rezerwacji proporcji — o realnym
+   rozmiarze decyduje panel, zeby zrzut ekranu nie rozpychal go w bok. */
+.desc-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: var(--s2) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: zoom-in;
+}

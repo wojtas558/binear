@@ -437,6 +437,22 @@ export function ElsewhereIcon() {
   );
 }
 
+/** Spinacz — zalacznik komentarza, ktory nie jest obrazkiem. */
+export function ClipIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
+      <path
+        d="M10.8 5.2 6.1 9.9a1.7 1.7 0 0 0 2.4 2.4l4.7-4.7a3.2 3.2 0 0 0-4.5-4.5L3.9 8.0a4.7 4.7 0 0 0 6.6 6.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function CopyIcon() {
   return (
     <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
