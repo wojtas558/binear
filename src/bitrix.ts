@@ -87,6 +87,15 @@ export interface Task {
   responsibleId: number | null;
   responsibleName: string | null;
   responsiblePhoto: string | null;
+  creatorId: number | null;
+  creatorName: string | null;
+  creatorPhoto: string | null;
+  /**
+   * Obserwatorzy — SAME identyfikatory. Lista zadan nie dostaje dla tego pola nazwisk
+   * ani zdjec (inaczej niz `responsible` czy `creator`), ale do filtrowania wystarcza:
+   * nazwe dokleja filtr z osob, ktore juz zna.
+   */
+  auditorIds: number[];
   createdDate: string | null;
   changedDate: string | null;
   closedDate: string | null;
@@ -262,6 +271,12 @@ function normalizeTask(t: any): Task {
     responsibleId: relId(t.responsibleId ?? t.RESPONSIBLE_ID ?? t.responsible?.id),
     responsibleName: personName(t.responsible),
     responsiblePhoto: personPhoto(t.responsible),
+    creatorId: relId(t.createdBy ?? t.CREATED_BY ?? t.creator?.id),
+    creatorName: personName(t.creator),
+    creatorPhoto: personPhoto(t.creator),
+    auditorIds: (Array.isArray(t.auditors) ? t.auditors : [])
+      .map((v: unknown) => Number(v))
+      .filter((n: number) => Number.isFinite(n) && n > 0),
     createdDate: str(t.createdDate ?? t.CREATED_DATE) || null,
     changedDate: str(t.changedDate ?? t.CHANGED_DATE) || null,
     closedDate: str(t.closedDate ?? t.CLOSED_DATE) || null,
@@ -294,6 +309,11 @@ const LIST_SELECT = [
   'STATUS',
   'PRIORITY',
   'RESPONSIBLE_ID',
+  // Zwraca tez CALY obiekt `creator` (id, nazwa, zdjecie) — filtr po autorze
+  // dostaje z tego awatar bez ani jednego dodatkowego zapytania.
+  'CREATED_BY',
+  // Obserwatorzy — do filtra. Same identyfikatory, wiec tanio nawet przy 1160 zadaniach.
+  'AUDITORS',
   'CREATED_DATE',
   'CHANGED_DATE',
   'CLOSED_DATE',
@@ -503,19 +523,30 @@ export async function fetchActiveSprint(groupId: number): Promise<Sprint | null>
  * ale nie do wzmianek `@` - tam trzeba dosiegnac calej firmy, takze kogos, kto
  * nie ma u nas ani jednego zadania.
  *
- * `FILTER[ACTIVE]` zalatwia sie po stronie portalu: z 158 kont 93 to osoby juz
- * NIEAKTYWNE (byli pracownicy). Bez tego filtra dwie trzecie listy wzmianek to
- * ludzie, ktorych nie ma juz w firmie.
+ * Sciagamy WSZYSTKICH (z 158 kont 93 to osoby juz nieaktywne), ale kazdy dostaje
+ * flage `active` i wolajacy decyduje, kogo pokazac:
+ *
+ *  - wzmianki `@` i wybor osob -> TYLKO aktywni; podpowiadanie kogos, kogo nie ma
+ *    juz w firmie, jest bez sensu;
+ *  - ROZWIAZYWANIE NAZWISK -> wszyscy. Byly pracownik zostaje obserwatorem starych
+ *    zadan, wiec filtrujac po samych aktywnych pokazywalismy w filtrze "#102"
+ *    zamiast "Grzegorz Wozniak".
  *
  * `USER_TYPE` odsiewamy dodatkowo u siebie - dzis kazde konto na tym portalu to
  * `employee`, ale konta zewnetrzne (extranet, e-mail, boty) nie maja czego szukac
  * we wzmiankach, gdyby kiedys sie pojawily.
  */
-export async function fetchEmployees(): Promise<Person[]> {
+export interface Employee extends Person {
+  /** `false` = konto wylaczone (byly pracownik). Patrz komentarz przy `fetchEmployees`. */
+  active: boolean;
+}
+
+export async function fetchEmployees(): Promise<Employee[]> {
   const PAGE = 50;
   const raw: any[] = [];
   for (let start = 0, page = 0; page < 20; page++) {
-    const chunk = await call<any[]>('user.get', { FILTER: { ACTIVE: 'Y' }, start });
+    // BEZ filtra ACTIVE — patrz komentarz nizej, potrzebujemy takze wylaczonych.
+    const chunk = await call<any[]>('user.get', { start });
     const got = chunk ?? [];
     raw.push(...got);
     if (got.length < PAGE) break;
@@ -530,6 +561,7 @@ export async function fetchEmployees(): Promise<Person[]> {
       // imie i zadnego nazwiska. Zostaja: wspomnienie dzialu jest sensowne.
       name: [str(u.NAME), str(u.LAST_NAME)].filter(Boolean).join(' ').trim() || `#${u.ID}`,
       photo: photoUrl(u.PERSONAL_PHOTO),
+      active: u.ACTIVE === true || u.ACTIVE === 'Y',
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
 }

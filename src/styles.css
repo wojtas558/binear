@@ -2805,7 +2805,10 @@ img.avatar {
 
 .picker-list {
   overflow-y: auto;
-  max-height: 248px;
+  /* Dziewiec wymiarow filtra + dwie kreski to ~260 px — przy 248 lista scrollowala
+     sie o wlos i ostatnia pozycja ("Story points") chowala sie pod krawedzia, co
+     kasowalo caly zysk z pogrupowania. Tyle miejsca, zeby komplet wszedl naraz. */
+  max-height: 320px;
 }
 
 .picker-empty {
@@ -4188,6 +4191,12 @@ a.mention:hover {
   margin: var(--s2) var(--s1) var(--s1);
 }
 
+/* Miejsce na podpis kreski odniesienia. Tylko gdy kreska jest — suwak story
+   pointow nie ma czego podpisywac i nie ma powodu, zeby rosl. */
+.range-slider-marked {
+  margin-bottom: 18px;
+}
+
 .range-track,
 .range-fill {
   position: absolute;
@@ -4196,6 +4205,30 @@ a.mention:hover {
   border-radius: 2px;
   transform: translateY(-50%);
   pointer-events: none;
+}
+
+/* Kreska odniesienia na torze suwaka (dla terminu: dzis). Pod kciukami, nad torem,
+   i BEZ pointer-events — ma byc widoczna, ale nie da sie jej zlapac ani kliknac. */
+.range-zero {
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 14px;
+  background: var(--fg-dim);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Podpis pod kreska. `translateX(-50%)` centruje go wzgledem niej, a nie wzgledem
+   toru — przy 0 lezacym poza srodkiem skali to nie to samo. */
+.range-zero-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+  white-space: nowrap;
+  transform: translateX(-50%);
 }
 
 .range-track {
@@ -4727,4 +4760,14 @@ a.mention:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: zoom-in;
+}
+
+/* Odczyt zakresu terminu w miejscu pol "od"/"do" — sama wartosc, wysrodkowana,
+   bo nie ma tu nic do klikniecia ani wpisania. */
+.range-read {
+  justify-content: center;
+  padding: var(--s1) 0;
+  color: var(--fg-dim);
+  font-size: var(--t-small);
+  font-variant-numeric: tabular-nums;
 }

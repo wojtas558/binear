@@ -437,6 +437,135 @@ export function ElsewhereIcon() {
   );
 }
 
+/*
+ * Ikony WYMIAROW filtra ("+ Filtr"). Wszystkie neutralne i jednym konturem, bo
+ * oznaczaja KATEGORIE, a nie wartosci.
+ *
+ * Dlatego NIE uzywamy tu `PriorityIcon` ani `StatusIcon`, mimo ze istnieja: one
+ * rysuja konkretna wartosc razem z jej kolorem (pomaranczowy = pilny), wiec w
+ * liscie wymiarow czytaloby sie to jako "priorytet: wysoki", a nie "priorytet".
+ *
+ * Wspolny szkielet: viewBox 16, kontur `currentColor` o grubosci 1.4 — arkusz
+ * skaluje je do 16px i barwi na `--fg-dim` razem z reszta wiersza.
+ */
+const GLYPH = {
+  viewBox: '0 0 16 16',
+  width: 16,
+  height: 16,
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.4,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+} as const;
+
+/** Osoba odpowiedzialna. */
+export function PersonIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <circle cx="8" cy="5.6" r="2.6" />
+      <path d="M3 13.2c0-2.4 2.2-3.8 5-3.8s5 1.4 5 3.8" />
+    </svg>
+  );
+}
+
+/** Autor — pioro, czyli "kto to napisal", a nie "kto to robi". */
+export function PenIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <path d="M10.8 2.6 13.4 5.2 6.1 12.5 2.8 13.2l0.7-3.3z" />
+      <path d="M9.4 4 12 6.6" />
+    </svg>
+  );
+}
+
+/** Termin — kalendarz. */
+export function CalendarIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <rect x="2.4" y="3.4" width="11.2" height="10.2" rx="1.6" />
+      <path d="M2.4 6.6h11.2M5.6 2v2.6M10.4 2v2.6" />
+    </svg>
+  );
+}
+
+/** Tag — etykieta z dziurka. */
+export function TagIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <path d="M8.2 2.4H13.6V7.8L7.9 13.5 2.5 8.1z" />
+      <circle cx="10.8" cy="5.2" r="1" />
+    </svg>
+  );
+}
+
+/** Epik — warstwy, czyli zadania zebrane pod jednym tematem. */
+export function LayersIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <path d="M8 2.2 14 5.4 8 8.6 2 5.4z" />
+      <path d="M2 8.6 8 11.8 14 8.6" />
+      <path d="M2 11.6 8 14.8 14 11.6" />
+    </svg>
+  );
+}
+
+/** Story pointy — krata, bo to wymiar LICZBOWY. */
+export function HashIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <path d="M6.2 2.6 4.8 13.4M11.2 2.6 9.8 13.4M2.6 6h11M2.2 10h11" />
+    </svg>
+  );
+}
+
+/**
+ * Etap — kolumny kanbana, ale KONTUREM, nie wypelnieniem.
+ *
+ * `BoardIcon` (te same kolumny, na pelno) jest tu za ciezki: w kolumnie samych
+ * konturow cztery pelne kwadraty wybijaly sie z rzedu jak pogrubienie i wzrok
+ * lapal je pierwsze, chociaz "Etap" nie jest wazniejszy od reszty wymiarow.
+ */
+export function ColumnsIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <rect x="2.3" y="3" width="4.6" height="10" rx="1.3" />
+      <rect x="9.1" y="3" width="4.6" height="6.6" rx="1.3" />
+    </svg>
+  );
+}
+
+/** Obserwator — oko. Patrzy na zadanie, nie pracuje przy nim. */
+export function EyeIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <path d="M1.6 8s2.6-4.2 6.4-4.2S14.4 8 14.4 8s-2.6 4.2-6.4 4.2S1.6 8 1.6 8z" />
+      <circle cx="8" cy="8" r="1.9" />
+    </svg>
+  );
+}
+
+/** Status — sam pierscien, bez wypelnienia i bez koloru wartosci. */
+export function RingIcon() {
+  return (
+    <svg {...GLYPH} aria-hidden>
+      <circle cx="8" cy="8" r="5.4" />
+    </svg>
+  );
+}
+
+/** Priorytet — te same slupki co przy zadaniu, ale bez poziomu i bez koloru. */
+export function BarsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+      {[4, 7.5, 11].map((h, i) => (
+        <rect key={i} x={2.4 + i * 4} y={13 - h} width="2.6" height={h} rx="0.9" fill="currentColor" />
+      ))}
+    </svg>
+  );
+}
+
+/**
 /** Spinacz — zalacznik komentarza, ktory nie jest obrazkiem. */
 export function ClipIcon() {
   return (

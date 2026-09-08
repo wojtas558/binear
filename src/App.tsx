@@ -49,6 +49,7 @@ import {
   updateTags,
   updateTask,
   fetchEmployees,
+  type Employee,
   type AppConfig,
   type Comment,
   type Epic,
@@ -80,6 +81,16 @@ import {
   BoardIcon,
   ChartIcon,
   ClipIcon,
+  PersonIcon,
+  ColumnsIcon,
+  PenIcon,
+  EyeIcon,
+  CalendarIcon,
+  TagIcon,
+  LayersIcon,
+  HashIcon,
+  RingIcon,
+  BarsIcon,
   DirIcon,
   RefreshIcon,
   ViewsIcon,
@@ -165,7 +176,17 @@ type ViewMode = 'list' | 'board' | 'charts';
  * jeden sprint. Filtr osoby trzyma id — konto-zaslepke zbijamy do UNASSIGNED_ID,
  * dzieki czemu jeden warunek "Nieprzypisane" lapie i braki, i zaslepke.
  */
-type FilterField = 'assignee' | 'priority' | 'stage' | 'status' | 'tag' | 'epic' | 'points';
+type FilterField =
+  | 'assignee'
+  | 'creator'
+  | 'priority'
+  | 'stage'
+  | 'status'
+  | 'tag'
+  | 'epic'
+  | 'points'
+  | 'deadline'
+  | 'observer';
 
 /**
  * Operatory jak w Linearze. Wymiary jednowartosciowe (osoba/priorytet/status/etap —
@@ -185,14 +206,29 @@ interface Condition {
 /** Lista warunkow — miedzy warunkami ORAZ, wewnatrz warunku decyduje operator. */
 type Filters = Condition[];
 
-const FILTER_FIELDS: { field: FilterField; label: string }[] = [
-  { field: 'assignee', label: 'Osoba' },
-  { field: 'priority', label: 'Priorytet' },
-  { field: 'stage', label: 'Etap' },
-  { field: 'status', label: 'Status' },
-  { field: 'epic', label: 'Epik' },
-  { field: 'points', label: 'Story points' },
-  { field: 'tag', label: 'Tag' },
+/*
+ * Wymiary filtra w TRZECH grupach, oddzielonych kreska w menu "+ Filtr":
+ * kto (ludzie) - gdzie w procesie (stan) - o czym (tresc zadania).
+ *
+ * Przy czterech pozycjach kolejnosc byla obojetna, przy osmiu juz nie: plaska
+ * lista zmusza do czytania wszystkich etykiet po kolei, zamiast skoczyc wzrokiem
+ * do wlasciwej trojki. `divider` rysuje kreske NAD pozycja (Picker pomija ja na
+ * samej gorze listy), wiec grupe otwiera jej pierwszy element.
+ */
+const FILTER_FIELDS: { field: FilterField; label: string; icon: ReactNode; divider?: boolean }[] = [
+  // kto
+  { field: 'assignee', label: 'Osoba', icon: <PersonIcon /> },
+  { field: 'creator', label: 'Autor', icon: <PenIcon /> },
+  { field: 'observer', label: 'Obserwator', icon: <EyeIcon /> },
+  // gdzie w procesie
+  { field: 'stage', label: 'Etap', icon: <ColumnsIcon />, divider: true },
+  { field: 'status', label: 'Status', icon: <RingIcon /> },
+  { field: 'priority', label: 'Priorytet', icon: <BarsIcon /> },
+  { field: 'deadline', label: 'Termin', icon: <CalendarIcon /> },
+  // o czym
+  { field: 'epic', label: 'Epik', icon: <LayersIcon />, divider: true },
+  { field: 'tag', label: 'Tag', icon: <TagIcon /> },
+  { field: 'points', label: 'Story points', icon: <HashIcon /> },
 ];
 
 const FILTER_LABEL = Object.fromEntries(FILTER_FIELDS.map((f) => [f.field, f.label])) as Record<
@@ -201,7 +237,11 @@ const FILTER_LABEL = Object.fromEntries(FILTER_FIELDS.map((f) => [f.field, f.lab
 >;
 
 /** Wymiary, w ktorych zadanie ma WIELE wartosci naraz — tylko tam ma sens „wszystkie z". */
-const MULTI_FIELDS = new Set<FilterField>(['tag']);
+/*
+ * Wymiary, w ktorych ZADANIE ma wiele wartosci naraz — stad operatory zbiorowe
+ * (dowolny z / wszystkie z / zaden z) zamiast "to / to nie".
+ */
+const MULTI_FIELDS = new Set<FilterField>(['tag', 'observer']);
 
 /**
  * Pseudo-wartosc filtra tagu „Bez tagów" — zadanie bez zadnego tagu. Znak NUL nie
@@ -227,12 +267,45 @@ const NO_TAGS = '\u0000';
  */
 const NO_POINTS = '\u0000';
 
-const isRange = (field: FilterField, op: FilterOp) => field === 'points' && op === 'between';
+/** To samo co NO_POINTS, ale dla terminu: zadanie, ktoremu nikt terminu nie nadal. */
+const NO_DEADLINE = '\u0001';
+
+/*
+ * Termin filtrujemy W DNIACH OD DZIS, nie datami z kalendarza.
+ *
+ * Zakres dat bylby prawdziwy tylko w dniu zapisania: widok "termin do 30.09"
+ * zapisany we wrzesniu w pazdzierniku nie znaczy juz nic. "Od dzis do za 7 dni"
+ * znaczy to samo zawsze — a przy terminach pyta sie wlasnie o to.
+ *
+ * Skala jest nierowna CELOWO: gesto wokol dzis, bo tam sie rozstrzyga, co robic
+ * teraz; rzadko na koncach. Suwak chodzi po jej INDEKSACH, wiec odstepy na torze
+ * sa rowne mimo nierownych wartosci — dokladnie jak przy story pointach.
+ */
+const DEADLINE_SCALE = [-90, -30, -14, -7, -3, -1, 0, 1, 3, 7, 14, 30, 60, 90];
+
+/** Pelne dni kalendarzowe miedzy dzis a `iso`; ujemne = po terminie. */
+function dayOffset(iso: string): number | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const midnight = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  return Math.round((midnight(d) - midnight(new Date())) / 86400000);
+}
+
+/** Granica zakresu terminu po ludzku — ten sam podpis na suwaku i na chipie. */
+function dayLabel(d: number): string {
+  if (d === 0) return 'dziś';
+  if (d === 1) return 'jutro';
+  if (d === -1) return 'wczoraj';
+  return d < 0 ? `${-d} dni po terminie` : `za ${d} dni`;
+}
+
+const isRange = (field: FilterField, op: FilterOp) =>
+  (field === 'points' || field === 'deadline') && op === 'between';
 
 const opsFor = (field: FilterField): FilterOp[] =>
   MULTI_FIELDS.has(field)
     ? ['anyOf', 'allOf', 'noneOf']
-    : field === 'points'
+    : field === 'points' || field === 'deadline'
       ? // Zakres PIERWSZY, bo `defaultOp` bierze poczatek listy: story pointy to
         // skala liczbowa, wiec „od-do" jest tu zwyklym przypadkiem, a wybor
         // pojedynczych wartosci wyjatkiem.
@@ -263,8 +336,15 @@ function opLabel(op: FilterOp, many: boolean): string {
  * Podpis zakresu na chipie. Granica otwarta czyta sie jako nierownosc, nie jako
  * puste miejsce: samo "od 3" to "3+", samo "do 8" to "≤ 8".
  */
-function rangeLabel(values: string[]): string {
+function rangeLabel(field: FilterField, values: string[]): string {
   const [from = '', to = ''] = values;
+  if (field === 'deadline') {
+    // Termin czyta sie slowami, nie liczbami: "-7" na chipie nie znaczy nic.
+    if (from && to) return `${dayLabel(Number(from))} – ${dayLabel(Number(to))}`;
+    if (from) return `od ${dayLabel(Number(from))}`;
+    if (to) return `do ${dayLabel(Number(to))}`;
+    return 'dowolny';
+  }
   if (from && to) return `${from}–${to} SP`;
   if (from) return `${from}+ SP`;
   if (to) return `≤ ${to} SP`;
@@ -1283,6 +1363,19 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>):
     }
   }
 
+  if (c.field === 'observer') {
+    // Zadanie ma ZBIOR obserwatorow, wiec te same operatory co przy tagach.
+    const has = (v: string) => t.auditorIds.includes(Number(v));
+    switch (c.op) {
+      case 'allOf':
+        return c.values.every(has);
+      case 'noneOf':
+        return !c.values.some(has);
+      default: // anyOf
+        return c.values.some(has);
+    }
+  }
+
   if (c.field === 'points') {
     const sp = t.storyPoints;
 
@@ -1305,6 +1398,28 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>):
     return c.op === 'isNot' ? !inSet : inSet;
   }
 
+  if (c.field === 'deadline') {
+    const off = t.deadline ? dayOffset(t.deadline) : null;
+
+    if (c.op === 'between') {
+      const lo = Number(c.values[0]);
+      const hi = Number(c.values[1]);
+      const hasLo = c.values[0] !== '' && Number.isFinite(lo);
+      const hasHi = c.values[1] !== '' && Number.isFinite(hi);
+      if (!hasLo && !hasHi) return true;
+      // Zadanie BEZ terminu nie wpada w zaden zakres — tak samo jak zadanie bez
+      // oszacowania nie wpada w zakres pointow. Brak terminu to brak danych.
+      if (off === null) return false;
+      if (hasLo && off < lo) return false;
+      if (hasHi && off > hi) return false;
+      return true;
+    }
+
+    const key = off === null ? NO_DEADLINE : String(off);
+    const inSet = c.values.includes(key);
+    return c.op === 'isNot' ? !inSet : inSet;
+  }
+
   // Wymiary jednowartosciowe: wyliczamy klucz zadania (osoba po id, reszta wprost)
   // i sprawdzamy przynaleznosc; `isNot` odwraca wynik.
   const key =
@@ -1312,7 +1427,11 @@ function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>):
       ? isUnassigned(t.responsibleId)
         ? String(UNASSIGNED_ID)
         : String(t.responsibleId)
-      : c.field === 'priority'
+      : // Autor NIE dostaje zaslepki "Nieprzypisane": zadanie zawsze ktos zalozyl,
+        // a konto-zaslepka bywa autorem naprawde i wtedy ma znaczyc siebie.
+        c.field === 'creator'
+        ? String(t.creatorId)
+        : c.field === 'priority'
         ? t.priority
         : c.field === 'status'
           ? t.status
@@ -1389,6 +1508,11 @@ function RangeMenu({
   from,
   to,
   onChange,
+  title,
+  markAt,
+  markLabel,
+  format,
+  emptyLabel,
   onUnestimated,
   onClose,
 }: {
@@ -1398,7 +1522,19 @@ function RangeMenu({
   from: string;
   to: string;
   onChange: (from: string, to: string) => void;
-  /** Przejscie na "tylko bez oszacowania" — to NIE jest zakres, wiec zmienia operator. */
+  /** Naglowek panelu — inaczej kazdy zakres przedstawia sie jako "Story points". */
+  title: string;
+  /** Indeks na skali, ktory dostaje kreske odniesienia (dzis). `undefined` = brak. */
+  markAt?: number;
+  markLabel?: string;
+  /**
+   * Jak podpisac wartosc ze skali. Story pointy sa czytelne same z siebie ("8"),
+   * termin juz nie — "-7" nie znaczy nic, musi byc "7 dni po terminie".
+   */
+  format?: (v: number) => string;
+  /** Podpis przycisku zaslepki: "Tylko bez oszacowania" / "Tylko bez terminu". */
+  emptyLabel: string;
+  /** Przejscie na zaslepke — to NIE jest zakres, wiec zmienia takze operator. */
   onUnestimated: () => void;
   onClose: () => void;
 }) {
@@ -1469,11 +1605,22 @@ function RangeMenu({
     <>
       <div className="picker-backdrop" onClick={onClose} />
       <div className="picker range-menu" style={{ left, top, width }}>
-        <div className="picker-title">Story points</div>
+        <div className="picker-title">{title}</div>
 
         {scale.length > 1 && (
-          <div className="range-slider">
+          <div className={`range-slider${markAt !== undefined ? ' range-slider-marked' : ''}`}>
             <span className="range-track" />
+            {/*
+              Kreska ZERA na torze. Bez niej suwak terminu nie ma punktu odniesienia:
+              zakres siega od "90 dni po terminie" do "za 90 dni", a granica miedzy
+              przeszloscia a przyszloscia jest tu najwazniejsza i nie lezy posrodku
+              (skala jest nierowna), wiec nie da sie jej wyliczyc z oka.
+            */}
+            {markAt !== undefined && markAt >= 0 && (
+              <span className="range-zero" style={{ left: `${pct(markAt)}%` }}>
+                <span className="range-zero-label">{markLabel}</span>
+              </span>
+            )}
             <span
               className="range-fill"
               style={{ left: `${pct(lo)}%`, right: `${100 - pct(hi)}%` }}
@@ -1485,7 +1632,7 @@ function RangeMenu({
               min={0}
               max={last}
               value={lo}
-              aria-label="Story points od"
+              aria-label={format ? 'Termin od' : 'Story points od'}
               onChange={(e) => move(Number(e.target.value), hi)}
               onPointerUp={commit}
               onKeyUp={commit}
@@ -1496,7 +1643,7 @@ function RangeMenu({
               min={0}
               max={last}
               value={hi}
-              aria-label="Story points do"
+              aria-label={format ? 'Termin do' : 'Story points do'}
               onChange={(e) => move(lo, Number(e.target.value))}
               onPointerUp={commit}
               onKeyUp={commit}
@@ -1505,6 +1652,17 @@ function RangeMenu({
           </div>
         )}
 
+        {format ? (
+          /*
+           * Przy terminie pola liczbowe nie maja sensu: granica bywa UJEMNA
+           * ("7 dni po terminie"), a `clean` i tak zdejmuje minus przy wpisywaniu.
+           * Zostaje sam odczyt tego, co ustawily kciuki — suwak jest tu jedynym
+           * sposobem wyboru i w zupelnosci wystarcza.
+           */
+          <div className="range-row range-read">
+            {lo === 0 && hi === last ? 'dowolny' : `${format(scale[lo])} – ${format(scale[hi])}`}
+          </div>
+        ) : (
         <div className="range-row">
           <label className="range-field">
             <span>od</span>
@@ -1531,6 +1689,7 @@ function RangeMenu({
             />
           </label>
         </div>
+        )}
 
         {/*
           Skrot do zadan BEZ oszacowania. Musi byc tutaj, bo zakres jest domyslnym
@@ -1539,7 +1698,7 @@ function RangeMenu({
           trzeba najpierw przelaczyc operator na "to".
         */}
         <button type="button" className="range-none" onClick={onUnestimated}>
-          Tylko bez oszacowania
+          {emptyLabel}
         </button>
       </div>
     </>
@@ -4768,16 +4927,41 @@ export default function App() {
   }, [tasks, me]);
 
   /*
+   * AUTORZY zadan — osobno od `people` (osoby odpowiedzialne), bo to inne zbiory:
+   * pol firmy zaklada zadania, ktorych nigdy nie prowadzi, i odwrotnie. Wspolna
+   * lista dawalaby w obu filtrach pozycje bez ani jednego trafienia.
+   *
+   * Liczymy z zadan, nie z rosteru: filtrowanie po kims, kto nie zalozyl tu nic,
+   * zwraca pusto — a autor bywa tez osoba, ktorej juz nie ma w firmie, wiec w
+   * rosterze (`FILTER[ACTIVE]`) by jej zabraklo.
+   */
+  const creators = useMemo(() => {
+    const map = new Map<number, Person>();
+    for (const t of tasks) {
+      if (t.creatorId && !map.has(t.creatorId)) {
+        map.set(t.creatorId, {
+          id: t.creatorId,
+          name: t.creatorName ?? `#${t.creatorId}`,
+          photo: t.creatorPhoto,
+        });
+      }
+    }
+    return [...map.values()].sort(
+      (a, b) => Number(b.id === me) - Number(a.id === me) || a.name.localeCompare(b.name, 'pl'),
+    );
+  }, [tasks, me]);
+
+  /*
    * Ksiazka adresowa CALEJ firmy - osobno od `people`, ktore powstaje z zadan.
    * Te dwie listy odpowiadaja na dwa rozne pytania: `people` na "po kim moge
    * filtrowac" (po kims bez zadan nie ma sensu), roster na "kogo moge wspomniec"
    * (kazdego). Sciagamy raz, przy starcie, i tylko do wzmianek.
    */
-  const [roster, setRoster] = useState<Person[]>([]);
+  const [directory, setDirectory] = useState<Employee[]>([]);
   useEffect(() => {
     let alive = true;
     void fetchEmployees()
-      .then((list) => alive && setRoster(list))
+      .then((list) => alive && setDirectory(list))
       // Cicho: bez rosteru wzmianki nadal dzialaja, tylko na wezszej liscie.
       .catch(() => {});
     return () => {
@@ -4790,7 +4974,31 @@ export default function App() {
    * ten wypada z `FILTER[ACTIVE]`, ale jego stare zadania zostaja, wiec suma
    * wracalaby z byłymi pracownikami dokladnie tam, gdzie ich nie chcemy.
    */
+  /*
+   * Do WSKAZYWANIA osoby (wzmianki, dopisywanie obserwatorow) bierzemy tylko konta
+   * czynne — podpowiadanie kogos, kogo nie ma juz w firmie, nikomu nie sluzy.
+   */
+  const roster = useMemo(() => directory.filter((p) => p.active), [directory]);
   const mentionPeople = roster.length ? roster : people;
+
+  /*
+   * Obserwatorzy WYSTEPUJACY w danych — jak `creators`, z tego samego powodu:
+   * po kims, kto niczego nie obserwuje, nie ma czego filtrowac.
+   *
+   * Nazwiska bierzemy z `people`/`creators`/rosteru, bo lista zadan oddaje dla tego
+   * pola same identyfikatory. Kogo nie znajdziemy, pokazujemy jako `#id` — lepiej to
+   * niz wyciecie go z listy i udawanie, ze nie obserwuje.
+   */
+  const observers = useMemo(() => {
+    const seen = new Set<number>();
+    for (const t of tasks) for (const id of t.auditorIds) seen.add(id);
+    const known = new Map<number, Person>();
+    for (const p of [...directory, ...people, ...creators]) if (!known.has(p.id)) known.set(p.id, p);
+    return [...seen]
+      .map((id) => known.get(id) ?? { id, name: `#${id}`, photo: null })
+      .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+  }, [tasks, directory, people, creators]);
+
 
   const sprintId = activeSprint?.id ?? null;
 
@@ -4867,15 +5075,18 @@ export default function App() {
         return Number(value) === UNASSIGNED_ID
           ? UNASSIGNED_LABEL
           : (people.find((p) => p.id === Number(value))?.name ?? `#${value}`);
+      if (field === 'creator') return creators.find((p) => p.id === Number(value))?.name ?? `#${value}`;
+      if (field === 'observer') return observers.find((p) => p.id === Number(value))?.name ?? `#${value}`;
       if (field === 'priority') return labels.priority[value] ?? value;
       if (field === 'status') return labels.status[value] ?? value;
       if (field === 'epic')
         return value === '0' ? 'Bez epika' : (epicNames.get(Number(value))?.name ?? `#${value}`);
       if (field === 'tag' && value === NO_TAGS) return 'Bez tagów';
       if (field === 'points') return value === NO_POINTS ? 'Bez oszacowania' : `${value} SP`;
+      if (field === 'deadline') return value === NO_DEADLINE ? 'Bez terminu' : dayLabel(Number(value));
       return value; // etap i tag — wartoscia jest sama nazwa
     },
-    [people, labels, epicNames],
+    [people, creators, observers, labels, epicNames],
   );
 
   /** Etap ma to samo id w kazdym sprincie — do ikony na chipie mapujemy po nazwie. */
@@ -4898,6 +5109,14 @@ export default function App() {
         const p = people.find((x) => x.id === Number(value));
         return <Avatar name={p?.name ?? `#${value}`} photo={p?.photo} />;
       }
+      if (field === 'creator') {
+        const p = creators.find((x) => x.id === Number(value));
+        return <Avatar name={p?.name ?? `#${value}`} photo={p?.photo} />;
+      }
+      if (field === 'observer') {
+        const p = observers.find((x) => x.id === Number(value));
+        return <Avatar name={p?.name ?? `#${value}`} photo={p?.photo} />;
+      }
       if (field === 'priority') return <PriorityIcon priority={value} />;
       if (field === 'status') return <StatusIcon status={value} />;
       if (field === 'stage') {
@@ -4912,7 +5131,7 @@ export default function App() {
       const dotColor = value === NO_TAGS ? 'var(--fg-dim)' : tagHue(value);
       return <span className="tag-dot" style={{ background: dotColor }} />;
     },
-    [people, stageIconByName, epicNames],
+    [people, creators, observers, stageIconByName, epicNames],
   );
 
   /**
@@ -4985,6 +5204,10 @@ export default function App() {
                W facepile („2" „3" „5") to jedyne, co odroznia monety od siebie;
                bez tego wpadalyby w golasy `filterValueIcon('priority')` ponizej. */
             <span className="filter-chip-points">{v === NO_POINTS ? '–' : v}</span>
+          ) : field === 'deadline' ? (
+            /* Poza zakresem termin ma tylko zaslepke "bez terminu" — ta sama kreska
+               co przy braku oszacowania, bo znaczy dokladnie to samo: brak danych. */
+            <span className="filter-chip-points">{v === NO_DEADLINE ? '–' : v}</span>
           ) : (
             filterValueIcon('priority', v)
           )}
@@ -5000,7 +5223,13 @@ export default function App() {
       FILTER_FIELDS.map((f) => {
         // Ile aktywnych warunkow juz dotyczy tego wymiaru — ten sam wymiar moze wystapic wiele razy.
         const n = filters.filter((c) => c.field === f.field && c.values.length).length;
-        return { value: f.field, label: f.label, hint: n ? String(n) : undefined };
+        return {
+          value: f.field,
+          label: f.label,
+          icon: f.icon,
+          hint: n ? String(n) : undefined,
+          divider: f.divider,
+        };
       }),
     [filters],
   );
@@ -5018,6 +5247,10 @@ export default function App() {
         photo: p.id === UNASSIGNED_ID ? undefined : p.photo,
         icon: p.id === UNASSIGNED_ID ? <Avatar name={null} /> : undefined,
       }));
+    if (field === 'creator')
+      return creators.map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }));
+    if (field === 'observer')
+      return observers.map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }));
     if (field === 'priority')
       return Object.entries(labels.priority).map(([value, label]) => ({
         value,
@@ -5045,6 +5278,15 @@ export default function App() {
         });
       }
       return opts;
+    }
+    if (field === 'deadline') {
+      /*
+       * Poza zakresem termin ma tylko JEDNO sensowne pytanie: czy w ogole jest.
+       * Konkretna liczba dni ("dokladnie za 5") nikogo nie interesuje, wiec lista
+       * wartosci ogranicza sie do zaslepki — reszta nalezy do suwaka.
+       */
+      const missing = tasks.filter((t) => !t.deadline).length;
+      return [{ value: NO_DEADLINE, label: 'Bez terminu', hint: String(missing) }];
     }
     if (field === 'points') {
 
@@ -5093,7 +5335,7 @@ export default function App() {
         icon: <span className="tag-dot" style={{ background: tagHue(tag) }} />,
       })),
     ];
-  }, [filters, filterPick, people, labels, stages, sprintId, stageMeta, allTags, epics, tasks]);
+  }, [filters, filterPick, people, creators, observers, labels, stages, sprintId, stageMeta, allTags, epics, tasks]);
 
   /*
    * Klucze pustych grup dla danej osi — tylko etap i status maja skonczony, znany
@@ -6601,7 +6843,7 @@ export default function App() {
                       /* Zakres to JEDNA wartosc do przeczytania ("3-8"), a nie dwie
                          monety obok siebie: facepile sugerowalaby wybor z listy. */
                       <span className="filter-chip-val">
-                        <span className="filter-chip-range">{rangeLabel(c.values)}</span>
+                        <span className="filter-chip-range">{rangeLabel(c.field, c.values)}</span>
                       </span>
                     ) : c.values.length === 1 ? (
                       // Jedna wartosc: ta sama moneta (tlo POD ikona) co w facepile + podpis.
@@ -6961,13 +7203,18 @@ export default function App() {
           return (
             <RangeMenu
               anchor={filterPick.anchor}
-              scale={pointsScale}
+              scale={cond.field === 'deadline' ? DEADLINE_SCALE : pointsScale}
+              title={FILTER_LABEL[cond.field]}
+              markAt={cond.field === 'deadline' ? DEADLINE_SCALE.indexOf(0) : undefined}
+              markLabel="dziś"
               from={cond.values[0] ?? ''}
               to={cond.values[1] ?? ''}
               onChange={(from, to) => setCondValues(cond.id, [from, to])}
+              format={cond.field === 'deadline' ? dayLabel : undefined}
+              emptyLabel={cond.field === 'deadline' ? 'Tylko bez terminu' : 'Tylko bez oszacowania'}
               onUnestimated={() => {
                 setCondOp(cond.id, 'is');
-                setCondValues(cond.id, [NO_POINTS]);
+                setCondValues(cond.id, [cond.field === 'deadline' ? NO_DEADLINE : NO_POINTS]);
                 setFilterPick(null);
               }}
               onClose={() => {
@@ -6988,6 +7235,30 @@ export default function App() {
             emptyLabel="Brak wartości do wyboru"
             onToggle={(value) => toggleCondValue(cond.id, value)}
             onPick={() => {}}
+            /*
+             * Droga POWROTNA do suwaka. "Tylko bez terminu" (i bez oszacowania)
+             * przelacza operator na "to", czyli zamienia panel zakresu na zwykla
+             * liste wartosci — i bez tego przycisku nie bylo stad wyjscia inaczej
+             * niz przez skasowanie filtra i zalozenie go od nowa. Operator da sie
+             * zmienic klikajac w nazwe wymiaru na chipie, ale nikt tego nie zgadnie.
+             *
+             * Wyjscia maja byc symetryczne: skoro zakres oferuje przejscie do
+             * zaslepki, zaslepka musi oferowac powrot do zakresu.
+             */
+            footer={
+              opsFor(cond.field).includes('between') && cond.op !== 'between' ? (
+                <button
+                  type="button"
+                  className="range-none"
+                  onClick={() => {
+                    setCondOp(cond.id, 'between');
+                    setFilterPick(null);
+                  }}
+                >
+                  Wróć do zakresu
+                </button>
+              ) : undefined
+            }
             onClose={() => {
               // Porzucony, pusty warunek (np. "+ Filtr" bez wyboru) nie zostaje wiszacy.
               if (!cond.values.length) removeCondition(cond.id);
