@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
@@ -82,6 +83,7 @@ import {
   BoardIcon,
   ChartIcon,
   ClipIcon,
+  GripIcon,
   PersonIcon,
   ColumnsIcon,
   PenIcon,
@@ -96,6 +98,7 @@ import {
   RefreshIcon,
   ViewsIcon,
   statusColor,
+  personColor,
   SubtaskIcon,
   ParentIcon,
   LinkIcon,
@@ -164,6 +167,14 @@ type PickerKind =
   | 'epic'
   | 'tags';
 type ViewMode = 'list' | 'board' | 'charts';
+
+/** Warianty kolorowania grup listy — patrz `listTint` w ustawieniach. */
+type ListTint = 'off' | 'fade' | 'rail';
+const LIST_TINTS: { key: ListTint; label: string }[] = [
+  { key: 'off', label: 'Bez koloru' },
+  { key: 'fade', label: 'Nagłówek' },
+  { key: 'rail', label: 'Szyna z lewej' },
+];
 
 /*
  * Filtry w stylu Linear: pasek nad lista, do ktorego dokladasz warunki. Kazdy
@@ -411,6 +422,11 @@ interface Settings {
   withUnassigned: boolean;
   showDone: boolean;
   /**
+   * Odcien grup na LISCIE — trzy warianty do porownania na zywo:
+   *  `head` pasek na naglowku, `fade` pasek + wygaszanie w dol, `rail` szyna z lewej.
+   */
+  listTint: ListTint;
+  /**
    * Puste grupy/kolumny. Lista: pokazuje naglowek etapu/statusu nawet bez zadan.
    * Tablica: gdy wylaczone, kolumna bez kart znika (np. "Wdrozone", gdy nic nie
    * jest wdrozone). Dotyczy tylko grupowania po etapie i statusie — przy osobie
@@ -441,6 +457,8 @@ const DEFAULT_SETTINGS: Settings = {
   onlyMine: true,
   withUnassigned: false,
   showDone: false,
+  // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
+  listTint: 'fade',
   showEmpty: false,
   shownEmpty: [],
   detailWidth: 520,
@@ -1710,9 +1728,12 @@ function ViewsMenu({
   anchor,
   views,
   activeId,
+  editingId,
   onApply,
   onDelete,
   onSave,
+  onUpdate,
+  onReorder,
   onClose,
   autoFocusInput = true,
   showKeys = false,
@@ -1723,9 +1744,17 @@ function ViewsMenu({
   anchor: Anchor;
   views: SavedView[];
   activeId: string | null;
+  /**
+   * Widok ZASTOSOWANY, czyli ten, ktory uzytkownik edytuje. Rozni sie od `activeId`
+   * dokladnie wtedy, gdy cos juz zmienil — i tylko wtedy ma sens aktualizacja.
+   */
+  editingId: string | null;
   onApply: (v: SavedView) => void;
   onDelete: (id: string) => void;
   onSave: (name: string) => void;
+  onUpdate: (id: string) => void;
+  /** Zmiana kolejnosci: widok z pozycji `from` ląduje na pozycji `to`. */
+  onReorder: (from: number, to: number) => void;
   onClose: () => void;
   /** Menu otwarte najechaniem NIE zabiera focusu — inaczej kradnie klawiature mimochodem. */
   autoFocusInput?: boolean;
@@ -1739,6 +1768,17 @@ function ViewsMenu({
   onHoverOut?: () => void;
 }) {
   const [name, setName] = useState('');
+  /*
+   * Przeciagana pozycja i ta, nad ktora wisi kursor. Natywny HTML5 drag&drop, a nie
+   * `@dnd-kit` jak na tablicy: tam chodzi o przenoszenie miedzy kolumnami z podgladem
+   * pod kursorem, tu o przestawienie kilku wierszy w jednej liscie. Dociaganie calego
+   * `DndContext` do popovera byloby wiecej kodu niz sama funkcja.
+   *
+   * Kolejnosc NIE jest kosmetyczna: `v` + 1-9 stosuje widok o danym NUMERZE, wiec
+   * przestawienie listy przestawia tez skroty.
+   */
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
 
   const width = 260;
   const left = Math.min(anchor.left + 32, window.innerWidth - width - 12);
@@ -1749,6 +1789,26 @@ function ViewsMenu({
   // wtedy PIERWSZY z nich, wiec drugiego nie da sie potem zaznaczyc. Blokujemy zapis.
   const activeName = views.find((v) => v.id === activeId)?.name ?? null;
   const alreadySaved = activeId != null;
+
+  /*
+   * Trzeci stan paska zapisu: widok zastosowany, ale JUZ ZMIENIONY. Poznajemy go po
+   * tym, ze pamietamy edytowany widok, a odcisk biezacego ukladu do niego nie pasuje
+   * (`activeId` jest wtedy pusty albo wskazuje inny widok).
+   *
+   * Bez tego jedynym wyjsciem bylo zapisanie kopii pod nowa nazwa albo skasowanie
+   * starego widoku i zalozenie go od zera.
+   *
+   * Warunek `activeId == null` NIE jest tylko skrotem na "uklad sie zmienil". Gdy
+   * biezacy uklad pasuje do JAKIEGOKOLWIEK zapisanego widoku, aktualizacja jest
+   * zabroniona — inaczej mozna doprowadzic edytowany widok do ksztaltu INNEGO
+   * widoku i zrobic dwa wpisy o identycznym odcisku. Dopasowanie po odcisku bierze
+   * wtedy PIERWSZY z nich, wiec drugiego nie da sie juz nigdy zaznaczyc. Dokladnie
+   * przed tym broni `alreadySaved` przy zapisie; tu potrzebna jest ta sama bariera.
+   *
+   * Przy okazji zalatwia to powrot do stanu wyjsciowego: gdy cofniesz zmiany recznie,
+   * `activeId` znow wskazuje ten widok, przycisk znika i pasek mowi "juz zapisany".
+   */
+  const edited = activeId == null ? (views.find((v) => v.id === editingId) ?? null) : null;
 
   const save = () => {
     const n = name.trim();
@@ -1784,6 +1844,20 @@ function ViewsMenu({
         onMouseLeave={hover ? onHoverOut : undefined}
       >
         <div className="picker-title">Widoki</div>
+          {/* Nazwa widoku SIEDZI W PRZYCISKU, bo nadpisania nie da sie cofnac —
+            "Zaktualizuj" samo w sobie pozwalaloby nadpisac nie ten widok. */}
+        {edited && (
+          <button
+            className="btn view-update"
+            title={`Zapisz biezacy uklad w widoku „${edited.name}"`}
+            onClick={() => {
+              onUpdate(edited.id);
+              onClose();
+            }}
+          >
+            Zaktualizuj „{edited.name}"
+          </button>
+        )}
         <div
           className="view-save"
           title={alreadySaved ? `Bieżący widok jest już zapisany jako „${activeName}"` : undefined}
@@ -1817,7 +1891,47 @@ function ViewsMenu({
         <div className="picker-list">
           {views.length === 0 && <div className="picker-empty">Brak zapisanych widoków</div>}
           {views.map((v, i) => (
-            <div key={v.id} className={`view-item${v.id === activeId ? ' view-item-on' : ''}`}>
+            <div
+              key={v.id}
+              className={`view-item${v.id === activeId ? ' view-item-on' : ''}${
+                dragOver === i && dragFrom !== null && dragFrom !== i ? ' view-item-drop' : ''
+              }${dragFrom === i ? ' view-item-dragging' : ''}`}
+              onDragOver={(e) => {
+                // `preventDefault` na dragover to JEDYNY sposob, zeby element
+                // zglosil sie jako cel upuszczenia — bez niego `drop` nie leci.
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragOver !== i) setDragOver(i);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragFrom !== null && dragFrom !== i) onReorder(dragFrom, i);
+                setDragFrom(null);
+                setDragOver(null);
+              }}
+            >
+              {/*
+                Przeciaganie startuje TYLKO z uchwytu, nie z calego wiersza. Gdy
+                `draggable` siedzialo na wierszu, kazde chwycenie nazwy groziło
+                przeciagnieciem zamiast klikniecia — a nazwa jest tu przyciskiem.
+              */}
+              <span
+                className="view-grip"
+                title="Przeciągnij, aby zmienić kolejność (numery skrótów idą za nią)"
+                draggable
+                onDragStart={(e) => {
+                  setDragFrom(i);
+                  // Bez tego Firefox nie zaczyna przeciagania w ogole.
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData('text/plain', String(i));
+                }}
+                onDragEnd={() => {
+                  setDragFrom(null);
+                  setDragOver(null);
+                }}
+              >
+                <GripIcon />
+              </span>
               <button className="view-apply" onClick={() => onApply(v)}>
                 <span className="picker-label">{v.name}</span>
                 {/* Numer klawisza tylko przy pierwszych dziewieciu - dalej nie ma juz
@@ -2386,7 +2500,7 @@ function TaskRow({
       ) : (
         <StatusIcon status={task.status} />
       )}
-      <TaskCode code={task.code ?? `#${task.id}`} onCopied={onCopied} />
+      <TaskCode code={task.code ?? `#${task.id}`} copy={task.code ?? String(task.id)} onCopied={onCopied} />
       {/* Rodzic poza grupa — bez tego wiersz udawalby zadanie samodzielne. */}
       {parentRef && (
         <button
@@ -2404,10 +2518,9 @@ function TaskRow({
 
       <span className="row-title">{task.title || task.rawTitle}</span>
 
-      {/* Liczba tagow w wierszu zalezy od szerokosci listy — reszta jako "+N". */}
-      {task.tags.length > 0 && <TagStrip tags={task.tags} limit={tagLimit} onPick={onTag} />}
-
-      {/* Epik — kwadratowa plakietka ZA tagami; klik filtruje liste po tym epiku. */}
+      {/* Epik ZAWSZE przed tagami: nalezy do zadania na stale, a tagi przychodza
+          i znikaja — stojac za nimi skakal w bok przy kazdej zmianie etykiet.
+          Klik fi klik filtruje liste po tym epiku. */}
       {epic &&
         (() => {
           const col = epic.color ? `#${epic.color}` : tagHue(epic.name);
@@ -2429,6 +2542,9 @@ function TaskRow({
             </button>
           );
         })()}
+      {/* Liczba tagow w wierszu zalezy od szerokosci listy — reszta jako "+N". */}
+      {task.tags.length > 0 && <TagStrip tags={task.tags} limit={tagLimit} onPick={onTag} />}
+
 
       {/*
         Jeden znacznik "⑂" na oba rodzaje niewidocznych tutaj podzadan, dwie liczby:
@@ -3639,7 +3755,7 @@ function DetailPanel({
     <aside className="detail" style={{ width }}>
       <div className="detail-resizer" onMouseDown={startResize} title="Przeciągnij, aby zmienić szerokość" />
       <div className="detail-head">
-        <TaskCode code={task.code ?? `#${task.id}`} onCopied={() => {}} />
+        <TaskCode code={task.code ?? `#${task.id}`} copy={task.code ?? String(task.id)} onCopied={() => {}} />
         <div className="detail-head-right">
           <a
             className="icon-btn"
@@ -3778,11 +3894,36 @@ function DetailPanel({
         <div className="rel-block">
           {/* Nadrzędne: selektor (ustaw/zmień/odepnij — ten sam picker „parent") w naglowku,
               a pod nim wiersz do PRZEJSCIA do rodzica, gdy jest ustawiony. */}
-          <div className="rel-head">
+          <div className={`rel-head${parent || task.parentId ? '' : ' rel-head-empty'}`}>
             <span className="relation-kind">Nadrzędne</span>
-            <FieldButton kind="parent" onPick={onPick}>
-              {parent ? (parent.code ?? `#${parent.id}`) : task.parentId ? `#${task.parentId}` : '—'}
-            </FieldButton>
+            {/*
+              Pusty rodzic dostaje DOKLADNIE ten sam przycisk co "Powiązane": ten sam
+              ksztalt, ten sam rozmiar, to samo zachowanie pod kursorem. Wczesniej
+              stal tu `FieldButton`, ktory sam dokłada strzalke — wiec nawet po
+              zrownaniu znaku ("+" zamiast kreski) jeden wiersz pokazywal na hover
+              strzalke, a drugi nic. Dwa sasiadujace wiersze robiace to samo nie moga
+              inaczej reagowac na najechanie.
+
+              Gdy rodzic JEST ustawiony, wraca `FieldButton` ze strzalka — bo to juz
+              WARTOSC do zmiany, jak priorytet czy osoba, a nie puste miejsce do
+              wypelnienia.
+            */}
+            {parent || task.parentId ? (
+              <FieldButton kind="parent" onPick={onPick}>
+                {parent ? (parent.code ?? `#${parent.id}`) : `#${task.parentId}`}
+              </FieldButton>
+            ) : (
+              <button
+                className="rel-add"
+                title="Ustaw zadanie nadrzędne"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  onPick('parent', { left: r.left, top: r.top, bottom: r.bottom });
+                }}
+              >
+                +
+              </button>
+            )}
           </div>
           {parent && (
             <button className="relation" onClick={() => onOpenTask(parent.id)}>
@@ -3792,7 +3933,7 @@ function DetailPanel({
             </button>
           )}
 
-          <div className="rel-head">
+          <div className={`rel-head${related.length ? '' : ' rel-head-empty'}`}>
             <span className="relation-kind">Powiązane{related.length ? ` · ${related.length}` : ''}</span>
             <button
               className="rel-add"
@@ -4261,6 +4402,7 @@ function DropZone({
   tag,
   disabled,
   className,
+  style,
   dataGroup,
   children,
 }: {
@@ -4268,6 +4410,8 @@ function DropZone({
   tag: 'section' | 'div';
   disabled?: boolean;
   className?: string;
+  /** Nosnik `--group-tint` — koloru grupy nie da sie zapisac w arkuszu. */
+  style?: CSSProperties;
   dataGroup?: string;
   children: ReactNode;
 }) {
@@ -4275,11 +4419,11 @@ function DropZone({
   const cls = [className, isOver && active ? 'group-over' : null].filter(Boolean).join(' ');
 
   return tag === 'section' ? (
-    <section ref={setNodeRef} className={cls || undefined} data-group={dataGroup}>
+    <section ref={setNodeRef} className={cls || undefined} style={style} data-group={dataGroup}>
       {children}
     </section>
   ) : (
-    <div ref={setNodeRef} className={cls || undefined}>
+    <div ref={setNodeRef} className={cls || undefined} style={style}>
       {children}
     </div>
   );
@@ -4380,6 +4524,8 @@ function ViewMenu({
     mine: boolean;
     unassigned: boolean;
     done: boolean;
+    /** Wariant kolorowania grup listy — do porownania na zywo. */
+    tint: ListTint;
     empty: boolean;
     filtersOn: boolean;
     theme: Theme;
@@ -4401,6 +4547,7 @@ function ViewMenu({
     mine: () => void;
     unassigned: () => void;
     done: () => void;
+    tint: (v: ListTint) => void;
     empty: () => void;
     toggleColumn: (name: string) => void;
     clearFilters: () => void;
@@ -4546,6 +4693,17 @@ function ViewMenu({
             value={state.theme}
             options={THEMES.map((t) => ({ value: t.value, label: t.label, section: t.section }))}
             onPick={(v) => on.theme(v as Theme)}
+          />
+        </div>
+
+        {/* Kolor grup listy — trzy warianty obok siebie, zeby dalo sie je porownac
+            na zywo zamiast wybierac z opisu. */}
+        <div className={rowClass}>
+          <span className="ds-label">Kolor grup</span>
+          <Control
+            value={state.tint}
+            options={LIST_TINTS.map((t) => ({ value: t.key, label: t.label }))}
+            onPick={(v) => on.tint(v as ListTint)}
           />
         </div>
 
@@ -4954,6 +5112,12 @@ export default function App() {
   const [onlyMine, setOnlyMine] = useState(saved.onlyMine);
   const [withUnassigned, setWithUnassigned] = useState(saved.withUnassigned);
   const [showDone, setShowDone] = useState(saved.showDone);
+  /* Zapisane ustawienie moze pochodzic ze starszej wersji (byl tez wariant sam
+     naglowek) — nieznana wartosc wraca do "bez koloru", zamiast zostawiac klase,
+     ktorej arkusz juz nie zna. */
+  const [listTint, setListTint] = useState<ListTint>(() =>
+    LIST_TINTS.some((t) => t.key === saved.listTint) ? saved.listTint : 'fade',
+  );
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
   const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
@@ -5632,6 +5796,23 @@ export default function App() {
   );
 
   /** Klucz zwijania podgrupy musi byc unikalny w obrebie calej listy. */
+  /**
+   * Kolor grupy. Nie ma jednego zrodla — zalezy od tego, PO CZYM grupujemy:
+   * etap ma kolor z Bitriksa, status swoj wlasny, osoba odcien z nazwiska.
+   * "Nieprzypisane" i etap bez koloru zostaja bez odcienia (null).
+   */
+  const groupTint = useCallback(
+    (key: string): string | null => {
+      if (groupBy === 'stage') {
+        const meta = stageIconByName.get(key);
+        return meta?.color ? `#${meta.color}` : null;
+      }
+      if (groupBy === 'status') return statusColor(key);
+      return key === UNASSIGNED_LABEL ? null : personColor(key);
+    },
+    [groupBy, stageIconByName],
+  );
+
   const subKey = (groupKey: string, sub: string) => `${groupKey}\u0000${sub}`;
 
   // Plaska lista widocznych zadan — po niej chodzi kursor klawiatury.
@@ -5770,6 +5951,7 @@ export default function App() {
       onlyMine,
       withUnassigned,
       showDone,
+      listTint,
       showEmpty,
       shownEmpty,
       detailWidth,
@@ -5779,7 +5961,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, showEmpty, shownEmpty, detailWidth]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, listTint, showEmpty, shownEmpty, detailWidth]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -5819,14 +6001,28 @@ export default function App() {
    * dwa wejscia - przycisk "x" w pasku i skrot `x` - zeby nie rozjechaly sie
    * w tym, co dokladnie czyszcza.
    */
+  /*
+   * Widok, ktory zostal ZASTOSOWANY — czyli ten, ktory wlasnie edytujemy.
+   *
+   * To NIE jest `activeViewId`. Tamten powstaje z odcisku biezacego ukladu, wiec
+   * znika w chwili, gdy cokolwiek zmienisz — a to jest dokladnie ten moment, w
+   * ktorym chce sie widok zaktualizowac. Ta wartosc zmiane przezywa i dlatego jest
+   * jedyna rzecza, ktora wie, CO nadpisac.
+   */
+  const [editingViewId, setEditingViewId] = useState<string | null>(null);
+
   const clearAllFilters = useCallback(() => {
     setFilters(EMPTY_FILTERS);
     setQuery('');
+    // Zdjecie calego zawezenia to nie jest juz "ten widok po zmianach".
+    setEditingViewId(null);
     // SearchBox trzyma wlasny draft, wiec sam `setQuery` zostawilby w polu tekst.
     searchRef.current?.setValue('');
   }, []);
 
   const applyView = useCallback((v: SavedView) => {
+    // Od teraz edytujemy TEN widok — takze gdy zastosowano go z klawiatury (v + 1-9).
+    setEditingViewId(v.id);
     // Swieze id warunkow, zeby nie kolidowaly z licznikiem `condSeq` biezacej sesji.
     setFilters(v.filters.map((c) => ({ ...c, id: newCondId() })));
     // Wyszukiwanie: od razu do stanu i do widocznego pola (SearchBox ma wlasny draft).
@@ -5851,15 +6047,46 @@ export default function App() {
     (name: string) => {
       const n = name.trim();
       if (!n) return;
-      setViews((vs) => [...vs, { id: `v${Date.now()}`, name: n, ...viewSnapshot }]);
+      const id = `v${Date.now()}`;
+      setViews((vs) => [...vs, { id, name: n, ...viewSnapshot }]);
+      // Swiezo zapisany widok jest tym, ktory od teraz edytujemy.
+      setEditingViewId(id);
     },
     [viewSnapshot],
   );
 
-  const deleteView = useCallback(
-    (id: string) => setViews((vs) => vs.filter((v) => v.id !== id)),
-    [],
+  /**
+   * Nadpisanie zapisanego widoku biezacym ukladem. Nazwa i id zostaja — zmienia sie
+   * tylko to, CO widok pokazuje.
+   *
+   * Nieodwracalne (widoki nie maja historii), dlatego przycisk, ktory to wola, nosi
+   * nazwe widoku: "Zaktualizuj «Sprint 65»", a nie samo "Zaktualizuj".
+   */
+  /**
+   * Przestawienie widoku na liscie. Kolejnosc nie jest ozdoba: skrot `v` + 1-9
+   * stosuje widok o danym NUMERZE, wiec to takze przypisanie skrotow.
+   */
+  const reorderViews = useCallback((from: number, to: number) => {
+    setViews((vs) => {
+      if (from === to || from < 0 || to < 0 || from >= vs.length || to >= vs.length) return vs;
+      const next = [...vs];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, []);
+
+  const updateView = useCallback(
+    (id: string) =>
+      setViews((vs) => vs.map((v) => (v.id === id ? { ...v, ...viewSnapshot } : v))),
+    [viewSnapshot],
   );
+
+  const deleteView = useCallback((id: string) => {
+    setViews((vs) => vs.filter((v) => v.id !== id));
+    // Skasowanego widoku nie ma juz czego aktualizowac.
+    setEditingViewId((cur) => (cur === id ? null : cur));
+  }, []);
 
   useEffect(() => {
     applyTheme(theme);
@@ -7159,6 +7386,8 @@ export default function App() {
             showDone={showDone}
             shownEmpty={pinnedStages}
             epicOf={epicOf}
+            subCounts={childStats}
+            relatedIds={relatedIds}
             pending={pending}
             activeId={flat[cursor]?.id ?? null}
             openId={openId}
@@ -7183,13 +7412,33 @@ export default function App() {
           {groupNodes.map((g) => {
             const isCollapsed = collapsed.has(g.key);
             return (
-              <DropZone key={g.key} tag="section" id={groupDropId(g.key)} dataGroup={g.key}>
+              <DropZone
+                key={g.key}
+                tag="section"
+                id={groupDropId(g.key)}
+                dataGroup={g.key}
+                className={listTint === 'off' ? undefined : `tint-${listTint}`}
+                style={
+                  listTint === 'off'
+                    ? undefined
+                    : ({ '--group-tint': groupTint(g.key) ?? 'var(--fg-dim)' } as CSSProperties)
+                }
+              >
                 <div className="group-head" onClick={() => toggleGroup(g.key)}>
                   <ChevronIcon open={!isCollapsed} />
                   <span className="group-label">{g.label}</span>
                   <span className="group-count">{g.tasks.length}</span>
                   <GroupPoints tasks={g.tasks} />
                 </div>
+                {/*
+                  Zanik pod naglowkiem jako WLASNY element, nie `::after` naglowka.
+                  `position: sticky` ZAWSZE tworzy kontekst ukladania, wiec pseudo-element
+                  naglowka nie ma jak zejsc pod wiersze — cala grupa malowala sie wtedy
+                  nad nimi i tekst pierwszych zadan blakl. Osobny element z `z-index: -1`
+                  laduje pod trescia sekcji, a `sticky` trzyma go tuz pod naglowkiem
+                  przez cale przewijanie grupy.
+                */}
+                {listTint === 'fade' && !isCollapsed && <div className="tint-veil" aria-hidden />}
                 {!isCollapsed &&
                   g.subs.map((sub) => {
                     const sKey = subKey(g.key, sub.key);
@@ -7395,9 +7644,12 @@ export default function App() {
           anchor={viewsMenu}
           views={views}
           activeId={activeViewId}
+          editingId={editingViewId}
           onApply={applyView}
           onDelete={deleteView}
           onSave={saveView}
+          onUpdate={updateView}
+          onReorder={reorderViews}
           /* Otwarte najechaniem: nie zabieramy focusu i pilnujemy kursora nad menu. */
           autoFocusInput={!viewsMenu.hover && !viewsMenu.kb}
           showKeys={!!viewsMenu.kb}
@@ -7568,6 +7820,7 @@ export default function App() {
             mine: onlyMine,
             unassigned: withUnassigned,
             done: showDone,
+            tint: listTint,
             empty: showEmpty,
             filtersOn: anyFilter(filters),
             theme,
@@ -7591,6 +7844,7 @@ export default function App() {
             mine: () => setOnlyMine((v) => !v),
             unassigned: () => setWithUnassigned((v) => !v),
             done: () => setShowDone((v) => !v),
+            tint: setListTint,
             empty: () => setShowEmpty((v) => !v),
             toggleColumn,
             clearFilters: () => setFilters(EMPTY_FILTERS),

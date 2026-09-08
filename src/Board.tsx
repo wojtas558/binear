@@ -1,7 +1,7 @@
-import { type MouseEvent as ReactMouseEvent } from 'react';
+import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Epic, Stage, Task } from './bitrix';
-import { Avatar, CommentIcon, ParentIcon, PriorityIcon, tagHue } from './icons';
+import { Avatar, CommentIcon, LinkIcon, ParentIcon, PriorityIcon, SubtaskIcon, tagHue } from './icons';
 import { shortDate, isUnassigned, sumPoints } from './taskView';
 import { colDropId, dragId } from './dnd';
 import { TaskCode } from './TaskCode';
@@ -31,6 +31,8 @@ export function Board({
   newIds,
   parentLabels,
   epicOf,
+  subCounts,
+  relatedIds,
   onOpen,
   onMenu,
   onCopied,
@@ -51,6 +53,14 @@ export function Board({
   parentLabels: Map<number, string>;
   /** Epik zadania — karta pokazuje ta sama plakietke co wiersz listy (parytet widokow). */
   epicOf: (t: Task) => Epic | null;
+  /**
+   * Podzadania: ile przeszlo filtr, ile filtr uciął. Na TABLICY kazde podzadanie
+   * jest OSOBNA karta w swojej kolumnie — nic nie chowa sie pod rodzicem, jak na
+   * liscie — wiec `inFilter` czyta sie tu wprost jako "jest gdzie indziej".
+   */
+  subCounts: Map<number, { hidden: number; inFilter: number }>;
+  /** Zadania z powiazaniami (DEPENDS_ON) — sama obecnosc, bez liczby. */
+  relatedIds: Set<number>;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
   /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
   onCopied: (code: string) => void;
@@ -90,6 +100,8 @@ export function Board({
           newIds={newIds}
           parentLabels={parentLabels}
           epicOf={epicOf}
+          subCounts={subCounts}
+          relatedIds={relatedIds}
           onOpen={onOpen}
           onMenu={onMenu}
           onCopied={onCopied}
@@ -110,6 +122,8 @@ export function Board({
           newIds={newIds}
           parentLabels={parentLabels}
           epicOf={epicOf}
+          subCounts={subCounts}
+          relatedIds={relatedIds}
           onOpen={onOpen}
           onMenu={onMenu}
           onCopied={onCopied}
@@ -131,6 +145,8 @@ function BoardColumn({
   newIds,
   parentLabels,
   epicOf,
+  subCounts,
+  relatedIds,
   onOpen,
   onMenu,
   onCopied,
@@ -148,6 +164,14 @@ function BoardColumn({
   newIds: Set<number>;
   parentLabels: Map<number, string>;
   epicOf: (t: Task) => Epic | null;
+  /**
+   * Podzadania: ile przeszlo filtr, ile filtr uciął. Na TABLICY kazde podzadanie
+   * jest OSOBNA karta w swojej kolumnie — nic nie chowa sie pod rodzicem, jak na
+   * liscie — wiec `inFilter` czyta sie tu wprost jako "jest gdzie indziej".
+   */
+  subCounts: Map<number, { hidden: number; inFilter: number }>;
+  /** Zadania z powiazaniami (DEPENDS_ON) — sama obecnosc, bez liczby. */
+  relatedIds: Set<number>;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
   /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
   onCopied: (code: string) => void;
@@ -159,7 +183,16 @@ function BoardColumn({
   const sp = sumPoints(tasks);
 
   return (
-    <section ref={setNodeRef} className={`col${isOver && active ? ' col-over' : ''}`}>
+    /*
+     * Odcien etapu wjezdza JEDNA zmienna, a nie gotowym tlem. Gdyby tlo szlo inline,
+     * bilo by `.col-over` (podswietlenie celu przeciagania), bo styl inline wygrywa
+     * z klasa — i karta przestalaby pokazywac, gdzie wlasnie spadnie.
+     */
+    <section
+      ref={setNodeRef}
+      className={`col${isOver && active ? ' col-over' : ''}`}
+      style={{ '--stage-tint': color ? `#${color}` : 'var(--fg-dim)' } as CSSProperties}
+    >
       <header className="col-head">
         <span className="col-dot" style={{ background: color ? `#${color}` : 'var(--fg-dim)' }} />
         <span className="col-title">{title}</span>
@@ -184,6 +217,8 @@ function BoardColumn({
             busy={pending.has(t.id)}
             parentLabel={parentLabels.get(t.id)}
             epic={epicOf(t)}
+            subs={subCounts.get(t.id)}
+            hasRelated={relatedIds.has(t.id)}
             onOpen={onOpen}
             onMenu={onMenu}
             onCopied={onCopied}
@@ -207,6 +242,8 @@ function BoardCard({
   busy,
   parentLabel,
   epic,
+  subs,
+  hasRelated,
   onOpen,
   onMenu,
   onCopied,
@@ -221,6 +258,9 @@ function BoardCard({
   parentLabel: string | undefined;
   /** Epik zadania — ta sama plakietka co w wierszu listy (parytet widokow). */
   epic: Epic | null;
+  /** Liczby podzadan tego zadania — patrz `subCounts` wyzej. */
+  subs: { hidden: number; inFilter: number } | undefined;
+  hasRelated: boolean;
   onOpen: (id: number, e: ReactMouseEvent) => void;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
   /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
@@ -253,7 +293,7 @@ function BoardCard({
       }}
     >
       <div className="card-top">
-        <TaskCode code={t.code ?? `#${t.id}`} onCopied={onCopied} />
+        <TaskCode code={t.code ?? `#${t.id}`} copy={t.code ?? String(t.id)} onCopied={onCopied} />
         {/* Bez pierscienia etapu — kolumna, w ktorej lezy karta, JEST etapem. */}
         <PriorityIcon priority={t.priority} />
         <span className="card-spacer" />
@@ -261,6 +301,33 @@ function BoardCard({
         {t.storyPoints != null && (
           <span className="row-sp" title={`Story points: ${t.storyPoints}`}>
             {t.storyPoints}
+          </span>
+        )}
+        {/*
+          Podzadania. Na liscie te liczby dziela sie na "w innych grupach" i "ukryte
+          filtrem"; tutaj wszystkie podzadania i tak leza we wlasnych kolumnach, wiec
+          `inFilter` JEST tym pierwszym przypadkiem — stad ta sama para liczb, ale
+          bez rozroznienia, ktorego na tablicy nie ma jak zrobic.
+        */}
+        {subs && (subs.inFilter > 0 || subs.hidden > 0) && (
+          <span
+            className="row-subs"
+            title={[
+              subs.inFilter > 0 ? `${subs.inFilter} podzadań w innych kolumnach` : '',
+              subs.hidden > 0 ? `${subs.hidden} podzadań ukrytych przez bieżący filtr` : '',
+            ]
+              .filter(Boolean)
+              .join('\n')}
+          >
+            <SubtaskIcon />
+            {subs.inFilter > 0 && <span className="row-subs-elsewhere">{subs.inFilter}</span>}
+            {subs.inFilter > 0 && subs.hidden > 0 && <span className="row-subs-sep">·</span>}
+            {subs.hidden > 0 && <span className="row-subs-hidden">{subs.hidden}</span>}
+          </span>
+        )}
+        {hasRelated && (
+          <span className="row-related" title="Ma powiązane zadania">
+            <LinkIcon />
           </span>
         )}
         {isNew && <span className="row-new">nowe</span>}
@@ -292,13 +359,9 @@ function BoardCard({
       <div className="card-title">{t.title || t.rawTitle}</div>
       {(t.tags.length > 0 || epic) && (
         <div className="card-tags">
-          {t.tags.map((tag) => (
-            <span key={tag} className="tag tag-static">
-              <span className="tag-dot" style={{ background: tagHue(tag) }} />
-              {tag}
-            </span>
-          ))}
-          {/* Epik — ta sama kwadratowa plakietka co w wierszu, tez za tagami. */}
+          {/* Epik ZAWSZE pierwszy, przed tagami: nalezy do zadania na stale, a tagi
+              przychodza i znikaja — gdy stal za nimi, skakal w bok przy kazdej zmianie
+              etykiet i nie dalo sie go znalezc wzrokiem w stalym miejscu. */}
           {epic &&
             (() => {
               const col = epic.color ? `#${epic.color}` : tagHue(epic.name);
@@ -315,6 +378,12 @@ function BoardCard({
                 </span>
               );
             })()}
+          {t.tags.map((tag) => (
+            <span key={tag} className="tag tag-static">
+              <span className="tag-dot" style={{ background: tagHue(tag) }} />
+              {tag}
+            </span>
+          ))}
         </div>
       )}
     </article>

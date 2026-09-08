@@ -586,6 +586,15 @@ kbd {
   scrollbar-color: var(--border-strong) transparent;
 }
 
+/* Firefox nie zna `::-webkit-scrollbar` — tam „grubszy po najechaniu" da sie zrobic
+   tylko przeskokiem `thin` -> `auto`. Skokowo, ale lepiej niz wcale. */
+.list:hover,
+.detail-body:hover,
+.col-body:hover,
+.board:hover {
+  scrollbar-width: auto;
+}
+
 .list::-webkit-scrollbar,
 .detail-body::-webkit-scrollbar,
 .col-body::-webkit-scrollbar,
@@ -608,6 +617,25 @@ kbd {
   border: 3px solid transparent;
   background-clip: padding-box;
   border-radius: 6px;
+}
+
+/*
+ * Pasek ma 10 px, ale kciuk chowa 3 px przezroczystej ramki z kazdej strony
+ * (`background-clip: padding-box`), wiec WIDAC z niego tylko 4 px — i w te 4 px
+ * sie celuje, chociaz klikalne jest cale 10.
+ *
+ * Po najechaniu NA OBSZAR ramka schodzi do 1 px, czyli kciuk rosnie z 4 do 8 px.
+ * Rosnie na hover POJEMNIKA, nie samego kciuka: zeby pomogl przy celowaniu, musi
+ * byc gruby ZANIM sie w niego trafi.
+ */
+.list:hover::-webkit-scrollbar-thumb,
+.detail-body:hover::-webkit-scrollbar-thumb,
+.col-body:hover::-webkit-scrollbar-thumb,
+.board:hover::-webkit-scrollbar-thumb,
+.palette-list:hover::-webkit-scrollbar-thumb,
+.picker-list:hover::-webkit-scrollbar-thumb,
+.md-table-wrap:hover::-webkit-scrollbar-thumb {
+  border-width: 1px;
 }
 
 .list::-webkit-scrollbar-thumb:hover,
@@ -2045,7 +2073,16 @@ input[type='search']::-webkit-search-decoration {
   display: inline-flex;
   align-items: center;
   gap: var(--s1);
-  /* Stala kolumna trzyma tytuly w jednej linii; waska, zeby kod stal blisko tytulu. */
+  /*
+   * Stala kolumna trzyma tytuly w jednej linii; waska, zeby kod stal blisko tytulu.
+   *
+   * ŚWIADOMY KOMPROMIS: 56px miesci `IT-885` (44px) razem z przyciskiem kopiowania,
+   * ale nie `#116213` (57px) — na wierszu z samym numerem przycisk wypada poza
+   * obcinany obszar i na hover go nie widac. Zostaje tak: kopiuje sie przede
+   * wszystkim numery IT, bo to one ida w nazwe galezi, tytul PR-a i commit.
+   * Poszerzenie kolumny do 74px naprawia przycisk, ale przesuwa KAZDY tytul
+   * o 18px w prawo — placilby caly widok za rzadki przypadek.
+   */
   flex: 0 0 56px;
   font-size: var(--t-mini);
   color: var(--fg-dim);
@@ -2147,17 +2184,34 @@ input[type='search']::-webkit-search-decoration {
  * "nowe" — zadanie, ktorego nie bylo przy poprzednim uruchomieniu. Wypelniony
  * akcent, bo to sygnal o CALYM zadaniu i ma byc widoczny na pierwszy rzut oka.
  */
-/* Plakietka „ma powiazane zadania" — sama ikona lancucha, wyciszona (jak subtaski). */
+/*
+ * Plakietka „ma powiazane zadania".
+ *
+ * Ten sam KSZTALT co znacznik podzadan obok — obwodka i to samo zaokraglenie —
+ * bo oba mowia o tym samym: „to zadanie ma jeszcze cos przy sobie". Bez obwodki
+ * byl tu goly, przygaszony znaczek obok oprawionej plakietki i czytal sie jak
+ * przypadkowa kropka, a nie jak sygnal.
+ *
+ * Kolor o stopien mocniejszy niz `--fg-dim`: plakietka nie ma liczby, wiec caly
+ * jej ciezar niesie sam glif.
+ */
 .row-related {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  color: var(--fg-dim);
+  /* Pion dobrany do sasiednich plakietek (podzadania, nieprzeczytane): tam
+     wysokosc bierze sie z tekstu, tu z samego glifu, wiec brakujace piksele
+     trzeba dolozyc — inaczej ta jedna stoi nizsza i rzad faluje. */
+  padding: 1px 4px;
+  color: var(--fg-muted);
+  border-radius: var(--s1);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
   cursor: help;
 }
 
-.row:hover .row-related {
-  color: var(--fg-muted);
+.row:hover .row-related,
+.card:hover .row-related {
+  color: var(--fg-secondary);
 }
 
 .row-new {
@@ -2549,7 +2603,26 @@ img.avatar {
   flex: 1 1 0;
   min-width: 232px;
   min-height: 0;
-  background: var(--bg-panel);
+  /*
+   * Odcien ETAPU: pelny w naglowku, potem gasnie w dol kolumny.
+   *
+   * Gradient zaczyna gasnac dopiero na WYSOKOSCI NAGLOWKA (40 px). Gdyby ruszal od
+   * zera, pod naglowkiem bylby juz czesciowo wyblakly i na jego krawedzi robilby sie
+   * schodek — a ma byc plynne przejscie z paska w tlo.
+   *
+   * Konczy na `color-mix(... 0%)`, czyli dokladnie `--bg-panel`, a nie na
+   * `transparent`: przejscie do przezroczystosci interpoluje przez szarosc i po
+   * drodze brudzi kolor.
+   *
+   * Wszystko liczone z `--bg-panel`, wiec kazdy z kilkunastu motywow dostaje swoja
+   * wersje tego samego odcienia zamiast jednej stalej, ktora gdzies bedzie za mocna.
+   */
+  background:
+    linear-gradient(
+      color-mix(in oklab, var(--bg-panel), var(--stage-tint) 14%) 40px,
+      color-mix(in oklab, var(--bg-panel), var(--stage-tint) 0%) 155px
+    ),
+    var(--bg-panel);
   border-radius: var(--radius-lg);
   transition: background 120ms ease;
   /* Kolumna jest kontenerem zapytania: gdy jest ich mniej (np. po ukryciu
@@ -2567,6 +2640,11 @@ img.avatar {
   gap: var(--s2);
   height: 40px;
   padding: 0 var(--s3);
+  /* Naglowek trzyma PELNY odcien; gradient nizej podejmuje go i wygasza. Kreska
+     u gory to ten sam kolor mocniej — krawedz kolumny, nie ozdoba. */
+  background: color-mix(in oklab, var(--bg-panel), var(--stage-tint) 14%);
+  box-shadow: inset 0 2px 0 color-mix(in oklab, var(--bg-panel), var(--stage-tint) 62%);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .col-dot {
@@ -2679,7 +2757,16 @@ img.avatar {
   padding: var(--s1);
   background: var(--bg-panel);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-pop), 0 0 0 1px var(--border-strong);
+  /*
+   * Obwodka mocniejsza niz `--border-strong`: ten token ma niemal ten sam odcien
+   * co tlo panelu, wiec krawedz popovera po prostu w nim znikala.
+   *
+   * Domieszka `--fg` zamiast nowego tokenu — motywow jest kilkanascie i kazdy
+   * musialby dostac wlasna wartosc. Kolor tekstu jest jasny w ciemnych motywach
+   * i ciemny w jasnych, wiec kontrast rosnie wszedzie tak samo. Sila siedzi w
+   * jednej liczbie ponizej i tylko ona sie zmienia przy regulacji.
+   */
+  box-shadow: var(--shadow-pop), 0 0 0 1px color-mix(in oklab, var(--border-strong), var(--fg) 40%);
 }
 
 .menu-head {
@@ -2957,6 +3044,17 @@ body.resizing {
   height: 48px;
   padding: 0 var(--s3) 0 var(--s4);
   box-shadow: inset 0 -1px 0 var(--border);
+}
+
+/*
+ * W panelu kod NIE jest kolumna, wiec nie ma czego wyrownywac — a staly slot 56 px
+ * z `overflow: hidden` (z listy) obcinal przycisk kopiowania, gdy tekst byl dluzszy.
+ * Kod IT ("IT-877") miescil sie z przyciskiem, sam numer ("#116213") juz nie — czyli
+ * kopiowanie znikalo dokladnie tam, gdzie jest jedynym identyfikatorem zadania.
+ */
+.detail-head .row-code {
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .detail-head-right {
@@ -3379,16 +3477,36 @@ a.mention:hover {
 
 /* Grupa „Powiązane" tuz pod „Nadrzędne" — bez duzego odstepu sekcji, zeby relacje
    czytaly sie jako jeden blok. */
+/*
+ * Blok relacji siedzi MIEDZY dwiema kreskami (dolna krawedz `.props` i `.rel-sep`),
+ * wiec odstep ma byc z obu stron ten sam.
+ *
+ * Bez marginesu wlasnego: `.detail-body` to zwykly blok, wiec margines dolny tego
+ * bloku i gorny `.rel-sep` I TAK by sie skleily do wiekszego z nich (4 px ginelo
+ * pod 12 px). Trzymanie tu czworki tylko udawalo, ze cos robi.
+ */
 .rel-block {
-  margin-bottom: var(--s1);
+  margin-bottom: 0;
 }
 
 .rel-head {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  min-height: 26px;
-  margin-bottom: var(--s1);
+  /* Wysokosc podyktowana przyciskiem (20 px) plus wlos — bylo 26 px, czyli 6 px
+     powietrza, ktorego nikt nie zamawial. */
+  min-height: 22px;
+  margin-bottom: 2px;
+}
+
+/*
+ * Naglowek, pod ktorym NIC nie ma (brak rodzica, brak powiazan). Margines pod nim
+ * dzielil dwie puste linijki tak, jakby cos miedzy nimi stalo — a nie stalo nic,
+ * wiec "Nadrzędne" i "Powiązane" rozjezdzaly sie bez powodu.
+ */
+.rel-head-empty {
+  min-height: 20px;
+  margin-bottom: 0;
 }
 
 /* Odstep miedzy pod-grupami relacji (Nadrzędne -> Powiązane). */
@@ -3694,6 +3812,20 @@ a.mention:hover {
 }
 
 /* Pole „Zapisz bieżący widok…" na gorze menu, nad lista widokow. */
+/* "Zaktualizuj <widok>" — pelna szerokosc nad polem nazwy. Nie `btn-primary`:
+   nadpisanie jest nieodwracalne, wiec nie ma byc najjasniejszym punktem panelu,
+   tylko wyraznie dostepnym wyjsciem. Nazwa widoku bywa dluga, stad ucinanie. */
+.view-update {
+  display: block;
+  /* `.picker` to kolumna flex, wiec dziecko rozciaga sie samo — `width: 100%`
+     razem z marginesami wystawaloby poza panel o ich sume. */
+  margin: var(--s2) var(--s2) 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .view-save {
   display: flex;
   gap: var(--s2);
@@ -4799,6 +4931,36 @@ a.mention:hover {
   font-size: var(--t-small);
   font-variant-numeric: tabular-nums;
 }
+
+/* Przeciagany widok — przygaszony, zeby bylo widac, ze jest "w reku". */
+.view-item-dragging {
+  opacity: 0.4;
+}
+
+/* Cel upuszczenia: kreska NAD wierszem, a nie podswietlenie calego. Podswietlenie
+   myli sie z zaznaczeniem aktywnego widoku, ktore juz tu jest. */
+.view-item-drop {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* Uchwyt: widoczny od razu (nie tylko na hover), ale przygaszony — ma podpowiadac,
+   ze wiersz da sie przestawic, a nie konkurowac z nazwa widoku. */
+.view-grip {
+  display: flex;
+  align-items: center;
+  padding-left: var(--s1);
+  color: var(--fg-dim);
+  cursor: grab;
+}
+
+.view-grip:hover {
+  color: var(--fg);
+}
+
+.view-grip:active {
+  cursor: grabbing;
+}
+
 /* ─── Pliki doczepione do zadania ──────────────────────────────────────────── */
 
 .attachments {
@@ -4964,3 +5126,59 @@ a.mention:hover {
  * stalym alpha — motywow jest kilkanascie i ta sama przezroczystosc wychodzi na
  * jednych blado, na innych brudno.
  */
+
+/* Pasek na naglowku. Naglowek grupy jest `sticky`, wiec zostaje na ekranie przez
+   cale przewijanie grupy. */
+.tint-fade > .group-head {
+  background: color-mix(in oklab, var(--bg-base), var(--group-tint) 13%);
+  box-shadow: inset 0 2px 0 color-mix(in oklab, var(--bg-base), var(--group-tint) 55%);
+}
+
+/*
+ * Zanik POD naglowkiem — doczepiony do samego naglowka, nie do sekcji.
+ *
+ * Gradient na sekcji odjezdzal przy przewijaniu: naglowek jest `sticky`, wiec zostawal
+ * u gory, a zanik wedrowal w gore razem z wierszami i tuz pod przyklejonym paskiem
+ * widac bylo juz czyste tlo — kolor urywal sie ostra kreska.
+ *
+ * `::after` nalezy do naglowka, wiec przykleja sie razem z nim i zanik towarzyszy mu
+ * przez cale przewijanie grupy.
+ *
+ * Konczy na TEJ SAMEJ barwie z zerowa nieprzezroczystoscia, a nie na `transparent`:
+ * `transparent` to czarny z alfa 0, wiec po drodze przyciemnia.
+ */
+/*
+ * Zanik pod naglowkiem grupy.
+ *
+ * Wlasny element, a nie `::after` naglowka: `position: sticky` ZAWSZE tworzy kontekst
+ * ukladania, wiec cokolwiek wisi na przyklejonym naglowku, maluje sie razem z nim NAD
+ * wierszami — `z-index: -1` w srodku tego kontekstu nie ma jak zejsc nizej.
+ *
+ * Ten element tez jest `sticky` (wiec towarzyszy naglowkowi przez cale przewijanie),
+ * ale `z-index: -1` liczy sie juz wzgledem sekcji, ktora kontekstu nie tworzy — wiec
+ * laduje POD tekstem zadan.
+ *
+ * `margin-bottom` rowny wysokosci zdejmuje go z ukladu: ma barwic, nie odsuwac.
+ */
+.tint-veil {
+  position: sticky;
+  top: var(--head-h);
+  z-index: -1;
+  height: 120px;
+  margin-bottom: -120px;
+  pointer-events: none;
+  background: linear-gradient(
+    color-mix(in oklab, var(--bg-base), var(--group-tint) 13%),
+    color-mix(in srgb, color-mix(in oklab, var(--bg-base), var(--group-tint) 13%), transparent 100%)
+  );
+}
+
+/* Szyna z lewej. Jedyny, ktory trzyma sie CALEJ grupy niezaleznie od
+   przewijania i nie klaadzie koloru pod trescia wiersza. */
+.tint-rail {
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--bg-base), var(--group-tint) 62%);
+}
+
+.tint-rail > .group-head {
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--bg-base), var(--group-tint) 62%);
+}

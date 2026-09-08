@@ -11,7 +11,22 @@ import { CheckIcon, CopyIcon } from './icons';
  * widokow), a Board nie moze importowac z App.tsx — wyszedlby cykl importow.
  * To ten sam powod, dla ktorego `sumPoints` mieszka w taskView.ts.
  */
-export function TaskCode({ code, onCopied }: { code: string; onCopied: (text: string) => void }) {
+export function TaskCode({
+  code,
+  copy,
+  onCopied,
+}: {
+  code: string;
+  /**
+   * Co ma trafic do schowka, gdy rozni sie od tego, co widac.
+   *
+   * Zadanie bez kodu IT pokazuje `#116213` — krzyzyk mowi "to numer, nie kod" — ale
+   * wklejac trzeba samo `116213`: tyle przyjmuje wyszukiwarka Bitriksa i tyle wchodzi
+   * w adres zadania. Z krzyzykiem kopia byla do niczego.
+   */
+  copy?: string;
+  onCopied: (text: string) => void;
+}) {
   const [done, setDone] = useState(false);
 
   return (
@@ -19,16 +34,16 @@ export function TaskCode({ code, onCopied }: { code: string; onCopied: (text: st
       {code}
       <button
         className="copy-btn"
-        title={`Kopiuj ${code}`}
+        title={`Kopiuj ${copy ?? code}`}
         onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => {
           e.stopPropagation();
           void navigator.clipboard
-            .writeText(code)
+            .writeText(copy ?? code)
             .then(() => {
               setDone(true);
               setTimeout(() => setDone(false), 1200);
-              onCopied(code);
+              onCopied(copy ?? code);
             })
             .catch(() => onCopied(''));
         }}

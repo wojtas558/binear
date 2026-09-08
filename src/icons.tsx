@@ -278,33 +278,28 @@ export function ParentIcon() {
   );
 }
 
-/** Ogniwa lancucha — plakietka „ma powiazane zadania" (DEPENDS_ON). */
+/**
+ * Powiazane zadania (DEPENDS_ON) — dwie kropki polaczone W POZIOMIE.
+ *
+ * Byl tu LANCUCH i odstawal: `ParentIcon` (kolanko W GORE) oraz `SubtaskIcon`
+ * (kolanko W DOL z kropkami) mowia o RELACJI MIEDZY ZADANIAMI tym samym jezykiem —
+ * kreska plus kropka — a lancuch to zupelnie inna metafora, wiec przy nich czytal
+ * sie jak ikona z innego zestawu.
+ *
+ * Teraz trojka trzyma sie kupy i rozni ja tylko KIERUNEK: gora = rodzic,
+ * dol = podzadania, poziom = powiazane (relacja rowna, bez hierarchii).
+ */
 export function LinkIcon() {
+  /*
+   * 14px, nie 12 jak `SubtaskIcon`. Ta ikona nie ma przy sobie LICZBY, wiec cala
+   * plakietka to sam glif — przy 12px byla najmniejszym znakiem w wierszu i po
+   * prostu ginela. Sasiedni znacznik podzadan dobiera objetosc cyfra obok.
+   */
   return (
-    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden>
-      <path
-        d="M6.5 9.5 9.5 6.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-      <path
-        d="M8.7 5.3 10 4a2.4 2.4 0 0 1 3.4 3.4l-1.3 1.3"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M7.3 10.7 6 12a2.4 2.4 0 0 1-3.4-3.4l1.3-1.3"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+      <circle cx="3.4" cy="8" r="1.8" fill="currentColor" />
+      <path d="M5.6 8h4.8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="12.6" cy="8" r="1.8" fill="currentColor" />
     </svg>
   );
 }
@@ -566,6 +561,19 @@ export function BarsIcon() {
 }
 
 /**
+ * Uchwyt do przeciagania (szesc kropek). Bez niego nikt nie zgaduje, ze wiersz da
+ * sie chwycic — sam kursor `grab` pokazuje sie dopiero PO najechaniu, czyli za pozno.
+ */
+export function GripIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+      {[5, 8, 11].map((y) =>
+        [6, 10].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.05" fill="currentColor" />),
+      )}
+    </svg>
+  );
+}
+
 /** Spinacz — zalacznik komentarza, ktory nie jest obrazkiem. */
 export function ClipIcon() {
   return (
