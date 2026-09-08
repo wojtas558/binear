@@ -1240,27 +1240,53 @@ export interface Interval {
  * odcinek policzylby sie podwojnie — dlatego bierzemy REAL_STATUS, a STATUS tylko gdy
  * REAL_STATUS w ogole nie ma.
  */
-export function inProgressIntervals(history: HistoryEntry[], nowMs: number, target = '3'): Interval[] {
-  const real = history.filter((h) => h.field === 'REAL_STATUS');
-  const source = real.length ? real : history.filter((h) => h.field === 'STATUS');
+/** Nazwa etapu czytana jako "praca trwa". Dziennik zapisuje NAZWY, nie identyfikatory. */
+const IN_PROGRESS_STAGE = /^\s*(w toku|in progress)\s*$/i;
 
-  const rows = source
-    .map((h) => ({ t: h.createdDate ? Date.parse(h.createdDate) : NaN, to: h.to }))
-    .filter((r) => Number.isFinite(r.t))
-    .sort((a, b) => a.t - b.t);
-
+/** Wspolny przebieg: z listy zmian jednego pola robi odcinki "bylo w X". */
+function intervalsFrom(
+  rows: { t: number; to: string }[],
+  hits: (to: string) => boolean,
+  nowMs: number,
+): Interval[] {
   const out: Interval[] = [];
   let openStart: number | null = null;
-  for (const r of rows) {
+  for (const r of rows.slice().sort((a, b) => a.t - b.t)) {
     if (openStart !== null) {
       out.push({ start: openStart, end: r.t });
       openStart = null;
     }
-    if (r.to === target) openStart = r.t;
+    if (hits(r.to)) openStart = r.t;
   }
   if (openStart !== null) out.push({ start: openStart, end: Math.max(openStart, nowMs) });
-
   return out;
+}
+
+export function inProgressIntervals(history: HistoryEntry[], nowMs: number, target = '3'): Interval[] {
+  const at = (h: HistoryEntry) => (h.createdDate ? Date.parse(h.createdDate) : NaN);
+  const rowsOf = (field: string) =>
+    history.filter((h) => h.field === field).map((h) => ({ t: at(h), to: h.to })).filter((r) => Number.isFinite(r.t));
+
+  /*
+   * ETAP jest zrodlem PIERWSZYM, status zapasowym.
+   *
+   * W tym portalu praca plynie po kolumnach kanbana sprintu, a wbudowany status
+   * bywa tylko przestawiany na koncu (2 -> 4). Do 2026-09-04 Bitrix trzymal status
+   * w parze z etapem, wiec liczenie po statusie dawalo te same odcinki; odkad
+   * `moveToStage` zapisuje `STAGE_ID` przez `tasks.task.update` zamiast
+   * `task.stages.movetask`, ta para sie rozjechala i po samym statusie wychodzilo
+   * 0 minut (zadanie 116017 / IT-876: etap Nowe -> W toku bez zadnego wpisu statusu).
+   *
+   * Zrodla NIE SUMUJEMY. Dla zadan sprzed rozjazdu w dzienniku sa OBA wpisy z tym
+   * samym znacznikiem czasu, wiec suma liczylaby kazdy odcinek dwa razy. Bierzemy
+   * to, ktore w ogole cos ma — etap, a gdy zadanie nie ma historii etapow (np. nigdy
+   * nie bylo w sprincie), wracamy do statusu.
+   */
+  const byStage = intervalsFrom(rowsOf('STAGE'), (to) => IN_PROGRESS_STAGE.test(to), nowMs);
+  if (byStage.length) return byStage;
+
+  const real = rowsOf('REAL_STATUS');
+  return intervalsFrom(real.length ? real : rowsOf('STATUS'), (to) => to === target, nowMs);
 }
 
 /** Prosta suma odcinkow (czas zegarowy, bez przycinania). */
@@ -1456,6 +1482,25 @@ export async function moveToSprint(taskId: number, entityId: number): Promise<vo
  * Story pointy leza na scrumowym bycie zadania (tak jak sprint), nie na samym
  * zadaniu — stad ta sama metoda co `moveToSprint`. Pusty string kasuje oszacowanie.
  */
+/**
+ * Wspolwykonawcy / obserwatorzy zadania.
+ *
+ * Osobno od `updateTask`, bo te pola sa TABLICAMI identyfikatorow, a tamta funkcja
+ * przyjmuje pojedyncze wartosci.
+ *
+ * Pusta lista NIE moze isc jako pusta tablica: serializacja nie wyprodukowalaby
+ * wtedy zadnego parametru, Bitrix nie zobaczylby pola i po prostu zostawilby stara
+ * wartosc — czyli ostatniej osoby nie dalo by sie usunac. Pusty STRING czysci pole
+ * (sprawdzone na zywo: `fields[AUDITORS]=` zdejmuje wszystkich).
+ */
+export async function updateParticipants(
+  taskId: number,
+  field: 'ACCOMPLICES' | 'AUDITORS',
+  ids: number[],
+): Promise<void> {
+  await call('tasks.task.update', { taskId, fields: { [field]: ids.length ? ids : '' } });
+}
+
 export async function updateStoryPoints(taskId: number, points: number | ''): Promise<void> {
   await call('tasks.api.scrum.task.update', { id: taskId, fields: { storyPoints: points } });
 }

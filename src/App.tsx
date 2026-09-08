@@ -44,6 +44,7 @@ import {
   deleteTask,
   moveToStage,
   setChecklistItem,
+  updateParticipants,
   updateStoryPoints,
   updateEpic,
   updateTags,
@@ -3243,6 +3244,73 @@ function FieldButton({
  * kalendarz — ale przez ukryte `input[type=date]` i `showPicker()`, zeby nie pokazywac
  * brzydkiego natywnego pola. Pusta wartosc kasuje termin.
  */
+/**
+ * Ile zostalo do terminu — "za 3 dni", "jutro", "dziś", "2 dni po terminie".
+ *
+ * Sama data nie mowi nic bez liczenia w pamieci, zwlaszcza na przelomie miesiaca.
+ * Dopisek stoi PRZY dacie, a nie w osobnym wierszu: to ta sama informacja, tylko
+ * podana inaczej.
+ *
+ * Liczymy w pelnych dniach KALENDARZOWYCH, nie w dobach — jutrzejszy termin ma byc
+ * "jutro" takze o 23:50, a nie "za 0 dni". Dlatego obie strony scinamy do lokalnej
+ * polnocy. Bitrix trzyma termin z godzina, ale binear ustawia go polem `type="date"`,
+ * wiec godzina i tak jest umowna i nie ma czego odliczac dokladniej.
+ */
+function DeadlineLeft({ value, done }: { value: string; done: boolean }) {
+  /*
+   * Przerysowanie O POLNOCY. Bez tego okno zostawione na noc pokazuje rano wczorajsze
+   * "dziś". Celujemy w najblizsza polnoc, zamiast budzic sie co minute: ta wartosc
+   * zmienia sie doslownie raz na dobe. Efekt przezbraja sie po kazdym tyknieciu.
+   */
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+    const t = window.setTimeout(() => setTick((n) => n + 1), next - now.getTime() + 1000);
+    return () => clearTimeout(t);
+  }, [tick, value]);
+
+  const end = new Date(value);
+  if (Number.isNaN(end.getTime())) return null;
+
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(end) - midnight(new Date())) / 86400000);
+  const late = -days;
+
+  const label =
+    days < 0
+      ? `${late} ${late === 1 ? 'dzień' : 'dni'} po terminie`
+      : days === 0
+        ? 'dziś'
+        : days === 1
+          ? 'jutro'
+          // Bez "za": wiersz jest juz podpisany "Termin" i stoi przy nim data, wiec
+          // przyimek powtarzalby to, co pole samo mowi. Zeton niesie sama miare, a
+          // kierunek — przed czy po — bierze sie z "po terminie" i z koloru.
+          : `${days} dni`;
+
+  /*
+   * Przechyl ku czerwieni liczony tak samo jak tempo na wykresie: mieszamy z
+   * `--fg-dim`, wiec punktem wyjscia w kazdym motywie zostaje jego wlasna szarosc,
+   * a dopisek nigdy nie krzyczy glosniej niz sama data. Pelny odcien od dzisiaj
+   * w dol, dwa tygodnie do przodu to juz zwykla szarosc.
+   *
+   * Zadanie ZAKONCZONE zostaje szare bez wzgledu na date: "5 dni po terminie" na
+   * czerwono przy czyms, co juz zrobione, straszy zupelnie bez powodu.
+   */
+  const t = done ? 0 : days < 0 ? 1 : Math.max(0, 1 - days / 14);
+  const fill =
+    t < 0.05
+      ? 'var(--fg-dim)'
+      : `color-mix(in oklab, hsl(5 52% 55%) ${Math.round(t * 70)}%, var(--fg-dim))`;
+
+  return (
+    <span className="dd-deadline" style={{ color: fill }}>
+      {label}
+    </span>
+  );
+}
+
 function DateField({ value, onChange }: { value: string | null; onChange: (date: string) => void }) {
   const ref = useRef<HTMLInputElement | null>(null);
   const open = () => {
@@ -3483,6 +3551,41 @@ function DetailPanel({
    * a przy bledzie REST-a cofamy i mowimy o tym toastem. `detail` to lokalny stan
    * panelu, wiec i zmiane, i rollback robimy przez `setDetail`.
    */
+  /** Otwarty wybor osob: ktore pole zadania i pod czym powiesic popover. */
+  const [peoplePick, setPeoplePick] = useState<{
+    field: 'ACCOMPLICES' | 'AUDITORS';
+    anchor: Anchor;
+    /*
+     * Kolejnosc osob ZAMROZONA na moment otwarcia: juz dopisani na gorze, reszta pod
+     * nimi. Gdyby liczyc ja na biezaco, kazde klikniecie przerzucalo by osobe na gore
+     * i lista skakalaby pod kursorem — przy dopisywaniu kilku osob z rzedu nie dalo by
+     * sie trafic w kolejna. Ptaszki zmieniaja sie od razu, pozycje dopiero po ponownym
+     * otwarciu.
+     */
+    order: number[];
+  } | null>(null);
+
+  /*
+   * Dopisanie/zdjecie osoby. Optymistycznie, tak samo jak checklista: `detail` to
+   * stan lokalny panelu, wiec i zmiana, i cofniecie ida przez `setDetail`.
+   *
+   * Toggle, a nie osobne "dodaj"/"usun": picker jest wielokrotny i pokazuje ptaszki
+   * przy juz wybranych, wiec ten sam klik naturalnie znaczy raz jedno, raz drugie.
+   */
+  const toggleParticipant = (field: 'ACCOMPLICES' | 'AUDITORS', person: Person) => {
+    const key = field === 'AUDITORS' ? 'auditors' : 'accomplices';
+    const before = detail?.[key] ?? [];
+    const next = before.some((p) => p.id === person.id)
+      ? before.filter((p) => p.id !== person.id)
+      : [...before, person];
+
+    setDetail((d) => (d ? { ...d, [key]: next } : d));
+    updateParticipants(task.id, field, next.map((p) => p.id)).catch((e) => {
+      setDetail((d) => (d ? { ...d, [key]: before } : d));
+      onError(`Nie udało się zmienić osób: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  };
+
   const toggleCheck = (groupId: number, itemId: number, wasDone: boolean) => {
     const set = (done: boolean) =>
       setDetail((d) =>
@@ -3628,8 +3731,9 @@ function DetailPanel({
             </FieldButton>
           </dd>
           <dt>Termin</dt>
-          <dd>
+          <dd className="dd-deadline-cell">
             <DateField value={task.deadline} onChange={onDeadline} />
+            {task.deadline && <DeadlineLeft value={task.deadline} done={task.status === '5'} />}
           </dd>
           <dt>Utworzone</dt>
           <dd>{shortDate(task.createdDate) || '—'}</dd>
@@ -3830,6 +3934,59 @@ function DetailPanel({
             ))}
         </div>
 
+        {/*
+          Pliki doczepione do zadania. Bitrix pokazuje je osobna sekcja pod trescia i
+          my tak samo: obrazek wstawiony W OPIS to co innego niz plik DOCZEPIONY, a
+          zadanie miewa wylacznie te drugie — wtedy bez tej sekcji opis mowi o pliku,
+          ktorego nigdzie nie widac (np. 116137: opis wspomina "image (173).png",
+          a sam plik wisial niepokazany).
+
+          Lista jest PELNA, tak jak w Bitriksie: obrazek uzyty w opisie pojawia sie
+          i tu, i tam. Ukrywanie go tutaj wymagaloby zgadywania, ktore wystapienie
+          jest "tym wlasciwym", a licznik "Pliki: N" przestalby zgadzac sie z Bitriksem.
+        */}
+        {detail && detail.attachments.length > 0 && (
+          <div className="attachments">
+            <div className="attachments-head">
+              <ClipIcon />
+              Pliki: {detail.attachments.length}
+            </div>
+            <div className="attachments-grid">
+              {detail.attachments.map((a) =>
+                a.image ? (
+                  <button
+                    key={a.id}
+                    className="attach-card"
+                    title={a.name}
+                    onClick={() => {
+                      const i = descGallery.findIndex((g) => g.key === String(a.id));
+                      setPreview({
+                        items: i >= 0 ? descGallery : [{ key: String(a.id), name: a.name, src: `/api/attach/${a.id}` }],
+                        index: i >= 0 ? i : 0,
+                      });
+                    }}
+                  >
+                    <img src={`/api/attach/${a.id}`} alt={a.name} loading="lazy" />
+                    <span className="attach-name">{a.name}</span>
+                  </button>
+                ) : (
+                  <a
+                    key={a.id}
+                    className="attach-file"
+                    href={`/api/attach/${a.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={a.name}
+                  >
+                    <ClipIcon />
+                    <span className="attach-name">{a.name}</span>
+                  </a>
+                ),
+              )}
+            </div>
+          </div>
+        )}
+
         {preview && (
           <Lightbox
             files={preview.items}
@@ -3874,33 +4031,112 @@ function DetailPanel({
           </section>
         )}
 
-        {detail && (detail.accomplices.length > 0 || detail.auditors.length > 0) && (
+        {/*
+          Sekcja stoi ZAWSZE, takze przy pustych listach. Wczesniej pojawiala sie
+          dopiero, gdy ktos byl juz dopisany — czyli w zadaniu bez obserwatorow nie
+          bylo ani naglowka, ani sladu, ze cos takiego istnieje, a tym bardziej
+          sposobu, zeby kogos dodac.
+        */}
+        {detail && (
           <section className="subtasks">
-            {detail.accomplices.length > 0 && (
-              <>
-                <h2>Współwykonawcy</h2>
+            {([
+              { field: 'ACCOMPLICES', label: 'Współwykonawcy', list: detail.accomplices },
+              { field: 'AUDITORS', label: 'Obserwatorzy', list: detail.auditors },
+            ] as const).map(({ field, label, list }) => (
+              <div key={field} className={`people-group${list.length ? '' : ' people-group-empty'}`}>
+                {/*
+                  "+" siedzi PRZY NAGLOWKU, nie w rzedzie osob. Przy pustej liscie
+                  samotny krazek zajmowal caly wiersz tylko po to, zeby nic nie
+                  pokazac — i lgnal do naglowka sekcji ponizej. Na etykiecie kosztuje
+                  zero miejsca i jest w tym samym punkcie niezaleznie od tego, czy
+                  ktos juz jest dopisany.
+                */}
+                <h2 className="people-head">
+                  {label}
+                  <button
+                    className="people-edit"
+                    title={`Dodaj lub usuń: ${label.toLowerCase()}`}
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      const chosen = new Set(list.map((p) => p.id));
+                      setPeoplePick({
+                        field,
+                        anchor: { left: r.left, top: r.top, bottom: r.bottom },
+                        order: [
+                          ...people.filter((p) => chosen.has(p.id)),
+                          ...people.filter((p) => !chosen.has(p.id)),
+                        ].map((p) => p.id),
+                      });
+                    }}
+                  >
+                    +
+                  </button>
+                </h2>
+                {/* Pusta lista nie rezerwuje wiersza — nie ma czego w nim pokazac. */}
+                {list.length > 0 && (
                 <div className="people">
-                  {detail.accomplices.map((p) => (
+                  {list.map((p) => (
                     <span key={p.id} className="person">
                       <PersonInline id={p.id} name={p.name} photo={p.photo} />
+                      {/*
+                        Usuwanie WPROST z osoby. Wczesniej jedyna droga bylo otwarcie
+                        "+" i odklikniecie ptaszka — czyli usuwanie schowane pod
+                        przyciskiem, ktory glosi "dodaj". Nikt tego nie znajdzie.
+                      */}
+                      <button
+                        className="person-del"
+                        title={`Usuń: ${p.name}`}
+                        onClick={() => toggleParticipant(field, p)}
+                      >
+                        <CloseIcon />
+                      </button>
                     </span>
                   ))}
                 </div>
-              </>
-            )}
-            {detail.auditors.length > 0 && (
-              <>
-                <h2>Obserwatorzy</h2>
-                <div className="people">
-                  {detail.auditors.map((p) => (
-                    <span key={p.id} className="person">
-                      <PersonInline id={p.id} name={p.name} photo={p.photo} />
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
+                )}
+              </div>
+            ))}
           </section>
+        )}
+
+        {peoplePick && detail && (
+          <Picker
+            multi
+            title={peoplePick.field === 'AUDITORS' ? 'Obserwatorzy' : 'Współwykonawcy'}
+            anchor={peoplePick.anchor}
+            placeholder="Szukaj osoby…"
+            options={(() => {
+              const byId = new Map(people.map((p) => [p.id, p]));
+              const chosen = new Set(
+                (peoplePick.field === 'AUDITORS' ? detail.auditors : detail.accomplices).map((p) => p.id),
+              );
+              // Kreska pod ostatnim JUZ DOPISANYM — granica miedzy "ci sa" a "tych mozna dodac".
+              let drew = false;
+              return peoplePick.order
+                .map((id) => byId.get(id))
+                .filter((p): p is Person => Boolean(p))
+                .map((p) => {
+                  const first = !chosen.has(p.id) && !drew;
+                  if (first) drew = true;
+                  return {
+                    value: String(p.id),
+                    label: p.name,
+                    photo: p.photo,
+                    divider: first && chosen.size > 0,
+                  };
+                });
+            })()}
+            selected={(peoplePick.field === 'AUDITORS' ? detail.auditors : detail.accomplices).map((p) =>
+              String(p.id),
+            )}
+            emptyLabel="Brak osób"
+            onToggle={(value) => {
+              const p = people.find((x) => x.id === Number(value));
+              if (p) toggleParticipant(peoplePick.field, p);
+            }}
+            onPick={() => {}}
+            onClose={() => setPeoplePick(null)}
+          />
         )}
 
         {/*

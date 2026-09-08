@@ -3016,6 +3016,22 @@ body.resizing {
   display: inline-flex;
 }
 
+/* Data i odliczanie w jednej linii — odliczanie jest dopiskiem do daty, nie
+   osobnym polem, wiec nie moze sie od niej odrywac przy waskim panelu. */
+.dd-deadline-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+/* Kolor niesie tu pilnosc, wiec stopien pisma zostaje najcichszy z mozliwych —
+   inaczej dopisek przekrzykiwalby data, ktora opisuje. */
+.dd-deadline {
+  font-size: var(--t-mini);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .dd-date-hidden {
   position: absolute;
   left: 0;
@@ -3033,8 +3049,13 @@ body.resizing {
   grid-template-columns: 88px 1fr;
   align-items: center;
   gap: var(--s2) var(--s3);
-  margin: 0 0 var(--s5);
-  padding-bottom: var(--s5);
+  /*
+   * Nad blokiem relacji stalo 40 px: `padding-bottom` (nad kreska) PLUS
+   * `margin-bottom` (pod kreska), oba po 20 px. Kreska ma oddzielac, a nie
+   * odpychac — zwlaszcza gdy pod nia sa dwa jednowierszowe naglowki.
+   */
+  margin: 0 0 var(--s3);
+  padding-bottom: var(--s3);
   font-size: var(--t-mini);
   box-shadow: inset 0 -1px 0 var(--border);
 }
@@ -3378,7 +3399,9 @@ a.mention:hover {
 /* Kreska oddzielajaca blok relacji od reszty panelu (opis / podzadania). */
 .rel-sep {
   height: 1px;
-  margin: var(--s3) 0 var(--s4);
+  /* Rowno z gora i z dolu. Bylo 12/16 — kreska stala blizej relacji niz tego,
+     co po niej, przez co blok wygladal na doklejony do gory. */
+  margin: var(--s3) 0;
   background: var(--border);
 }
 
@@ -3522,8 +3545,13 @@ a.mention:hover {
 /* ── Komentarze ─────────────────────────────────────────────────────────── */
 
 .comments {
-  margin-top: var(--s6);
-  padding-top: var(--s5);
+  /*
+   * 12/12, czyli tyle samo co przy `.rel-sep` — w jednym panelu obie kreski maja
+   * odsuwac tak samo. Bylo 24/20: kreska stala blizej komentarzy niz tego, co nad
+   * nia, wiec czytala sie jak ich naglowek, a nie jak granica sekcji.
+   */
+  margin-top: var(--s3);
+  padding-top: var(--s3);
   box-shadow: inset 0 1px 0 var(--border);
 }
 
@@ -3636,7 +3664,7 @@ a.mention:hover {
   gap: var(--s2);
   flex: 1 1 auto;
   min-width: 0;
-  padding: var(--s2) var(--s3);
+  padding: var(--s2) var(--s3) var(--s2) var(--s2);
   color: inherit;
   text-align: left;
 }
@@ -4771,3 +4799,168 @@ a.mention:hover {
   font-size: var(--t-small);
   font-variant-numeric: tabular-nums;
 }
+/* ─── Pliki doczepione do zadania ──────────────────────────────────────────── */
+
+.attachments {
+  padding: var(--s3) 0 0;
+}
+
+.attachments-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+  color: var(--fg-dim);
+  font-size: var(--t-mini);
+}
+
+/* Siatka, a nie rzad: plikow bywa kilkanascie (zrzuty z inwentaryzacji), wiec
+   musza sie zawijac zamiast uciekac w bok razem z panelem. */
+.attachments-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.attach-card {
+  display: flex;
+  flex-direction: column;
+  width: 116px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: zoom-in;
+}
+
+/* Staly kadr miniatury: rozne proporcje zrzutow inaczej rozjezdzalyby rzad na
+   rozne wysokosci. `cover` przycina, bo tu chodzi o rozpoznanie, nie o oglad. */
+.attach-card img {
+  width: 100%;
+  height: 72px;
+  object-fit: cover;
+  background: var(--bg-base);
+}
+
+.attach-card:hover,
+.attach-file:hover {
+  border-color: var(--border-strong);
+}
+
+.attach-name {
+  overflow: hidden;
+  padding: var(--s1) var(--s2);
+  color: var(--fg-dim);
+  font-size: var(--t-micro);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.attach-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  max-width: 200px;
+  padding: var(--s1) var(--s2);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Kotwica dla krzyzyka nakladanego na awatar. */
+.person {
+  position: relative;
+}
+
+/*
+ * Krzyzyk NA AWATARZE, nie obok niego. Dwa powody:
+ *  - miejsce: `opacity: 0` nie zdejmuje elementu z ukladu, wiec krzyzyk obok
+ *    rozpychal kazdy wiersz osoby takze wtedy, gdy byl niewidoczny;
+ *  - czytelnosc: zdjecie osoby JEST celem, w ktory sie mierzy, wiec przycisk ma
+ *    lezec dokladnie na nim, a nie kilka pikseli dalej.
+ *
+ * Krazek 20x20 przykrywa awatar co do piksela (patrz `.avatar`).
+ */
+.person-del {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #fff;
+  /* Przyciemnienie, a nie pelne krycie: spod spodu ma prosvitac, KOGO sie usuwa. */
+  background: rgb(0 0 0 / 0.62);
+  border-radius: 50%;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 90ms ease-out;
+}
+
+.person:hover .person-del,
+/* Klawiatura tez musi go widziec — pozycja osiagalna Tabem, ale niewidoczna,
+   jest gorsza niz brak przycisku. */
+.person-del:focus-visible {
+  opacity: 1;
+}
+
+/*
+ * Grupa bez nikogo to SAM naglowek. Margines spod naglowka wisial wtedy nad pustka
+ * i sekcja konczyla sie dziura — najbardziej widoczna przy "Obserwatorzy", bo to
+ * ostatnia grupa i nic juz jej nie domykalo.
+ *
+ * Klasa z JSX zamiast `:has()`: warunek i tak jest znany przy renderowaniu, wiec nie
+ * ma powodu odtwarzac go w arkuszu selektorem o gorszym wsparciu.
+ */
+.people-group-empty .people-head {
+  margin-bottom: 0;
+}
+
+/* Odstep MIEDZY grupami, nigdy po ostatniej. */
+.people-group + .people-group {
+  margin-top: var(--s3);
+}
+
+/* Naglowek sekcji osob razem z przyciskiem edycji. */
+.people-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+/* "+" na etykiecie: przygaszony i maly, bo to dopisek do naglowka, a nie osobna
+   akcja w tresci. Pelna widocznosc dopiero po najechaniu na sekcje. */
+.people-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-dim);
+  font-size: var(--t-regular);
+  line-height: 1;
+  border-radius: var(--radius);
+  opacity: 0.55;
+}
+
+.people-head:hover .people-edit,
+.people-edit:focus-visible {
+  opacity: 1;
+}
+
+.people-edit:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+/* ─── Kolor grup na liscie (trzy warianty do porownania) ───────────────────── */
+
+/*
+ * Odcien grupy wjezdza zmienna `--group-tint` z Reacta: zrodlo koloru zalezy od
+ * OSI grupowania (etap / status / osoba), wiec arkusz nie ma skad go znac.
+ *
+ * Wspolne dla wszystkich wariantow: mieszamy z `--bg-base`/`--bg-panel`, nigdy
+ * stalym alpha — motywow jest kilkanascie i ta sama przezroczystosc wychodzi na
+ * jednych blado, na innych brudno.
+ */

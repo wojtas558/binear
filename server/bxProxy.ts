@@ -66,6 +66,21 @@ function readBody(req: Connect.IncomingMessage): Promise<string> {
   });
 }
 
+/**
+ * Naglowek z NAZWA pliku. Bez niego przegladarka zapisuje plik pod ostatnim
+ * czlonem adresu, czyli "31279" — bez rozszerzenia i bez nazwy. PDF jeszcze sie
+ * otworzy (po `content-type`), ale zapisany .docx czy .xlsx jest bezuzyteczny.
+ *
+ * `inline`, nie `attachment`: obrazki i PDF-y maja sie dalej otwierac w karcie,
+ * a nazwa jest potrzebna dopiero przy "Zapisz jako".
+ *
+ * `filename*` w formacie RFC 5987, bo nazwy bywaja polskie ("limity_wysyłki…")
+ * i spacjowane — samo `filename="..."` gubi znaki spoza ASCII.
+ */
+function contentDisposition(name: string): string {
+  return `inline; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 export function bxProxy(mode: string): Plugin {
   const env = loadEnv(mode, process.cwd(), '');
   const webhook = (env.BITRIX_WEBHOOK || '').replace(/\/+$/, '');
@@ -190,6 +205,7 @@ export function bxProxy(mode: string): Plugin {
             res.statusCode = 404;
             return res.end('nie ma takiego pliku');
           }
+          const name = String(meta?.result?.NAME ?? '');
 
           const file = await fetch(url);
           if (!file.ok || !file.body) {
@@ -199,6 +215,7 @@ export function bxProxy(mode: string): Plugin {
 
           res.statusCode = 200;
           res.setHeader('content-type', file.headers.get('content-type') ?? 'application/octet-stream');
+          if (name) res.setHeader('content-disposition', contentDisposition(name));
           const len = file.headers.get('content-length');
           if (len) res.setHeader('content-length', len);
           // Bajty pliku sie nie zmieniaja — `id` wskazuje konkretna wersje.
@@ -244,6 +261,7 @@ export function bxProxy(mode: string): Plugin {
             res.statusCode = 404;
             return res.end('nie ma takiego zalacznika');
           }
+          const name = String(meta?.result?.NAME ?? '');
 
           const file = await fetch(url);
           if (!file.ok) {
@@ -253,6 +271,7 @@ export function bxProxy(mode: string): Plugin {
 
           res.statusCode = 200;
           res.setHeader('content-type', file.headers.get('content-type') ?? 'application/octet-stream');
+          if (name) res.setHeader('content-disposition', contentDisposition(name));
           res.setHeader('cache-control', 'private, max-age=3600');
           res.end(Buffer.from(await file.arrayBuffer()));
         } catch (err) {
