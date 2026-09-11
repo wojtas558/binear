@@ -4868,6 +4868,7 @@ function ContextMenu({
   labels,
   count,
   anchor,
+  canEnterSprint,
   onPick,
   onOpen,
   onClose,
@@ -4880,6 +4881,8 @@ function ContextMenu({
   /** Ile zadan obejmie akcja — >1 gdy klikniete nalezy do zaznaczenia. */
   count: number;
   anchor: Anchor;
+  /** Czy jest aktywny sprint, do ktorego wybor etapu moze zadanie wciagnac. */
+  canEnterSprint: boolean;
   onPick: (kind: PickerKind) => void;
   onOpen: () => void;
   onClose: () => void;
@@ -4913,8 +4916,19 @@ function ContextMenu({
         </div>
 
         {MENU_ITEMS.map(({ kind, key }) => {
-          // Etapy istnieja tylko w obrebie sprintu — bez sprintu nie ma czego wybierac.
-          const disabled = kind === 'stage' && !bulk && !task.sprintId;
+          /*
+           * "Etap" bywal tu wygaszony dla zadania spoza sprintu — bo etapy zyja
+           * w sprincie, wiec bez sprintu nie bylo z czego wybierac.
+           *
+           * Juz nie: wybor kolumny SAM wciaga zadanie do aktywnego sprintu (i
+           * odpala automatyzacje nadajaca numer IT-NNN). Wygaszanie zmuszaloby do
+           * dwoch krokow — najpierw "Sprint", potem "Etap" — na cos, co jest
+           * jedna decyzja: "to zadanie idzie do roboty, o tutaj".
+           *
+           * Zostaje wygaszone tylko wtedy, gdy naprawde nie ma dokad wrzucic:
+           * projekt bez aktywnego sprintu.
+           */
+          const disabled = kind === 'stage' && !bulk && !task.sprintId && !canEnterSprint;
           return (
             <button
               key={kind}
@@ -6481,6 +6495,16 @@ export default function App() {
         const st = t?.sprintId
           ? stages.find((s) => s.sprintId === t.sprintId && s.name === key)
           : undefined;
+        // TEMP-TEST-UNLOCK (2026-09-10): zadanie z backlogu wchodzi do aktywnego sprintu na upuszczony etap. Do usuniecia po tescie.
+        const into =
+          !t?.sprintId && activeSprint
+            ? stages.find((s) => s.sprintId === activeSprint.id && s.name === key)
+            : undefined;
+        if (into) {
+          void mutate(id, { sprintId: into.sprintId, stageId: into.id }, () => moveToSprint(id, into.sprintId, into.id), 'sprint');
+          continue;
+        }
+        // /TEMP-TEST-UNLOCK
         if (!st) skipped++;
         else if (t?.stageId !== st.id) applyStage(id, st.id);
       }
@@ -6488,7 +6512,7 @@ export default function App() {
         toast(`Pominięto ${skipped} zadań — nie są w sprincie, więc nie mają etapów.`);
       }
     },
-    [people, tasks, stages, mutate, applyStage, toast],
+    [people, tasks, stages, mutate, applyStage, toast, activeSprint], // TEMP-TEST-UNLOCK: + activeSprint
   );
 
   /**
@@ -6528,6 +6552,13 @@ export default function App() {
       if (id === null || !target) return;
 
       if (target.kind === 'col') {
+        // TEMP-TEST-UNLOCK (2026-09-10): karta z backlogu upuszczona na kolumne wchodzi do sprintu tej kolumny. Do usuniecia po tescie.
+        const into = stages.find((s) => s.id === target.stageId);
+        if (into && !tasks.find((x) => x.id === id)?.sprintId) {
+          void mutate(id, { sprintId: into.sprintId, stageId: into.id }, () => moveToSprint(id, into.sprintId, into.id), 'sprint');
+          return;
+        }
+        // /TEMP-TEST-UNLOCK
         applyStage(id, target.stageId);
         return;
       }
@@ -6542,7 +6573,7 @@ export default function App() {
       if (source?.key === target.groupKey) return;
       dropOnGroup(target.groupKey, targetsFor(id));
     },
-    [applyStage, dropOnGroup, groupNodes, targetsFor],
+    [applyStage, dropOnGroup, groupNodes, targetsFor, stages, tasks, mutate], // TEMP-TEST-UNLOCK: + stages, tasks, mutate
   );
 
   /** Podglad pod kursorem: przeciagamy zaznaczenie, jesli zadanie do niego nalezy. */
@@ -7020,17 +7051,38 @@ export default function App() {
         apply: async (value: string) => {
           const entityId = Number(value);
           const toSprint = activeSprint !== null && entityId === activeSprint.id;
+
           /*
-           * Etapu NIE zgadujemy — nadaje go Bitrix przy wejsciu do sprintu.
-           * Czyscimy go optymistycznie i dociagamy prawdziwy cichym odswiezeniem,
-           * zamiast pokazywac kolumne, ktorej zadanie moze wcale nie dostac.
+           * Etap MUSIMY podac sami — wbrew temu, co tu kiedys stalo, Bitrix nadaje
+           * go tylko przy wejsciu do sprintu z interfejsu. Po samym `entityId`
+           * zadanie zostaje bez etapu i wypada z `tasks.task.list({SPRINT_ID})`,
+           * czyli znika ze sprintu (sprawdzone na zywo). Bierzemy pierwsza kolumne
+           * procesu: oznaczona przez Bitriksa jako NEW, a gdy takiej nie ma —
+           * najwczesniejsza po `sort`.
            */
+          const pickFirst = (list: Stage[]) =>
+            [...list]
+              .filter((st) => st.sprintId === entityId)
+              .sort((a, b) => Number(b.type === 'NEW') - Number(a.type === 'NEW') || a.sort - b.sort)[0];
+
+          /*
+           * `stages` w stanie sa TYLKO dla sprintow, ktore juz maja zadania (patrz
+           * `sprintIds` przy wczytywaniu). Przenoszac zadanie do sprintu SWIEZO
+           * zalozonego, jeszcze pustego, nie znalezlibysmy tu zadnej kolumny —
+           * i wpadli dokladnie w blad opisany wyzej: zadanie bez etapu wypada ze
+           * sprintu. Dlatego przy pudle dociagamy etapy tego sprintu na miejscu.
+           */
+          let firstStage = toSprint ? pickFirst(stages) : undefined;
+          if (toSprint && !firstStage) {
+            firstStage = pickFirst(await fetchStages([entityId]).catch(() => []));
+          }
+
           await Promise.all(
             targets.map((id) =>
               mutate(
                 id,
-                { sprintId: toSprint ? entityId : null, stageId: null },
-                () => moveToSprint(id, entityId),
+                { sprintId: toSprint ? entityId : null, stageId: firstStage?.id ?? null },
+                () => moveToSprint(id, entityId, firstStage?.id),
                 'sprint',
               ),
             ),
@@ -7039,10 +7091,25 @@ export default function App() {
         },
       };
     }
-    // Etapy istnieja tylko w obrebie sprintu zadania.
-    const sprintStages = stages.filter((s) => s.sprintId === pickerTask.sprintId);
+    /*
+     * Etapy zyja w konkretnym sprincie. Zadanie, ktore w zadnym nie jest, dawniej
+     * dostawalo tu pusta liste i komunikat "Zadanie nie jest w sprincie" — czyli
+     * slepy zaulek: zeby nadac etap, trzeba bylo najpierw osobno wrzucic zadanie
+     * do sprintu.
+     *
+     * Teraz pytamy o etapy AKTYWNEGO sprintu, a wybor kolumny sam wciaga tam
+     * zadanie (`moveToSprint`), razem z nadaniem numeru IT-NNN. Jedna decyzja
+     * zamiast dwoch, i dokladnie to samo, co daje upuszczenie karty na kolumne.
+     */
+    const stageSprintId = pickerTask.sprintId ?? activeSprint?.id ?? null;
+    const entering = pickerTask.sprintId === null;
+    const sprintStages = stages.filter((s) => s.sprintId === stageSprintId);
     return {
-      title: pickerTask.sprintId ? 'Etap' : 'Zadanie nie jest w sprincie',
+      title: !stageSprintId
+        ? 'Projekt nie ma aktywnego sprintu'
+        : entering
+          ? `Etap — wrzuci do „${activeSprint?.name ?? ''}”`
+          : 'Etap',
       options: sprintStages
         .sort((a, b) => a.sort - b.sort)
         .map((s) => {
@@ -7054,20 +7121,52 @@ export default function App() {
             icon: <StageIcon progress={meta?.progress ?? null} color={meta?.color ?? s.color} />,
           };
         }),
-      apply: (value: string) => {
+      apply: async (value: string) => {
+        const stageId = Number(value);
+
         /*
-         * Etap zyje w konkretnym sprincie, wiec zbiorczo mozna przestawic tylko te
-         * zadania, ktore sa w TYM SAMYM sprincie co wybrany etap. Reszte pomijamy
-         * i mowimy o tym wprost, zamiast po cichu nie zrobic nic.
+         * Zaznaczenie bywa mieszane, wiec dzielimy je na trzy kubelki:
+         *  - JUZ w tym sprincie -> sama zmiana kolumny,
+         *  - w ZADNYM sprincie  -> wejscie do sprintu na te kolumne,
+         *  - w INNYM sprincie   -> pomijamy.
+         *
+         * Ten trzeci przypadek zostaje pominiety swiadomie: przerzucanie zadania
+         * miedzy sprintami to inna decyzja niz wybor kolumny i nie powinna
+         * przydarzyc sie przy okazji. Mowimy o tym wprost.
          */
-        const eligible = targets.filter(
-          (id) => tasks.find((t) => t.id === id)?.sprintId === pickerTask.sprintId,
-        );
-        const skipped = targets.length - eligible.length;
-        if (skipped > 0) {
-          toast(`Pominięto ${skipped} zadań spoza sprintu „${activeSprint?.name ?? ''}" — etap ich nie dotyczy.`);
+        const move: number[] = [];
+        const enter: number[] = [];
+        let skipped = 0;
+        for (const id of targets) {
+          const t = tasks.find((x) => x.id === id);
+          if (!t) continue;
+          if (t.sprintId === stageSprintId) move.push(id);
+          else if (t.sprintId === null) enter.push(id);
+          else skipped += 1;
         }
-        return Promise.all(eligible.map((id) => applyStage(id, Number(value))));
+        if (skipped > 0) {
+          toast(`Pominięto ${skipped} zadań z innego sprintu — najpierw przenieś je tutaj.`);
+        }
+
+        await Promise.all([
+          ...move.map((id) => applyStage(id, stageId)),
+          ...enter.map((id) =>
+            mutate(
+              id,
+              { sprintId: stageSprintId, stageId },
+              () => moveToSprint(id, stageSprintId as number, stageId),
+              'sprint',
+            ),
+          ),
+        ]);
+
+        /*
+         * Wejscie do sprintu zmienia przynaleznosc, wiec lista musi sie przeliczyc.
+         * UWAGA: `tasks.task.list` potrafi przez kilka minut nie widziec swiezo
+         * przeniesionego zadania — wtedy pojawi sie dopiero przy kolejnym
+         * odswiezeniu. To ograniczenie Bitriksa, nie tego wywolania.
+         */
+        if (enter.length) await reload(true);
       },
     };
   }, [
@@ -7605,6 +7704,7 @@ export default function App() {
               labels={labels}
               count={menu.targets.length}
               anchor={menu.anchor}
+              canEnterSprint={activeSprint !== null}
               onClose={() => setMenu(null)}
               onOpen={() => {
                 setMenu(null);

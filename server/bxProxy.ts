@@ -33,6 +33,13 @@ const ALLOWED = new Set([
   'task.item.update', // legacy CTaskItem::update — jedyna droga zapisu DEPENDS_ON (zadania powiazane)
   'task.stages.movetask',
   'tasks.api.scrum.task.update', // sprint <-> backlog; przynaleznosc trzyma scrum, nie pole zadania
+  /*
+   * KARTA na tablicy sprintu. Bez niej wejscie do sprintu jest tylko wpisem w
+   * bazie: zadanie ma sprint i etap, ale na tablicy Bitriksa karty nie ma, wiec
+   * reguly kolumny nie maja czego "wpuscic" i nie odpalaja (a to one nadaja
+   * numer IT-XXX). Patrz `moveToSprint` w src/bitrix.ts.
+   */
+  'tasks.api.scrum.kanban.addTask',
   'task.commentitem.add',
   'task.checklistitem.complete', // odhaczenie pozycji checklisty
   'task.checklistitem.renew', // cofniecie odhaczenia

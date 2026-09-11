@@ -1459,7 +1459,15 @@ export async function fetchRelatedPresence(taskIds: number[]): Promise<Set<numbe
 
 /** Etap kanbana; dziala tylko dla zadan przypisanych do sprintu. */
 export async function moveToStage(taskId: number, stageId: number): Promise<void> {
-  await call('task.stages.movetask', { id: taskId, stageId });
+  /*
+   * NIE `task.stages.movetask` — ta metoda obsluguje kanban PROJEKTU, nie sprintu.
+   * Sprawdzone na zywo: `task.stages.get({entityId: 451})` oddaje etapy grupy
+   * (3441/3443/3445), a etapy sprintu to inny komplet (4651...4659). Podane id
+   * sprintowe `movetask` PRZYJMUJE i zwraca `true`, po czym nic nie zmienia —
+   * czyli przeciagniecie karty na tablicy wygladalo na udane i cofalo sie przy
+   * najblizszym odswiezeniu. `tasks.task.update` ustawia etap sprintu poprawnie.
+   */
+  await call('tasks.task.update', { taskId, fields: { STAGE_ID: stageId } });
 }
 
 /**
@@ -1474,8 +1482,99 @@ export async function moveToStage(taskId: number, stageId: number): Promise<void
  * `getFields`, ale przynaleznosc trzyma osobna tabela scruma i przestawienie
  * samego pola rozjechaloby jedno z drugim.
  */
-export async function moveToSprint(taskId: number, entityId: number): Promise<void> {
+export async function moveToSprint(
+  taskId: number,
+  entityId: number,
+  stageId?: number,
+): Promise<void> {
+  /*
+   * 1. PRZYNALEZNOSC do sprintu. Sama w sobie nie robi nic wiecej: nie nadaje
+   *    etapu (`STAGE_ID` zostaje 0), nie stawia karty na tablicy i nie odpala
+   *    zadnych regul.
+   */
   await call('tasks.api.scrum.task.update', { id: taskId, fields: { entityId } });
+
+  /* Powrot do backlogu — nie ma kolumny, w ktora cokolwiek mialoby wejsc. */
+  if (stageId === undefined) return;
+
+  /*
+   * KOLUMNA WEJSCIOWA. Automatyzacja nadajaca numer IT-XXX wisi na JEDNEJ
+   * kolumnie — u nas "Nowe / Oczekujące" (typ NEW). Wejscie do sprintu prosto
+   * na "W toku" czy "Do zatwierdzenia" nie odpala jej wcale, wiec zadanie
+   * zostaje bez numeru.
+   *
+   * Dlatego kazde wejscie do sprintu prowadzimy przez kolumne NEW, a dopiero
+   * potem przestawiamy karte tam, gdzie uzytkownik ja upuscil.
+   *
+   * Gdy etapow nie da sie pobrac, wchodzimy wprost na docelowa kolumne —
+   * zadanie ma trafic do sprintu nawet za cene braku numeru.
+   */
+  const entryId =
+    (await fetchStages([entityId]).catch(() => [] as Stage[])).find((st) => st.type === 'NEW')?.id ??
+    stageId;
+
+  /*
+   * 2. KARTA na tablicy sprintu — krok, ktorego tu przez caly czas brakowalo.
+   *
+   * Bez niego zadanie owszem ma sprint i etap, ale dla tablicy Bitriksa nie
+   * istnieje: nie ma karty, wiec nie ma czego "wpuscic" do kolumny. Reguly
+   * kolumny (u nas: nadanie numeru IT-XXX i wlaczenie liczenia czasu) sluchaja
+   * WLASNIE wejscia karty, nie zmiany pola.
+   *
+   * To tlumaczy stara zagadke: przeniesienie z binear wygladalo na udane —
+   * `STAGE_ID` sie zapisywal, listy pokazywaly sprint i kolumne — a numer nie
+   * przychodzil nigdy, w przeciwienstwie do przeciagniecia karty w Bitriksie.
+   *
+   * Sprawdzone na zywo 2026-09-10 (zadanie 116373 -> IT-895): dziennik zmian
+   * pokazuje MOVE_TO_SPRINT, zaraz po nim STAGE "Nowe / Oczekujące" ->
+   * "Nowe / Oczekujące" (to wlasnie jest owo WEJSCIE karty do kolumny), a
+   * sekunde pozniej TITLE przepisany przez regule na "IT-895: ...".
+   *
+   * Kolejnosc jest istotna: reguly odpalaja na kroku 3, ale tylko wtedy, gdy
+   * karta z kroku 2 juz stoi na tablicy. Przerwa miedzy wywolaniami nie jest
+   * potrzebna.
+   */
+  await call('tasks.api.scrum.kanban.addTask', { sprintId: entityId, taskId, stageId: entryId });
+
+  /*
+   * 3. ETAP. Dopiero ten zapis Bitrix czyta jako wejscie karty do kolumny —
+   *    i dopiero teraz odpalaja sie jej reguly.
+   */
+  await moveToStage(taskId, entryId);
+
+  /* Upuszczone na kolumne wejsciowa — nie ma dokad przestawiac. */
+  if (entryId === stageId) return;
+
+  /*
+   * 4. DOCELOWA kolumna. Czekamy najpierw, az regula dopisze numer: przestawienie
+   *    karty w trakcie jej pracy to wyscig, ktorego nie kontrolujemy, a numer jest
+   *    tu cala stawka. Regula wyrabia sie w okolo sekunde (sprawdzone), wiec
+   *    odpytujemy krotko i z gory ograniczonym budzetem.
+   *
+   *    Brak numeru po tym czasie NIE blokuje przeniesienia: uzytkownik prosil
+   *    o konkretna kolumne i ma ja dostac, choćby numer mial nie przyjsc.
+   */
+  await waitForCode(taskId);
+  await moveToStage(taskId, stageId);
+}
+
+/**
+ * Krotkie oczekiwanie na numer IT-XXX dopisany przez automatyzacje kolumny.
+ *
+ * `tasks.task.get` czyta zadanie wprost i widzi zmiane od razu — w odroznieniu od
+ * `tasks.task.list`, ktore po wejsciu do sprintu potrafi nie widziec zadania przez
+ * dobrych kilka minut (sprawdzone 2026-09-10: filtr po samym ID zwracal pustke).
+ */
+async function waitForCode(taskId: number, budgetMs = 6000, stepMs = 700): Promise<boolean> {
+  const until = Date.now() + budgetMs;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, stepMs));
+    const title = await call<any>('tasks.task.get', { taskId, select: ['ID', 'TITLE'] })
+      .then((r) => str(r?.task?.title))
+      .catch(() => '');
+    if (/\bIT-\d+/.test(title)) return true;
+  }
+  return false;
 }
 
 /**
