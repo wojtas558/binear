@@ -720,6 +720,92 @@ const POLL_MS = 30_000;
  */
 const IDLE_MS = 5 * 60_000;
 
+/**
+ * Jak dlugo bronic wlasnego zapisu przed lista, ktora go jeszcze nie widzi.
+ *
+ * `tasks.task.list` po zapisie potrafi przez KILKA MINUT zwracac stary wiersz —
+ * nawet filtrowany po id tego jednego zadania (`tasks.task.get` jest dokladny,
+ * ale listy z niego nie zlozymy: to jedno wywolanie na zadanie). Bez ochrony
+ * kazde ciche odswiezenie cofalo na ekranie dopiero co wprowadzona zmiane, a
+ * wlasciwa wartosc wracala dopiero po kilku minutach. Zapis byl caly czas
+ * poprawny — klamal WIDOK.
+ *
+ * Piec minut to bezpiecznik na wypadek, gdyby lista nigdy nie potwierdzila
+ * naszej wartosci (np. automatyzacja Bitriksa zapisala cos innego). W normalnym
+ * biegu pinezka znika wczesniej — w chwili, gdy serwer zwroci to samo.
+ */
+const PIN_TTL_MS = 5 * 60_000;
+
+/** Wlasny zapis czekajacy na potwierdzenie przez liste. */
+interface Pin {
+  /** Kiedy zapisalismy — do wygasniecia. */
+  at: number;
+  /** Pola, ktore sami ustawilismy, wraz z wartosciami. */
+  fields: Partial<Task>;
+  /** Zadanie usuniete przez nas: ma NIE wracac z nieaktualnej listy. */
+  gone?: boolean;
+}
+
+/** Porownanie wartosci pola — tagi i osoby to tablice, reszta wartosci proste. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  return a === b;
+}
+
+/**
+ * Naklada wlasne zapisy na swieza liste i sprzata pinezki, ktore zrobily swoje.
+ *
+ * Pinezka znika, gdy serwer zaczyna zwracac te sama wartosc (dogonil nas) albo
+ * gdy minal `PIN_TTL_MS`. Mapa jest zywa (ref), wiec czyscimy ja w miejscu.
+ */
+function applyPins(tasks: Task[], pins: Map<number, Pin>): Task[] {
+  if (!pins.size) return tasks;
+  const now = Date.now();
+
+  for (const [id, pin] of pins) {
+    if (now - pin.at > PIN_TTL_MS) pins.delete(id);
+  }
+  if (!pins.size) return tasks;
+
+  const out: Task[] = [];
+  for (const t of tasks) {
+    const pin = pins.get(t.id);
+    if (!pin) {
+      out.push(t);
+      continue;
+    }
+    if (pin.gone) continue;
+
+    let patched = t;
+    for (const [k, v] of Object.entries(pin.fields)) {
+      const key = k as keyof Task;
+      /* Serwer nas dogonil w tym polu — pinezka nie ma juz czego bronic. */
+      if (sameValue(t[key], v)) {
+        delete pin.fields[key];
+        continue;
+      }
+      if (patched === t) patched = { ...t };
+      (patched as unknown as Record<string, unknown>)[k] = v;
+    }
+    /* Nic juz nie trzymamy dla tego zadania. */
+    if (!Object.keys(pin.fields).length) pins.delete(t.id);
+    out.push(patched);
+  }
+
+  /*
+   * Zadania usuniete przez nas, ktorych lista wciaz nie zdjela, nie trafily do
+   * `out` — ale ich pinezki musza zyc dalej, az lista naprawde je zgubi. Gdy
+   * zniknely, pinezka nie ma juz sensu.
+   */
+  const present = new Set(tasks.map((t) => t.id));
+  for (const [id, pin] of pins) {
+    if (pin.gone && !present.has(id)) pins.delete(id);
+  }
+  return out;
+}
+
 function useBitrixData() {
   const [data, setData] = useState<Data>(EMPTY);
   /** Wybor uzytkownika; null = "ten z .env". Zmiana pociaga za soba pelne przeladowanie. */
@@ -738,6 +824,12 @@ function useBitrixData() {
   // Stan sprzed mutacji czytamy z refa — setState jest asynchroniczny,
   // a rollback musi znac dokladnie te wartosci, ktore nadpisalismy.
   const tasksRef = useRef<Task[]>([]);
+  /*
+   * Wlasne zapisy, ktorych lista jeszcze nie potwierdza — patrz `applyPins`.
+   * W refie, nie w stanie: nakladamy je W TRAKCIE `setData`, a nie renderujemy,
+   * wiec ich zmiana nie ma prawa sama z siebie odswiezac widoku.
+   */
+  const pinsRef = useRef<Map<number, Pin>>(new Map());
   useEffect(() => {
     tasksRef.current = data.tasks;
   }, [data.tasks]);
@@ -877,10 +969,14 @@ function useBitrixData() {
         // sa globalne, wiec nie ma ryzyka podmiany miedzy projektami.
         const carried = new Map(prev.tasks.map((t) => [t.id, { sp: t.storyPoints, ep: t.epicId }]));
         return {
-          tasks: tasks.map((t) => {
-            const c = carried.get(t.id);
-            return c ? { ...t, storyPoints: c.sp, epicId: c.ep } : t;
-          }),
+          /* Na koncu wlasne zapisy — patrz `applyPins`: lista bywa starsza od nich. */
+          tasks: applyPins(
+            tasks.map((t) => {
+              const c = carried.get(t.id);
+              return c ? { ...t, storyPoints: c.sp, epicId: c.ep } : t;
+            }),
+            pinsRef.current,
+          ),
           stages,
           stageNames: new Map(stages.map((s) => [s.id, s.name])),
           stageOrder,
@@ -907,10 +1003,13 @@ function useBitrixData() {
           d.groupId === groupId
             ? {
                 ...d,
-                tasks: d.tasks.map((t) => {
-                  const m = meta.get(t.id);
-                  return m ? { ...t, storyPoints: m.storyPoints, epicId: m.epicId } : t;
-                }),
+                tasks: applyPins(
+                  d.tasks.map((t) => {
+                    const m = meta.get(t.id);
+                    return m ? { ...t, storyPoints: m.storyPoints, epicId: m.epicId } : t;
+                  }),
+                  pinsRef.current,
+                ),
               }
             : d,
         );
@@ -1017,12 +1116,25 @@ function useBitrixData() {
       ) as Partial<Task>;
 
       patchTasks(id, patch);
+      /*
+       * Pinezke zakladamy JUZ TERAZ, a nie po udanym zapisie: odswiezenie moze
+       * wejsc w trakcie wywolania (recznemu nigdy nie odmawiamy), a wtedy stara
+       * lista zdazylaby cofnac zmiane, zanim zdazymy jej bronic.
+       */
+      const pin = pinsRef.current.get(id);
+      pinsRef.current.set(id, { at: Date.now(), fields: { ...pin?.fields, ...patch } });
       setPending((p) => new Set(p).add(id));
 
       try {
         await run();
       } catch (e) {
         patchTasks(id, rollback);
+        /* Zapis sie nie udal — nie ma juz czego bronic przed serwerem. */
+        const failed = pinsRef.current.get(id);
+        if (failed) {
+          for (const k of Object.keys(patch)) delete failed.fields[k as keyof Task];
+          if (!Object.keys(failed.fields).length) pinsRef.current.delete(id);
+        }
         toast(`Nie udało się zapisać (${what}): ${e instanceof Error ? e.message : String(e)}`);
       } finally {
         setPending((p) => {
@@ -1047,11 +1159,14 @@ function useBitrixData() {
       if (!before) return;
 
       setData((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== id) }));
+      /* Nieaktualna lista jeszcze przez chwile zwraca usuniete zadanie. */
+      pinsRef.current.set(id, { at: Date.now(), fields: {}, gone: true });
       setPending((p) => new Set(p).add(id));
 
       try {
         await deleteTask(id);
       } catch (e) {
+        pinsRef.current.delete(id);
         // Przywracamy zadanie na jego pierwotna pozycje, nie na koniec listy.
         setData((d) => {
           if (d.tasks.some((t) => t.id === id)) return d;
