@@ -139,6 +139,14 @@ export function bxProxy(mode: string): Plugin {
     .split(',')
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
+  // Odliczanie do konca sprintu: ilu programistow liczymy (1 godzina = 1 SP na osobe)
+  // i czyje zadania nie wchodza do limitu. Patrz .env.example.
+  const devsRaw = Number(env.BX_CAPACITY_DEVS);
+  const capacityDevs = Number.isInteger(devsRaw) && devsRaw > 0 ? devsRaw : 4;
+  const capacityExcludeIds = (env.BX_CAPACITY_EXCLUDE_IDS || '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
 
   return {
     name: 'bitrix-proxy',
@@ -168,6 +176,8 @@ export function bxProxy(mode: string): Plugin {
             unassignedId,
             itDepartments,
             itUsers,
+            capacityDevs,
+            capacityExcludeIds,
             configured: Boolean(webhook),
           }),
         );

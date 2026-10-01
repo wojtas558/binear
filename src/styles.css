@@ -2187,6 +2187,38 @@ input[type='search']::-webkit-search-decoration {
      Podpowiedz dziala tak samo bez niej — `title` nie potrzebuje kursora. */
 }
 
+/*
+ * Odliczanie do konca sprintu przy etapie „Nowe / Oczekujace" (CapacityChip). Ksztalt
+ * jak `.head-sp`, ale WYPELNIONY kolorem poziomu: to jedyny zeton w naglowku, ktory
+ * ma sie rzucac w oczy, bo mowi „zdazymy / nie zdazymy". Kolor to nie ozdoba, tylko
+ * odpowiedz, wiec nie moze zginac w szarosci sasiednich zetonow.
+ */
+.head-cap {
+  flex: 0 0 auto;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  border: 1px solid currentColor;
+  border-radius: var(--s1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.head-cap-ok {
+  color: var(--accent-green);
+  background: color-mix(in srgb, var(--accent-green) 14%, transparent);
+}
+
+.head-cap-warn {
+  color: var(--accent-orange);
+  background: color-mix(in srgb, var(--accent-orange) 16%, transparent);
+}
+
+.head-cap-over {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
 .chev {
   flex: 0 0 12px;
   transition: transform 120ms ease;

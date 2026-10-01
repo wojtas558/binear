@@ -919,6 +919,8 @@ export async function createSprint(
 export interface Employee extends Person {
   /** `false` = konto wylaczone (byly pracownik). Patrz komentarz przy `fetchEmployees`. */
   active: boolean;
+  /** Dzialy pracownika (`UF_DEPARTMENT`) — po nich poznajemy, kto jest z IT (patrz `planAssign.ts`). */
+  departments: number[];
 }
 
 export async function fetchEmployees(): Promise<Employee[]> {
@@ -942,6 +944,9 @@ export async function fetchEmployees(): Promise<Employee[]> {
       name: [str(u.NAME), str(u.LAST_NAME)].filter(Boolean).join(' ').trim() || `#${u.ID}`,
       photo: photoUrl(u.PERSONAL_PHOTO),
       active: u.ACTIVE === true || u.ACTIVE === 'Y',
+      departments: (Array.isArray(u.UF_DEPARTMENT) ? u.UF_DEPARTMENT : [])
+        .map(Number)
+        .filter((d: number) => Number.isFinite(d)),
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'pl'));
 }
@@ -2411,6 +2416,16 @@ export interface AppConfig {
    * z ktorego automat zadaje pytania wywiadu, gdy siedzi w dziale spoza IT.
    */
   itUsers: number[];
+  /**
+   * Odliczanie do konca sprintu — ilu programistow liczymy (z .env: BX_CAPACITY_DEVS,
+   * domyslnie 4). Opcjonalne, bo migawka zapisana przez wczesniejsza wersje go nie ma.
+   */
+  capacityDevs?: number;
+  /**
+   * Odpowiedzialni, ktorych zadania NIE wchodza do limitu punktow (z .env:
+   * BX_CAPACITY_EXCLUDE_IDS) — typowo kierownik, ktory nie liczy sie do pojemnosci.
+   */
+  capacityExcludeIds?: number[];
   configured: boolean;
 }
 

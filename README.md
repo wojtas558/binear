@@ -163,6 +163,30 @@ recorded: until story points and chats arrive, a card shows `…` and writes
 nothing, so a half-loaded zero can't pose as a drop. Days with binear closed are
 simply missing, and the arrow then compares with the last day it was open.
 
+## Sprint clock
+
+On the **New / Pending** stage (list header or board column, active sprint only) a
+chip shows two numbers, e.g. `mamy 97 · czeka 59 SP` — the story points the team can
+still do before the sprint ends ("we have") and the points still waiting after the
+excluded accounts' tasks are taken out ("waiting") — coloured by whether the second
+fits in the first. The working-out (hours × developers, what is left out and why) is in
+the tooltip. Numbers are rounded to whole values; the colour is computed from the exact ones.
+
+- **Hours** are working hours, Mon–Fri 8–16, until the sprint's end. The sprint ends
+  on the Monday at 9:00, so that Monday's 8–9 counts as the last hour. Holidays are
+  not subtracted.
+- **Capacity** = hours × developers (1 h = 1 SP per person). Developers come from
+  `BX_CAPACITY_DEVS` (default 4).
+- **Waiting** = tasks of the active sprint on the `NEW` stage that have an estimate.
+  Tasks in progress are not counted: we don't know how far along they are.
+- **Left out of the limit**: tasks assigned to the accounts in
+  `BX_CAPACITY_EXCLUDE_IDS` (e.g. a manager who isn't part of the team's capacity).
+  They are subtracted before comparing and listed in the tooltip.
+- **Colour**: green up to the capacity, orange slightly above it, red from
+  1.5× capacity ("we won't make it").
+
+It counts the whole group of tasks, not what the current filter lets through.
+
 ## Search
 
 An identifier-shaped query (`IT-749`, `it 749`, `749`, `#114677`) is matched
@@ -186,6 +210,21 @@ reads as a real person in one place and a placeholder in another. (Since the acc
 also authored most tasks via the bulk import, their **Autor** field now says
 "Unassigned" too.) The id is configurable: `BX_UNASSIGNED_ID` in `.env`, served to the
 front end via `/api/config` (defaults to 251).
+
+## Planning: who owns a task entering a sprint
+
+When tasks are moved **from the register into a sprint** in the planning view, a task whose
+responsible person is **outside IT** is handed to the placeholder account (`BX_UNASSIGNED_ID`, the
+"Unassigned" account IT works under) — the requesting department isn't the one who will do it. If the
+responsible person is **in IT**, they stay. A toast says how many tasks were handed over.
+
+- **Who counts as IT**: the account binear runs under, accounts in `BX_IT_USERS`, people from the
+  departments in `BX_IT_DEPARTMENTS` (read from each employee's `UF_DEPARTMENT`), the accounts in
+  `BX_CAPACITY_EXCLUDE_IDS` (the manager), and the placeholder itself.
+- **Only register → sprint.** Moving a task between sprints, or back to the register, changes nothing.
+- **Unknown stays put.** If the employee list hasn't loaded, or the person isn't in it, the task is
+  left alone — a wrong guess in the other direction would take a task away from someone in IT.
+- Only this planning path does it; the context menu and the board's drag-and-drop move tasks as before.
 
 ## Status ≠ Stage
 
