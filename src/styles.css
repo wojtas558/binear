@@ -1484,6 +1484,15 @@ input[type='search']::-webkit-search-decoration {
   background: var(--border-strong);
 }
 
+/* Grupa bez podpisu — to samo miejsce, ale bez tekstu i bez linii. */
+.counters-cap-empty::after {
+  display: none;
+}
+
+.counters-cap-empty .counters-cap-text {
+  visibility: hidden;
+}
+
 .counters-cap-text {
   font-size: var(--t-micro);
   font-weight: var(--w-medium);

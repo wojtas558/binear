@@ -266,15 +266,18 @@ export function CountersBar({
    *  - ROZBICIE: „Poza sprintem" i stany, ktore sie na nie skladaja (`inSum`).
    *    Podpis grupy przechodzi w linie siegajaca do konca tych kafelkow,
    *  - SPRINT: kafelek sprintu, osobna miara,
+   *  - BEZ PODPISU: cechy, ktore licza zadania i ze sprintu, i spoza niego (`standalone`, bledy) —
+   *    nie pasuja ani do „Sprint", ani do „Poza sumą", wiec stoja same miedzy nimi,
    *  - POZA SUMA: odlozone (status 6 nie wchodzi do „Poza sprintem") i cechy
-   *    (`separate`, np. bledy — bug jest tez w ktoryms ze stanow).
+   *    (`separate`, np. koncepcja, foldery — kazde jest tez w ktoryms ze stanow albo poza nimi).
    * Wczesniej byl jeden rzad z golym pionowym separatorem, a odlozone wisialy
    * pod nim jako szara notka — nic nie mowilo, co sie sumuje, a co nie.
    */
   const total = tiles.find((d) => d.key === 'poza');
   const parts = tiles.filter((d) => d.inSum);
   const sprint = tiles.filter((d) => d.key !== 'poza' && !d.inSum && !d.separate);
-  const outside = [...(note ? [note] : []), ...tiles.filter((d) => d.separate)];
+  const standalone = tiles.filter((d) => d.standalone);
+  const outside = [...(note ? [note] : []), ...tiles.filter((d) => d.separate && !d.standalone)];
 
   const tile = (d: CounterDef) => {
     const v = values[d.key];
@@ -315,6 +318,12 @@ Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
       <span className="counters-cap-text">{text}</span>
     </span>
   );
+  /* Pusty podpis: zajmuje to samo miejsce, co zwykly, zeby kafelki stały na jednej wysokosci. */
+  const emptyCap = (
+    <span className="counters-cap counters-cap-empty" aria-hidden>
+      <span className="counters-cap-text">&nbsp;</span>
+    </span>
+  );
 
   return (
     <div className="counters" role="toolbar" aria-label="Liczniki zadań" ref={rowRef}>
@@ -331,6 +340,12 @@ Kliknij ponownie, żeby wrócić do zwykłego widoku.` : d.hint}
         <div className="counters-group" style={nStyle(sprint.length)}>
           {cap('Sprint')}
           <div className="counters-group-row">{sprint.map((d) => tile(d))}</div>
+        </div>
+      )}
+      {standalone.length > 0 && (
+        <div className="counters-group" style={nStyle(standalone.length)}>
+          {emptyCap}
+          <div className="counters-group-row">{standalone.map((d) => tile(d))}</div>
         </div>
       )}
       {outside.length > 0 && (

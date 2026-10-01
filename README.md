@@ -123,7 +123,7 @@ following the steps of the task audit. Left to right:
 | **To estimate** | outside the sprint, `DO-STARTU`, no story points |
 | **Ready to start** | outside the sprint, `DO-STARTU`, with story points — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
-| **Bugs** *(apart, behind a divider)* | open tasks tagged `BUG`, in the sprint or outside it, deferred excluded |
+| **Bugs** *(stands alone, no group caption, between "Sprint" and "Out of the sums")* | open tasks tagged `BUG`, in the sprint or outside it, deferred excluded |
 
 **The five middle cards add up to "Outside sprint" exactly.** "Bugs" is an attribute,
 not a state (a bug is also in one of the states), so it stands apart behind a
