@@ -2411,6 +2411,16 @@ export interface AppConfig {
    * z ktorego automat zadaje pytania wywiadu, gdy siedzi w dziale spoza IT.
    */
   itUsers: number[];
+  /**
+   * Odliczanie do konca sprintu — ilu programistow liczymy (z .env: BX_CAPACITY_DEVS,
+   * domyslnie 4). Opcjonalne, bo migawka zapisana przez wczesniejsza wersje go nie ma.
+   */
+  capacityDevs?: number;
+  /**
+   * Odpowiedzialni, ktorych zadania NIE wchodza do limitu punktow (z .env:
+   * BX_CAPACITY_EXCLUDE_IDS) — typowo kierownik, ktory nie liczy sie do pojemnosci.
+   */
+  capacityExcludeIds?: number[];
   configured: boolean;
 }
 

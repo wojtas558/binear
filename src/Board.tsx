@@ -1,4 +1,4 @@
-import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Epic, Stage, Task } from './bitrix';
 import { Avatar, CommentIcon, LinkIcon, ParentIcon, PriorityIcon, SubtaskIcon, tagHue } from './icons';
@@ -35,6 +35,7 @@ export function Board({
   epicOf,
   subCounts,
   relatedIds,
+  headExtra,
   onOpen,
   onMenu,
   onCopied,
@@ -66,6 +67,8 @@ export function Board({
   /** Zadania z powiazaniami (DEPENDS_ON) — sama obecnosc, bez liczby. */
   relatedIds: Set<number>;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
+  /** Dodatek w naglowku kolumny danego etapu (np. odliczanie do konca sprintu); null = nic. */
+  headExtra?: (stage: Stage) => ReactNode;
   /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
   onCopied: (code: string) => void;
 }) {
@@ -133,6 +136,7 @@ export function Board({
           epicOf={epicOf}
           subCounts={subCounts}
           relatedIds={relatedIds}
+          headExtra={headExtra?.(s)}
           onOpen={onOpen}
           onMenu={onMenu}
           onCopied={onCopied}
@@ -157,6 +161,7 @@ function BoardColumn({
   epicOf,
   subCounts,
   relatedIds,
+  headExtra,
   onOpen,
   onMenu,
   onCopied,
@@ -185,6 +190,8 @@ function BoardColumn({
   /** Zadania z powiazaniami (DEPENDS_ON) — sama obecnosc, bez liczby. */
   relatedIds: Set<number>;
   onMenu: (id: number, anchor: { left: number; top: number; bottom: number }) => void;
+  /** Dodatek po sumie SP w naglowku kolumny. */
+  headExtra?: ReactNode;
   /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
   onCopied: (code: string) => void;
 }) {
@@ -216,6 +223,7 @@ function BoardColumn({
             {sp} SP
           </HoverNote>
         )}
+        {headExtra}
       </header>
 
       <div className="col-body">

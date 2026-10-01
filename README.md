@@ -163,6 +163,46 @@ recorded: until story points and chats arrive, a card shows `…` and writes
 nothing, so a half-loaded zero can't pose as a drop. Days with binear closed are
 simply missing, and the arrow then compares with the last day it was open.
 
+## Sprint clock
+
+On the **New / Pending** stage (list header or board column, active sprint only) a
+chip shows two numbers, e.g. `mamy 97 · czeka 59 SP` — the story points the team can
+still do before the sprint ends ("we have") and the points still waiting after the
+excluded accounts' tasks are taken out ("waiting") — coloured by whether the second
+fits in the first. The working-out (hours × developers, what is left out and why) is in
+the tooltip. Numbers are rounded to whole values; the colour is computed from the exact ones.
+
+- **Hours** are working hours, Mon–Fri 8–16, until the sprint's end. The sprint ends
+  on the Monday at 9:00, so that Monday's 8–9 counts as the last hour. Holidays are
+  not subtracted.
+- **Capacity** = hours × developers (1 h = 1 SP per person). Developers come from
+  `BX_CAPACITY_DEVS` (default 4).
+- **Waiting** = tasks of the active sprint on the `NEW` stage that have an estimate.
+  Tasks in progress are not counted: we don't know how far along they are.
+- **Left out of the limit**: tasks assigned to the accounts in
+  `BX_CAPACITY_EXCLUDE_IDS` (e.g. a manager who isn't part of the team's capacity).
+  They are subtracted before comparing and listed in the tooltip.
+- **Colour**: green up to the capacity, orange slightly above it, red from
+  1.5× capacity ("we won't make it").
+
+It counts the whole group of tasks, not what the current filter lets through.
+
+### Planning: team vs manager
+
+The accounts in `BX_CAPACITY_EXCLUDE_IDS` (a manager who isn't part of the team's capacity) don't
+use up the sprint limit in the planning view either:
+
+- **The limit bars count the team only** — "planned" and "with carry-over" — so the manager's tasks,
+  moved in from the backlog or carried over from the running sprint, no longer eat into the limit
+  or show up as "over".
+- **"How much the register can still take"** (the points left before the red "doesn't fit"
+  line) is computed from the team's tasks only, and a manager's task is never marked as not fitting:
+  it takes no capacity.
+- The manager's work is still shown, **separately**: a bar of its own under the team's bars
+  (`Kierownik · poza limitem`, no limit marker, carried-over part hatched), and the panel header
+  reads `… SP zespołu · … SP kierownika` instead of one total.
+- Without `BX_CAPACITY_EXCLUDE_IDS` nothing changes: one bar set, one total.
+
 ## Search
 
 An identifier-shaped query (`IT-749`, `it 749`, `749`, `#114677`) is matched
