@@ -22,6 +22,7 @@
  * decyzje podejmuje `onDragEnd` w App.tsx, w jednym wspolnym `DndContext`.
  */
 
+import { ostatnioDodaneNaGorze, type Dodane } from './planRecent';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useDroppable } from '@dnd-kit/core';
@@ -589,6 +590,7 @@ export function Planning({
   onPrzeniesienie,
   sort,
   sortFields,
+  dodane,
   onSort,
 }: {
   /**
@@ -679,6 +681,8 @@ export function Planning({
    */
   sort: { by: string; dir: 'asc' | 'desc' }[];
   sortFields: { key: string; label: string }[];
+  /** Kolejnosc wejscia do sprintu w tej sesji — ostatnio przeciagniete ma byc na gorze. */
+  dodane: Dodane;
   onSort: (next: { by: string; dir: 'asc' | 'desc' }[]) => void;
 }) {
   /*
@@ -722,12 +726,23 @@ export function Planning({
 
   const inActive = useMemo(
     () =>
-      activeSprint ? tasks.filter((t) => t.sprintId === activeSprint.id && inSprintView(t)) : [],
-    [tasks, activeSprint, inSprintView],
+      activeSprint
+        ? ostatnioDodaneNaGorze(
+            tasks.filter((t) => t.sprintId === activeSprint.id && inSprintView(t)),
+            dodane,
+          )
+        : [],
+    [tasks, activeSprint, inSprintView, dodane],
   );
   const inNext = useMemo(
-    () => (nextSprint ? tasks.filter((t) => t.sprintId === nextSprint.id && inSprintView(t)) : []),
-    [tasks, nextSprint, inSprintView],
+    () =>
+      nextSprint
+        ? ostatnioDodaneNaGorze(
+            tasks.filter((t) => t.sprintId === nextSprint.id && inSprintView(t)),
+            dodane,
+          )
+        : [],
+    [tasks, nextSprint, inSprintView, dodane],
   );
 
   /*

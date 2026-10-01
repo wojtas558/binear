@@ -171,6 +171,7 @@ import {
   noteMine,
 } from './history';
 import { TaskCode } from './TaskCode';
+import { zapiszPrzeniesienie, type Dodane } from './planRecent';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
@@ -8236,6 +8237,9 @@ export default function App() {
   const [planZwiniete, setPlanZwiniete] = useState<number[]>(() =>
     Array.isArray(saved.planZwiniete) ? saved.planZwiniete.filter((v) => Number.isFinite(v)) : [],
   );
+  /* Kiedy (kolejnosc) zadanie weszlo do sprintu w widoku planowania — Bitrix tego nie trzyma. */
+  const [planDodane, setPlanDodane] = useState<Dodane>({});
+  const planDodaneNext = useRef(1);
   const [planSort, setPlanSort] = useState<{ by: PlanSortBy; dir: 'asc' | 'desc' }[]>(
     () => saved.planSort ?? (SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[]),
   );
@@ -10123,6 +10127,9 @@ export default function App() {
       if (nextSprint !== null && sprintId === nextSprint.id) {
         setPlanTura((t) => t + list.length);
       }
+      const zapis = zapiszPrzeniesienie(planDodane, list, sprintId !== null, planDodaneNext.current);
+      planDodaneNext.current = zapis.nastepny;
+      setPlanDodane(zapis.dodane);
       return Promise.all(
         list.map((id) =>
           mutate(
@@ -10134,7 +10141,7 @@ export default function App() {
         ),
       ).then(() => reload(true));
     },
-    [nextSprint, mutate, backlogId, reload],
+    [nextSprint, mutate, backlogId, reload, planDodane],
   );
 
   /**
@@ -11371,6 +11378,7 @@ export default function App() {
             onPrzeniesienie={() => setPlanPrzeniesienie((v) => !v)}
             onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
             sort={planSort}
+            dodane={planDodane}
             sortFields={PLAN_SORTS}
             onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}
             /*
