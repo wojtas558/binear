@@ -116,7 +116,7 @@ following the steps of the task audit. Left to right:
 
 | card | counts |
 | --- | --- |
-| **Outside sprint** | open tasks outside the active sprint, **deferred excluded** |
+| **Outside sprint** | open tasks outside the active sprint, **deferred and `KONCEPCJA` excluded** |
 | **To interview** | outside the sprint, tagged `DO-WYWIADU` **or with no readiness tag at all** (new tasks, or ones tagged only `BUG`, `Wysoki`…) |
 | **Waiting for an answer** | outside the sprint, tagged `OCZEKUJE-NA-ODPOWIEDZ`, nobody outside IT has answered yet |
 | **Answers to read** | the same tag, and someone outside IT answered with substance after our last round of questions |
@@ -124,6 +124,7 @@ following the steps of the task audit. Left to right:
 | **Ready to start** | outside the sprint, `DO-STARTU`, with story points — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
 | **Bugs** *(apart, behind a divider)* | open tasks tagged `BUG`, in the sprint or outside it, deferred excluded |
+| **Concept** *(apart, behind a divider)* | open tasks tagged `KONCEPCJA`, in the sprint or outside it — ideas too early to count, so outside the sprint they are in **no** other card |
 
 **The five middle cards add up to "Outside sprint" exactly.** "Bugs" is an attribute,
 not a state (a bug is also in one of the states), so it stands apart behind a
