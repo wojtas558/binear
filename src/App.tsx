@@ -142,6 +142,7 @@ import {
 import {
   MONTHS,
   podzielNaTrafienia,
+  tagCounts,
   tagsForWidth,
   shortDate,
   isUnassigned,
@@ -8796,12 +8797,8 @@ export default function App() {
     return matchQuery(inScope, query, opisyIndeks);
   }, [base, scope, sprintId, query, opisyIndeks, cardTasks]);
 
-  /** Wszystkie tagi wystepujace w grupie, z liczba uzyc — do palety i filtra. */
-  const allTags = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const t of tasks) for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pl'));
-  }, [tasks]);
+  /** Wszystkie tagi wystepujace w grupie, alfabetycznie, z liczba uzyc — do palety, filtra i edycji tagow. */
+  const allTags = useMemo(() => tagCounts(tasks), [tasks]);
 
   /**
    * Story pointy OBECNE w danych, rosnaco - skala suwaka zakresu. Bierzemy ja z
