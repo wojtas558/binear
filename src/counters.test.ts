@@ -18,6 +18,7 @@ const zadanie = (o: Partial<Parameters<typeof countAll>[0][number]> & { id: numb
   tags: [],
   storyPoints: null,
   epicId: 141,
+  priority: '1',
   ...o,
 });
 
@@ -112,6 +113,22 @@ describe('countAll', () => {
       ctx(),
     );
     expect(w.bug.count).toBe(2);
+  });
+
+  it('bledy: plomien (priorytet wysoki) i tag BUG liczone razem, kazde zadanie raz', () => {
+    const w = countAll(
+      [
+        zadanie({ id: 80, priority: '2' }),
+        zadanie({ id: 81, tags: ['BUG'] }),
+        zadanie({ id: 82, priority: '2', tags: ['bug'] }), // oba zrodla, a liczy sie raz
+        zadanie({ id: 83, priority: '1', tags: ['Wysoki'] }),
+        zadanie({ id: 84, priority: '2', status: '5' }), // zamkniete
+        zadanie({ id: 85, priority: '2', status: '6' }), // odlozone
+        zadanie({ id: 86, priority: '2', sprintId: 70 }), // w sprincie tez
+      ],
+      ctx(),
+    );
+    expect(w.bug.count).toBe(4);
   });
 
   it('koncept: nowy tag KONCEPT i starszy KONCEPCJA, w sprincie i poza nim, bez zamknietych i odlozonych', () => {

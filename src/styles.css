@@ -2490,6 +2490,20 @@ input[type='search']::-webkit-search-decoration {
  * rezerwuje mu kawalek, ktorego nic juz nie zabierze; wielokropek dziala jak
  * dotad, tylko na wezszym polu.
  */
+/*
+ * Znaki bledu przed tytulem — czerwony plomien (wysoki priorytet) i czerwony robak (tag BUG). Ta sama
+ * czerwien, bo oba mowia „to jest blad"; ksztalt mowi, skad sie wziely, i podpowiedz tez. Stoja PRZED
+ * tytulem, w tej samej linii: na liscie sa flex-itemami obok tytulu, na karcie wchodza w jego tekst.
+ */
+.bug-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-right: var(--s1);
+  color: var(--danger);
+  vertical-align: -2px;
+}
+
 .row-title {
   flex: 1;
   min-width: 5rem;

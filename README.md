@@ -123,7 +123,7 @@ following the steps of the task audit. Left to right:
 | **To estimate** | outside the sprint, `DO-STARTU`, no story points |
 | **Ready to start** | outside the sprint, `DO-STARTU`, with story points — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
-| **Bugs** *(apart, behind a divider)* | open tasks tagged `BUG`, in the sprint or outside it, deferred excluded |
+| **Bugs** *(apart, behind a divider)* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
 
 **The five middle cards add up to "Outside sprint" exactly.** "Bugs" is an attribute,
 not a state (a bug is also in one of the states), so it stands apart behind a
@@ -186,6 +186,19 @@ reads as a real person in one place and a placeholder in another. (Since the acc
 also authored most tasks via the bulk import, their **Autor** field now says
 "Unassigned" too.) The id is configurable: `BX_UNASSIGNED_ID` in `.env`, served to the
 front end via `/api/config` (defaults to 251).
+
+## Bugs on the lists
+
+A bug gets red marks **before the title** — in the list, on the board cards and in planning:
+
+- a **flame** for Bitrix's high priority,
+- a **bug** for the `BUG` tag,
+- a task that has both shows both.
+
+The `BUG` tag is then not repeated as a label further along the row (the bug mark replaces it).
+The **Bugs** card counts flames and `BUG` tags together, each task once. The row's old priority
+bars are gone — the flame says the only thing about priority that mattered there; the priority
+is still editable in the detail panel and filterable.
 
 ## Status ≠ Stage
 

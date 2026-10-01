@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { podzielNaTrafienia, tagsForWidth } from './taskView';
+import { hasBugTag, isBug, isFlame, podzielNaTrafienia, tagsForWidth, withoutBugTag } from './taskView';
 
 /** Skrot do czytelnych asercji: „ab[cd]ef" znaczy, ze `cd` jest podswietlone. */
 const zapis = (text: string, fraza: string) =>
@@ -82,5 +82,33 @@ describe('tagsForWidth', () => {
 
   it('nie schodzi ponizej zera przy bzdurnej szerokosci', () => {
     expect(tagsForWidth(-100)).toBe(0);
+  });
+});
+
+describe('znaki błędu: płomień i BUG', () => {
+  const t = (priority: string, tags: string[] = []) => ({ priority, tags });
+
+  it('płomień to wysoki priorytet Bitriksa, nie inne', () => {
+    expect(isFlame(t('2'))).toBe(true);
+    expect(isFlame(t('1'))).toBe(false);
+    expect(isFlame(t('0'))).toBe(false);
+  });
+
+  it('tag BUG poznaje bez względu na wielkość liter, a nie podobne nazwy', () => {
+    expect(hasBugTag(t('1', ['BUG']))).toBe(true);
+    expect(hasBugTag(t('1', ['bug', 'Wysoki']))).toBe(true);
+    expect(hasBugTag(t('1', ['BUGFIX', 'debug']))).toBe(false);
+  });
+
+  it('błąd to płomień albo BUG — jedno z nich wystarcza, oba też', () => {
+    expect(isBug(t('2'))).toBe(true);
+    expect(isBug(t('1', ['BUG']))).toBe(true);
+    expect(isBug(t('2', ['BUG']))).toBe(true);
+    expect(isBug(t('1', ['OSZCZEDNOSC']))).toBe(false);
+  });
+
+  it('tag BUG znika z etykiet (zastępuje go robak), reszta zostaje w kolejności', () => {
+    expect(withoutBugTag(['BUG', 'Wysoki', 'bug', 'ZWROT-3'])).toEqual(['Wysoki', 'ZWROT-3']);
+    expect(withoutBugTag([])).toEqual([]);
   });
 });

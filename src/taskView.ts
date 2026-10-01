@@ -152,3 +152,20 @@ export function tagsForWidth(width: number): number {
    */
   return 0;
 }
+
+/*
+ * BLAD na listach ma czerwone znaki przed tytulem, po jednym na zrodlo:
+ *  - plomien — priorytet Bitriksa „wysoki" (`2`, ikona plomienia w Bitriksie),
+ *  - robak — tag BUG.
+ * Zadanie z obu na raz dostaje oba. Tag BUG nie jest wtedy pokazywany drugi raz jako etykieta (robak
+ * go zastepuje). Kafelek „Bledy" liczy plomienie i tagi BUG razem, kazde zadanie raz (patrz `counters.ts`).
+ */
+export const isFlame = (t: { priority: string }): boolean => t.priority === '2';
+
+export const hasBugTag = (t: { tags: string[] }): boolean => t.tags.some((g) => g.toUpperCase() === 'BUG');
+
+/** Zadanie jest bledem: plomien Bitriksa albo tag BUG. */
+export const isBug = (t: { priority: string; tags: string[] }): boolean => isFlame(t) || hasBugTag(t);
+
+/** Tagi bez BUG — ten tag zastepuje robak przed tytulem, wiec drugi raz jako etykieta zbedny. */
+export const withoutBugTag = (tags: string[]): string[] => tags.filter((g) => g.toUpperCase() !== 'BUG');

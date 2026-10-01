@@ -29,6 +29,7 @@
  * Modul jest czysty (bez Reacta i bez zapytan), zeby dalo sie go przetestowac.
  */
 import type { Task } from './bitrix';
+import { isBug } from './taskView';
 
 export type CounterKey =
   | 'poza'
@@ -64,7 +65,7 @@ export interface CounterCtx {
   answered: ReadonlySet<number> | null;
 }
 
-type CounterTask = Pick<Task, 'id' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId'>;
+type CounterTask = Pick<Task, 'id' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId' | 'priority'>;
 
 export interface CounterDef {
   key: CounterKey;
@@ -182,9 +183,11 @@ export const COUNTERS: CounterDef[] = [
     key: 'bug',
     label: 'Błędy',
     hint:
-      'Otwarte zadania z tagiem BUG (bez odłożonych) — w sprincie i poza nim. To cecha, a nie ' +
-      'stan: zadanie z BUG jest też w jednym ze stanów obok, więc kafelek nie wchodzi do sumy.',
-    match: (t, ctx) => inAudit(t, ctx) && hasTag(t, TAG_BUG),
+      'Otwarte zadania z płomieniem (wysoki priorytet w Bitriksie) albo z tagiem BUG, bez ' +
+      'odłożonych — w sprincie i poza nim, każde liczone raz. To cecha, a nie stan: takie zadanie ' +
+      'jest też w jednym ze stanów obok, więc kafelek nie wchodzi do sumy. Na listach mają czerwony ' +
+      'płomień i/albo robaka przed tytułem.',
+    match: (t, ctx) => inAudit(t, ctx) && isBug(t),
     separate: true,
     riseIsBad: true,
   },

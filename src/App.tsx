@@ -143,7 +143,9 @@ import {
   MONTHS,
   podzielNaTrafienia,
   tagsForWidth,
+  withoutBugTag,
   shortDate,
+  isBug,
   isUnassigned,
   setUnassignedId,
   stageOf,
@@ -171,6 +173,7 @@ import {
   noteMine,
 } from './history';
 import { TaskCode } from './TaskCode';
+import { BugBadge } from './BugBadge';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { Planning, SORT_DOMYSLNY } from './Planning';
@@ -3378,7 +3381,6 @@ function TaskRow({
         />
       )}
 
-      <PriorityIcon priority={task.priority} />
       {/* Pierscien pokazuje ETAP — to on niesie stan pracy. Poza sprintem
           etapu nie ma, wiec awaryjnie pokazujemy wbudowany status. */}
       {stage ? (
@@ -3401,6 +3403,9 @@ function TaskRow({
           {parentRef.label}
         </button>
       )}
+
+      {/* Blad: czerwony plomien (wysoki priorytet) i/albo robak (tag BUG); tag BUG nie wraca nizej jako etykieta. */}
+      {isBug(task) && <BugBadge task={task} />}
 
       <span className="row-title">
         {podzielNaTrafienia(task.title || task.rawTitle, fraza).map((k, i) =>
@@ -3433,7 +3438,9 @@ function TaskRow({
           );
         })()}
       {/* Liczba tagow w wierszu zalezy od szerokosci listy — reszta jako "+N". */}
-      {task.tags.length > 0 && <TagStrip tags={task.tags} limit={tagLimit} onPick={onTag} />}
+      {withoutBugTag(task.tags).length > 0 && (
+        <TagStrip tags={withoutBugTag(task.tags)} limit={tagLimit} onPick={onTag} />
+      )}
 
 
       {/*

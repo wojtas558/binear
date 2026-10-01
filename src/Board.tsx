@@ -1,11 +1,12 @@
 import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Epic, Stage, Task } from './bitrix';
-import { Avatar, CommentIcon, LinkIcon, ParentIcon, PriorityIcon, SubtaskIcon, tagHue } from './icons';
-import { shortDate, isUnassigned, podzielNaTrafienia, stageOf, sumPoints } from './taskView';
+import { Avatar, CommentIcon, LinkIcon, ParentIcon, SubtaskIcon, tagHue } from './icons';
+import { shortDate, isBug, isUnassigned, podzielNaTrafienia, stageOf, sumPoints, withoutBugTag } from './taskView';
 import { colDropId, dragId } from './dnd';
 import { HoverNote } from './HoverNote';
 import { TaskCode } from './TaskCode';
+import { BugBadge } from './BugBadge';
 
 /**
  * Tablica = kanban sprintu z Bitriksa, nie wlasny wymysl: kolumny to etapy
@@ -313,7 +314,6 @@ function BoardCard({
       <div className="card-top">
         <TaskCode code={t.code ?? `#${t.id}`} copy={t.code ?? String(t.id)} onCopied={onCopied} />
         {/* Bez pierscienia etapu — kolumna, w ktorej lezy karta, JEST etapem. */}
-        <PriorityIcon priority={t.priority} />
         <span className="card-spacer" />
         {/* Story pointy scruma — dociagane w tle, wiec pojawiaja sie chwile po karcie. */}
         {t.storyPoints != null && (
@@ -375,11 +375,13 @@ function BoardCard({
         </div>
       )}
       <div className="card-title">
+        {/* Blad: czerwony plomien (priorytet) i/albo robak (tag BUG) przed tytulem; tag BUG nie wraca nizej. */}
+        {isBug(t) && <BugBadge task={t} />}
         {podzielNaTrafienia(t.title || t.rawTitle, fraza).map((k, i) =>
           k.hit ? <mark key={i}>{k.text}</mark> : k.text,
         )}
       </div>
-      {(t.tags.length > 0 || epic) && (
+      {(withoutBugTag(t.tags).length > 0 || epic) && (
         <div className="card-tags">
           {/* Epik ZAWSZE pierwszy, przed tagami: nalezy do zadania na stale, a tagi
               przychodza i znikaja — gdy stal za nimi, skakal w bok przy kazdej zmianie
@@ -400,7 +402,7 @@ function BoardCard({
                 </span>
               );
             })()}
-          {t.tags.map((tag) => (
+          {withoutBugTag(t.tags).map((tag) => (
             <span key={tag} className="tag tag-static">
               <span className="tag-dot" style={{ background: tagHue(tag) }} />
               {tag}

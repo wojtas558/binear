@@ -108,6 +108,25 @@ export function BulbIcon() {
   );
 }
 
+/**
+ * Plomien — znacznik BLEDU na listach i kafelek „Bledy". Jeden znak na dwa zrodla: priorytet
+ * Bitriksa „wysoki" (plomien) i tag BUG. Ten sam kaligraficzny rys co reszta ikon.
+ */
+export function FlameIcon() {
+  return (
+    <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden>
+      <path
+        d="M7 1.4c.5 2.1 3.1 3.4 3.1 6.3A3.1 3.1 0 0 1 7 12.8 3.1 3.1 0 0 1 3.9 9.7c0-1.3.5-2.1 1.3-3 .1 1 .6 1.5 1.2 1.6C6.2 6.2 6.5 3.6 7 1.4z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /** Robak — kafelek BUG. Ten sam kaligraficzny rys (kreska 1.2, okragle konce) co reszta ikon. */
 export function BugIcon() {
   return (
