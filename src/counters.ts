@@ -20,6 +20,16 @@
  * listy (BUG, Wysoki). Zadanie nowe, bez zadnego tagu gotowosci, to zadanie, o ktore
  * trzeba dopiero zapytac.
  *
+ * FOLDERY leza POZA rejestrem: zadanie, ktore ma otwarte podzadanie, jest tylko kontenerem — praca
+ * siedzi w podzadaniach, wiec liczenie rodzica obok dzieci liczyloby ten sam temat dwa razy (tak samo
+ * jak kolejka audytu, ktora folderow nie pokazuje). Folder, ktorego wszystkie podzadania sa zamkniete,
+ * wraca do zwyklego rejestru. Ani do „Poza sprintem", ani do zadnego stanu (w tym „Do wywiadu") —
+ * pokazuje je tylko osobny kafelek „Foldery".
+ *
+ * KONCEPCJA lezy POZA rejestrem: to pomysly na zbyt wczesnym etapie, zeby je wliczac —
+ * ani do „Poza sprintem", ani do zadnego stanu (w tym „Do wywiadu"). Pokazuje je tylko osobny
+ * kafelek „Koncept". Zadanie z koncepcja, ktore trafilo do aktywnego sprintu, zostaje w „W sprincie".
+ *
  * Odlozone (status 6) leza poza kolejka audytu i poza suma; pokazuje je osobna,
  * wyszarzona notka pod kafelkami.
  *
@@ -40,6 +50,7 @@ export type CounterKey =
   | 'sprint'
   | 'bug'
   | 'koncept'
+  | 'foldery'
   | 'odlozone';
 
 export const TAG_DO_STARTU = 'DO-STARTU';
@@ -47,10 +58,10 @@ export const TAG_CZEKA = 'OCZEKUJE-NA-ODPOWIEDZ';
 export const TAG_WYWIAD = 'DO-WYWIADU';
 export const TAG_BUG = 'BUG';
 /**
- * Pomysl, a nie zadanie do zrobienia. Nowy tag to KONCEPT; starsze zadania
- * maja KONCEPCJA — liczymy oba, zeby kafelek nie zgubil tych sprzed zmiany.
+ * Pomysl, a nie zadanie do zrobienia — temat na etapie koncepcji (reguly zadan: tag KONCEPCJA).
+ * Nie ma drugiego tagu o tym znaczeniu; `KONCEPT` nie istnieje ani w regulach, ani w Bitriksie.
  */
-export const TAGS_KONCEPT = ['KONCEPT', 'KONCEPCJA'];
+export const TAG_KONCEPCJA = 'KONCEPCJA';
 
 /** Bitrix nie rozroznia wielkosci liter w tagach — „do-startu" to ten sam tag. */
 export const hasTag = (t: Pick<Task, 'tags'>, tag: string): boolean =>
@@ -62,9 +73,25 @@ export interface CounterCtx {
   closed: ReadonlySet<string>;
   /** Zadania OCZEKUJE-NA-ODPOWIEDZ z odpowiedzia po naszych pytaniach; `null` = jeszcze liczymy. */
   answered: ReadonlySet<number> | null;
+  /** Zadania-FOLDERY: maja otwarte podzadanie (patrz `foldersOf`). Liczone z CALEJ listy zadan. */
+  folders: ReadonlySet<number>;
 }
 
 type CounterTask = Pick<Task, 'id' | 'status' | 'sprintId' | 'tags' | 'storyPoints' | 'epicId'>;
+
+/**
+ * Identyfikatory zadan, ktore sa FOLDERAMI: otwarte zadanie ma co najmniej jedno OTWARTE podzadanie.
+ * „Otwarte" = niezamkniete (odlozone tez sie liczy — praca nadal wisi). Wymaga CALEJ listy, bo dziecko
+ * moze lezec w innym sprincie niz rodzic.
+ */
+export function foldersOf(
+  tasks: readonly Pick<Task, 'id' | 'parentId' | 'status'>[],
+  closed: ReadonlySet<string>,
+): Set<number> {
+  const folders = new Set<number>();
+  for (const t of tasks) if (t.parentId !== null && !closed.has(t.status)) folders.add(t.parentId);
+  return folders;
+}
 
 export interface CounterDef {
   key: CounterKey;
@@ -99,8 +126,13 @@ export const DEFERRED_STATUS = '6';
 const inAudit = (t: CounterTask, ctx: CounterCtx) => isOpen(t, ctx) && t.status !== DEFERRED_STATUS;
 const inSprint = (t: CounterTask, ctx: CounterCtx) =>
   ctx.sprintId !== null && t.sprintId === ctx.sprintId;
-/** Rejestr do przerobienia: otwarte, nieodlozone, spoza aktywnego sprintu. */
-const outside = (t: CounterTask, ctx: CounterCtx) => inAudit(t, ctx) && !inSprint(t, ctx);
+/** Pomysl na zbyt wczesnym etapie (KONCEPCJA) — nie jest czescia rejestru do przerobienia. */
+const isKoncept = (t: CounterTask) => hasTag(t, TAG_KONCEPCJA);
+/** Folder: kontener na podzadania, a nie praca do przerobienia — patrz `foldersOf`. */
+const isFolder = (t: CounterTask, ctx: CounterCtx) => ctx.folders.has(t.id);
+/** Rejestr do przerobienia: otwarte, nieodlozone, spoza aktywnego sprintu, nie-koncepcje i nie-foldery. */
+const outside = (t: CounterTask, ctx: CounterCtx) =>
+  inAudit(t, ctx) && !inSprint(t, ctx) && !isKoncept(t) && !isFolder(t, ctx);
 
 const isStartu = (t: CounterTask) => hasTag(t, TAG_DO_STARTU);
 /** DO-STARTU ma pierwszenstwo — zadanie z dwoma tagami gotowosci liczy sie raz. */
@@ -192,10 +224,21 @@ export const COUNTERS: CounterDef[] = [
     key: 'koncept',
     label: 'Koncept',
     hint:
-      'Otwarte zadania z tagiem KONCEPT (albo starszym KONCEPCJA), bez odłożonych — w sprincie i ' +
-      'poza nim. To cecha, a nie stan: takie zadanie jest też w jednym ze stanów obok, więc ' +
-      'kafelek nie wchodzi do sumy.',
-    match: (t, ctx) => inAudit(t, ctx) && TAGS_KONCEPT.some((g) => hasTag(t, g)),
+      'Otwarte zadania z tagiem KONCEPCJA, bez odłożonych — w sprincie i ' +
+      'poza nim. To pomysły na zbyt wczesnym etapie, więc poza sprintem NIE wchodzą do „Poza ' +
+      'sprintem" ani do żadnego stanu (także „Do wywiadu") — liczy je tylko ten kafelek.',
+    match: (t, ctx) => inAudit(t, ctx) && isKoncept(t),
+    separate: true,
+    riseIsBad: false,
+  },
+  {
+    key: 'foldery',
+    label: 'Foldery',
+    hint:
+      'Zadania spoza sprintu, które mają otwarte podzadanie — to kontenery, praca siedzi w ' +
+      'podzadaniach, więc nie wchodzą do „Poza sprintem" ani do żadnego stanu (także „Do wywiadu"), ' +
+      'tak jak w kolejce audytu. Folder, którego wszystkie podzadania są zamknięte, wraca do rejestru.',
+    match: (t, ctx) => inAudit(t, ctx) && !inSprint(t, ctx) && !isKoncept(t) && isFolder(t, ctx),
     separate: true,
     riseIsBad: false,
   },

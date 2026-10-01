@@ -88,7 +88,7 @@ export function StageIcon({ progress, color }: { progress: number | null; color:
 }
 
 /** Dymek przy liczniku nieprzeczytanych komentarzy. */
-/** Zarowka — kafelek KONCEPT (pomysl). Ta sama kreska co reszta ikon. */
+/** Zarowka — kafelek KONCEPCJA (pomysl). Ta sama kreska co reszta ikon. */
 export function BulbIcon() {
   return (
     <svg

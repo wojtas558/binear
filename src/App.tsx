@@ -180,6 +180,7 @@ import {
   COUNTERS,
   counterDef,
   countAll,
+  foldersOf,
   type CounterCtx,
   type CounterKey,
   type DaySnapshot,
@@ -8631,9 +8632,11 @@ export default function App() {
     groupId,
     enabled: metaReady,
   });
+  /* Foldery liczymy z CALEJ listy — dziecko moze lezec w innym sprincie niz rodzic. */
+  const folders = useMemo(() => foldersOf(tasks, CLOSED_STATUSES), [tasks]);
   const counterCtx = useMemo<CounterCtx>(
-    () => ({ sprintId, closed: CLOSED_STATUSES, answered }),
-    [sprintId, answered],
+    () => ({ sprintId, closed: CLOSED_STATUSES, answered, folders }),
+    [sprintId, answered, folders],
   );
   const counterDefs = useMemo(
     () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),

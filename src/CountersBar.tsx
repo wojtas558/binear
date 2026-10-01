@@ -29,6 +29,7 @@ import {
   HashIcon,
   HistoryIcon,
   LayersIcon,
+  ParentIcon,
   ListIcon,
   PenIcon,
 } from './icons';
@@ -185,6 +186,7 @@ const ICONS: Record<CounterKey, ReactNode> = {
   sprint: <CalendarIcon />,
   bug: <BugIcon />,
   koncept: <BulbIcon />,
+  foldery: <ParentIcon />,
   odlozone: <LayersIcon />,
 };
 

@@ -1537,6 +1537,7 @@ input[type='search']::-webkit-search-decoration {
 .counter-czeka { --c: #e879a6; }
 .counter-bug { --c: var(--danger); }
 .counter-koncept { --c: #58a6ff; }
+.counter-foldery { --c: #8b949e; }
 .counter-wywiad { --c: var(--accent-orange); }
 .counter-odpowiedzi { --c: var(--accent-amber); }
 .counter-wycena { --c: #a371f7; }
