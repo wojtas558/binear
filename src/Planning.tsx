@@ -704,17 +704,15 @@ export function Planning({
    * niedomyslane (DO-WYWIADU, OCZEKUJE-NA-ODPOWIEDZ), ktorych nie ma sensu
    * wrzucac do sprintu.
    *
-   * Gdy nikt nie ma tury (wszystkie dzialy pominiete), nie zawezamy niczego —
-   * pusty rejestr wygladalby na awarie, a nie na stan kolejki.
+   * Gdy nikt nie ma tury (wszystkie dzialy pominiete), nie zawezamy do epiku —
+   * pusty rejestr wygladalby na awarie, a nie na stan kolejki. Tag `DO-STARTU` obowiazuje
+   * mimo to: zadanie bez niego (np. OCZEKUJE-NA-ODPOWIEDZ) nie jest gotowe do sprintu.
    */
   const backlog = useMemo(() => {
-    const wszystkie = rejestrTasks.filter((t) => t.sprintId === null && plannable(t));
+    const gotowe = (t: Task) => !tylkoDoStartu || t.tags.some((g) => g.toUpperCase() === 'DO-STARTU');
+    const wszystkie = rejestrTasks.filter((t) => t.sprintId === null && plannable(t) && gotowe(t));
     if (!teraz) return wszystkie;
-    return wszystkie.filter(
-      (t) =>
-        t.epicId === teraz.id &&
-        (!tylkoDoStartu || t.tags.some((g) => g.toUpperCase() === 'DO-STARTU')),
-    );
+    return wszystkie.filter((t) => t.epicId === teraz.id);
   }, [rejestrTasks, plannable, teraz, tylkoDoStartu]);
 
   const inActive = useMemo(

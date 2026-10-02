@@ -563,8 +563,8 @@ interface Settings {
   planPrzeniesienie: boolean;
   /**
    * Czy KOLEJKA DZIALOW jest w uzyciu. Wylaczona zdejmuje zawezenie rejestru do
-   * epiku i do `DO-STARTU` — planowanie poza spotkaniem, gdy nikt nie wybiera po
-   * kolei, a chodzi o przejrzenie calego rejestru.
+   * epiku — planowanie poza spotkaniem, gdy nikt nie wybiera po kolei. Zawezenie do `DO-STARTU`
+   * zostaje (przelacznik „tylko DO-STARTU”): zadanie niegotowe nie nadaje sie do sprintu.
    */
   planKolejkaWl: boolean;
   /**
