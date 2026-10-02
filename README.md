@@ -232,7 +232,8 @@ the tooltip. Numbers are rounded to whole values; the colour is computed from th
   on the Monday at 9:00, so that Monday's 8–9 counts as the last hour. Holidays are
   not subtracted.
 - **Capacity** = hours × developers (1 h = 1 SP per person). Developers come from
-  `BX_CAPACITY_DEVS` (default 4).
+  `BX_CAPACITY_DEVS` in full-time equivalents, fractions allowed (default 3.5: three full-time
+  developers plus one half-time).
 - **Waiting** = tasks of the active sprint on the `NEW` stage that have an estimate.
   Tasks in progress are not counted: we don't know how far along they are.
 - **Left out of the limit**: tasks assigned to the accounts in

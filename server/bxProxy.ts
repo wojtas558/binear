@@ -139,10 +139,10 @@ export function bxProxy(mode: string): Plugin {
     .split(',')
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
-  // Odliczanie do konca sprintu: ilu programistow liczymy (1 godzina = 1 SP na osobe)
+  // Odliczanie do konca sprintu: ilu programistow liczymy (1 godzina = 1 SP na osobe; moze byc ulamek — pol etatu to 0,5)
   // i czyje zadania nie wchodza do limitu. Patrz .env.example.
   const devsRaw = Number(env.BX_CAPACITY_DEVS);
-  const capacityDevs = Number.isInteger(devsRaw) && devsRaw > 0 ? devsRaw : 4;
+  const capacityDevs = Number.isFinite(devsRaw) && devsRaw > 0 ? devsRaw : 3.5;
   const capacityExcludeIds = (env.BX_CAPACITY_EXCLUDE_IDS || '')
     .split(',')
     .map((s) => Number(s.trim()))

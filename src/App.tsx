@@ -8644,7 +8644,7 @@ export default function App() {
       sprintCapacity({
         now,
         dateEnd: activeSprint?.dateEnd ?? null,
-        devs: config?.capacityDevs ?? 4,
+        devs: config?.capacityDevs ?? 3.5,
         sprintId,
         waitingStageIds,
         excludedIds: config?.capacityExcludeIds ?? [],

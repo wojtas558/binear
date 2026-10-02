@@ -109,6 +109,11 @@ describe('sprintCapacity', () => {
     expect(r?.level).toBe('ok');
   });
 
+  it('pół etatu to ułamek: 3 pełne etaty + 0,5 = 3,5 osoby', () => {
+    const r = sprintCapacity({ ...base, devs: 3.5, tasks: [] });
+    expect(r?.capacity).toBe(87.5);
+  });
+
   it('liczy tylko zadania czekające, z tego sprintu i z oszacowaniem', () => {
     const r = sprintCapacity({
       ...base,
