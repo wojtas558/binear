@@ -101,13 +101,19 @@ export function sprintCapacity(opts: {
   /** Odpowiedzialni, których zadania nie liczą się do limitu. */
   excludedIds: readonly number[];
   tasks: readonly CapacityTask[];
+  /**
+   * Moce z grafiku zespolu (godziny = punkty) od teraz do konca sprintu. Gdy podane, zastepuja
+   * `godziny × programisci` — grafik wie o urlopach i polowie etatu, a sama liczba osob nie.
+   */
+  teamCapacity?: number | null;
 }): SprintCapacity | null {
-  const { now, dateEnd, devs, sprintId, waitingStageIds, excludedIds, tasks } = opts;
+  const { now, dateEnd, devs, sprintId, waitingStageIds, excludedIds, tasks, teamCapacity } = opts;
   const end = sprintDeadline(dateEnd);
   if (!end || sprintId === null) return null;
 
   const hoursLeft = workHoursBetween(now, end);
-  const capacity = hoursLeft * devs;
+  const fromSchedule = teamCapacity != null;
+  const capacity = fromSchedule ? teamCapacity : hoursLeft * devs;
 
   const skip = new Set(excludedIds);
   let demand = 0;
@@ -119,5 +125,7 @@ export function sprintCapacity(opts: {
     else demand += t.storyPoints;
   }
 
-  return { hoursLeft, devs, capacity, demand, excluded, level: capacityLevel(demand, capacity) };
+  /* Przy grafiku „ile osob" to etaty efektywne: moce podzielone przez godziny, ktore zostaly. */
+  const shownDevs = fromSchedule ? (hoursLeft > 0 ? capacity / hoursLeft : 0) : devs;
+  return { hoursLeft, devs: shownDevs, capacity, demand, excluded, level: capacityLevel(demand, capacity) };
 }

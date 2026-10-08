@@ -183,7 +183,9 @@ import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
 import { CapacityChip, useNow } from './CapacityChip';
-import { sprintCapacity } from './sprintClock';
+import { sprintCapacity, sprintDeadline } from './sprintClock';
+import { TeamModal } from './TeamModal';
+import { loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
 import {
@@ -8918,6 +8920,17 @@ export default function App() {
   );
   const waitingStageIds = useMemo(() => new Set(waitingStages.map((s) => s.id)), [waitingStages]);
   const waitingStageNames = useMemo(() => new Set(waitingStages.map((s) => s.name)), [waitingStages]);
+  /* Zespol i grafik tygodniowy (zapis w przegladarce). Pusty zespol = moce liczone po staremu. */
+  const [team, setTeamState] = useState<TeamConfig>(loadTeam);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const setTeam = useCallback((next: TeamConfig) => {
+    setTeamState(next);
+    saveTeam(next);
+  }, []);
+  const teamCapacity = useMemo(() => {
+    const end = sprintDeadline(activeSprint?.dateEnd ?? null);
+    return team.members.length > 0 && end ? teamHoursBetween(team, now, end) : null;
+  }, [team, now, activeSprint?.dateEnd]);
   const capacity = useMemo(
     () =>
       sprintCapacity({
@@ -8928,8 +8941,9 @@ export default function App() {
         waitingStageIds,
         excludedIds: config?.capacityExcludeIds ?? [],
         tasks,
+        teamCapacity,
       }),
-    [now, activeSprint?.dateEnd, config?.capacityDevs, config?.capacityExcludeIds, sprintId, waitingStageIds, tasks],
+    [now, activeSprint?.dateEnd, config?.capacityDevs, config?.capacityExcludeIds, sprintId, waitingStageIds, tasks, teamCapacity],
   );
   /* Chip tylko wtedy, gdy widok naprawde pokazuje ten sprint — w „Wszystkich" etap „Nowe"
      zlewa zadania z wielu sprintow i liczba nie odpowiadalaby temu, co widac. */
@@ -11721,6 +11735,8 @@ export default function App() {
             rejestrTasks={planTasks}
             activeSprint={activeSprint}
             nextSprint={nextSprint}
+            team={team}
+            onOpenTeam={() => setTeamOpen(true)}
             onCreateSprint={nastepnySprint && me !== null ? zalozSprint : undefined}
             lastDone={lastDone}
             people={people}
@@ -12383,6 +12399,9 @@ export default function App() {
             setHistFocus(null);
           }}
         />
+      )}
+      {teamOpen && (
+        <TeamModal team={team} people={people} now={now} onChange={setTeam} onClose={() => setTeamOpen(false)} />
       )}
       {gapPrompt && (
         <GapPrompt

@@ -237,6 +237,13 @@ the tooltip. Numbers are rounded to whole values; the colour is computed from th
   not subtracted.
 - **Capacity** = hours × developers (1 h = 1 SP per person). Developers come from
   `BX_CAPACITY_DEVS` (default 4).
+- **Team and weekly schedule.** Instead of a fixed number of developers you can describe the team in
+  the app: planning view → **Options → Team and schedule…**. Pick people, set each one's FTE (1, 0.75,
+  0.5, 0.25) and untick the days someone is away (everyone is present Mon–Fri by default, so only
+  exceptions are stored). Capacity = FTE × 8 h per ticked working day; with a team entered it replaces
+  `BX_CAPACITY_DEVS` in the countdown chip and, when the SP-per-sprint field is empty, becomes the
+  planning limit (from now, or from the sprint start, until its end). An empty team keeps the old
+  behaviour. The configuration lives only in this browser (`localStorage`).
 - **Waiting** = tasks of the active sprint on the `NEW` stage that have an estimate.
   Tasks in progress are not counted: we don't know how far along they are.
 - **Left out of the limit**: tasks assigned to the accounts in

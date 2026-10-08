@@ -8386,3 +8386,101 @@ a.mention:hover {
   opacity: 0.8;
 }
 
+
+/* Zespol i grafik tygodniowy — okno z macierza „osoba × dzien". */
+.team-modal {
+  position: fixed;
+  z-index: 60;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: var(--s4);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.team-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.team-head h2 {
+  margin: 0;
+  font-size: var(--t-regular);
+}
+
+.team-week {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.team-week-label {
+  min-width: 8em;
+  text-align: center;
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.team-week-now {
+  color: var(--fg-muted);
+  font-weight: var(--w-normal);
+}
+
+.team-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-small);
+}
+
+.team-table th,
+.team-table td {
+  padding: var(--s1) var(--s2);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.team-table .team-day {
+  text-align: center;
+}
+
+.team-table th small {
+  display: block;
+  color: var(--fg-muted);
+  font-weight: var(--w-normal);
+}
+
+.team-total {
+  text-align: left;
+}
+
+.team-table tfoot td {
+  border-bottom: 0;
+  font-weight: var(--w-medium);
+}
+
+.team-remove {
+  padding: 0 var(--s2);
+}
+
+.team-add {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.team-hint,
+.team-empty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+}

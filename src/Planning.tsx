@@ -30,6 +30,8 @@ import { CLOSED_STATUSES, REVIEW_STATUSES, type Sprint, type Task } from './bitr
 import { planDropId } from './dnd';
 import { podzielNaZespolIKierownika, pozaLimitem, sumaDoLimitu, sumaKierownika } from './planCapacity';
 import { PLAN_SORT_DOMYSLNY } from './planSort';
+import { sprintDeadline } from './sprintClock';
+import { teamHoursBetween, type TeamConfig } from './team';
 import { BarsIcon, CheckIcon, ChevronIcon, GripIcon, personColor } from './icons';
 import { Picker, type Anchor } from './Picker';
 import { tagsForWidth } from './taskView';
@@ -646,6 +648,8 @@ export function Planning({
   onToggleDone,
   moce,
   onMoce,
+  team,
+  onOpenTeam,
   dzialy,
   teraz,
   kolejkaWl,
@@ -699,6 +703,9 @@ export function Planning({
    */
   moce: number | null;
   onMoce: (v: number | null) => void;
+  /** Zespol i grafik — gdy sa w nim osoby, z niego liczymy moce sprintu (chyba ze wpisano reczne). */
+  team: TeamConfig;
+  onOpenTeam: () => void;
   /**
    * KOLEJKA DZIALOW — kto po kim wybiera zadanie do kolejnego sprintu. Dzialy to
    * epiki grupy, wiec nie ma tu drugiego slownika do utrzymywania.
@@ -843,7 +850,20 @@ export function Planning({
    * zespol dowiozl ostatnio — bo urlopy, swieta i zmiana skladu zmieniaja
    * pojemnosc tygodnia, a historia sama tego nie wie.
    */
-  const limit = moce ?? lastDone?.points ?? 0;
+  /*
+   * Moce z grafiku zespolu na sprint, do ktorego sie planuje (kolejny, a bez niego aktywny): od teraz
+   * (albo od startu sprintu, jesli jeszcze nie ruszyl) do jego konca. Puste, gdy zespol nie jest wpisany.
+   */
+  const teamLimit = useMemo(() => {
+    const cel = nextSprint ?? activeSprint;
+    const end = sprintDeadline(cel?.dateEnd ?? null);
+    if (!cel || !end || team.members.length === 0) return null;
+    const startMs = cel.dateStart ? Date.parse(cel.dateStart) : NaN;
+    const from = new Date(Math.max(Date.now(), Number.isNaN(startMs) ? 0 : startMs));
+    const h = teamHoursBetween(team, from, end);
+    return h > 0 ? Math.round(h) : null;
+  }, [team, nextSprint, activeSprint]);
+  const limit = moce ?? teamLimit ?? lastDone?.points ?? 0;
 
   /*
    * KOLEJNOSC WAZNOSCI w rejestrze — to po niej dzial czyta, co brac najpierw:
@@ -888,9 +908,14 @@ export function Planning({
   const compare =
     limit > 0
       ? {
-          label: moce !== null ? 'Moce zespołu' : `Ostatnio dowiezione (${lastDone?.name ?? ''})`,
+          label:
+            moce !== null
+              ? 'Moce zespołu'
+              : teamLimit !== null
+                ? 'Moce z grafiku zespołu'
+                : `Ostatnio dowiezione (${lastDone?.name ?? ''})`,
           points: limit,
-          wlasne: moce !== null,
+          wlasne: moce !== null || teamLimit !== null,
         }
       : undefined;
 
@@ -1355,7 +1380,7 @@ export function Planning({
                       step={1}
                       inputMode="numeric"
                       value={moce ?? ''}
-                      placeholder={lastDone ? String(lastDone.points) : '—'}
+                      placeholder={teamLimit !== null ? String(teamLimit) : lastDone ? String(lastDone.points) : '—'}
                       onChange={(e) => {
                         const v = e.target.value.trim();
                         onMoce(v === '' ? null : Math.max(0, Number(v) || 0));
@@ -1364,10 +1389,23 @@ export function Planning({
                     <span className="plan-moce-unit">SP na sprint</span>
                   </label>
                   <div className="ds-colhint">
-                    {moce === null && lastDone
-                      ? `Puste — liczymy do ostatnio dowiezionego (${lastDone.name}: ${lastDone.points} SP).`
-                      : 'Ile SP zespół jest w stanie wziąć na sprint.'}
+                    {moce !== null
+                      ? 'Ile SP zespół jest w stanie wziąć na sprint.'
+                      : teamLimit !== null
+                        ? `Puste — liczymy z grafiku zespołu (${teamLimit} SP do końca sprintu).`
+                        : lastDone
+                          ? `Puste — liczymy do ostatnio dowiezionego (${lastDone.name}: ${lastDone.points} SP).`
+                          : 'Ile SP zespół jest w stanie wziąć na sprint.'}
                   </div>
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      setPokazAt(null);
+                      onOpenTeam();
+                    }}
+                  >
+                    Zespół i grafik…
+                  </button>
 
                   <button
                     className={`menu-item tog${przeniesienie ? ' tog-on' : ''}`}

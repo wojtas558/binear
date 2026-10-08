@@ -45,7 +45,7 @@ export function CapacityChip({ cap }: { cap: SprintCapacity }) {
       label="Do końca sprintu"
       value={
         <>
-          {num(cap.hoursLeft)} h roboczych × {cap.devs} os. = {num(cap.capacity)} SP do zrobienia
+          {num(cap.hoursLeft)} h roboczych × {cap.devs.toLocaleString('pl-PL', { maximumFractionDigits: 2 })} os. = {num(cap.capacity)} SP do zrobienia
           <br />
           Czeka na start: {num(cap.demand)} SP
           {cap.excluded > 0 && (
