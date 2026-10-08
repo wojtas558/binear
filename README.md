@@ -109,6 +109,21 @@ with names (`{"243":{"id":243,"title":"EMX"}}`), so no dictionary query is neede
 Clicking a tag filters the list (shown in the scope bar, cleared with ✕). Tags are
 also a palette section with usage counts.
 
+## Sprint summary view
+
+The fifth view mode (key `5`, "Podsumowanie sprintu") shows the **active sprint** the way it is discussed
+at the Priority Council, from live data — so it works *before* the sprint is closed (closing moves the
+undelivered tasks to the next sprint and the picture is gone):
+
+- five tiles: **delivered**, **waiting for deployment** (PR), **in progress**, **waiting**, **on hold** — SP and
+  number of tasks — plus one proportional bar and a one-line summary (finished = delivered + PR);
+- a table **per department** (epic): totals, a bar and the SP per state; unfold a department to see its
+  **topics** (parent tasks), each with its own bar — a click opens the task;
+- only leaf tasks are counted (a parent with subtasks in the sprint is a folder, its points sit on the
+  subtasks), a topic and a department come from the root task; tasks without SP are counted but add no
+  points. State comes from the Bitrix status (5 delivered, 4 PR, 6 on hold, 3 or the "In progress" stage in
+  progress, the rest waiting). Scope, filters and search do not apply here.
+
 ## Counters
 
 A row of cards under the header answers "what is there to do in the register",

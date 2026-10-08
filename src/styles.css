@@ -8386,3 +8386,321 @@ a.mention:hover {
   opacity: 0.8;
 }
 
+
+/* Podsumowanie sprintu: kafelki stanow, pasek calosci i dzialy z tematami. */
+.sum {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.sum-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+}
+
+.sum-head h2 {
+  margin: 0;
+}
+
+.sum-dates,
+.sum-note,
+.sum-foot,
+.sum-empty {
+  color: var(--fg-muted);
+  font-size: var(--t-small);
+}
+
+.sum-note,
+.sum-foot {
+  margin: 0;
+}
+
+.sum-note b {
+  color: var(--fg);
+}
+
+.sum-empty {
+  padding: var(--s4);
+}
+
+.sum-tiles {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--s2);
+}
+
+.sum-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--c, var(--border-strong));
+  border-radius: var(--radius);
+}
+
+.sum-tile-n {
+  font-size: var(--t-large);
+  font-weight: var(--w-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-tile-l {
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+.sum-tile-l small {
+  display: block;
+}
+
+.sum-tile.is-wdrozone { --c: var(--accent-green); }
+.sum-tile.is-pr { --c: var(--accent); }
+.sum-tile.is-wtoku { --c: var(--accent-amber); }
+.sum-tile.is-czeka { --c: color-mix(in srgb, var(--fg) 40%, transparent); }
+.sum-tile.is-wstrzymane { --c: var(--accent-orange); }
+
+.sum-bar {
+  display: flex;
+  gap: 1px;
+  height: 8px;
+  min-width: 80px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.sum-bar-thick {
+  height: 14px;
+  border-radius: 6px;
+}
+
+.sum-seg {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.sum-seg.is-wdrozone { background: var(--accent-green); }
+.sum-seg.is-pr { background: var(--accent); }
+.sum-seg.is-wtoku { background: var(--accent-amber); }
+.sum-seg.is-czeka { background: color-mix(in srgb, var(--fg) 30%, transparent); }
+.sum-seg.is-wstrzymane { background: var(--accent-orange); }
+
+.sum-table-head,
+.sum-dept-head {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(120px, 2fr) repeat(6, minmax(52px, 0.5fr));
+  align-items: center;
+  gap: var(--s2);
+}
+
+.sum-table-head {
+  padding: 0 var(--s3);
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sum-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-total {
+  font-weight: var(--w-semibold);
+}
+
+.sum-dept {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sum-dept-head {
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.sum-dept-head::-webkit-details-marker {
+  display: none;
+}
+
+.sum-dept-name {
+  font-weight: var(--w-medium);
+}
+
+.sum-topics {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.sum-topic {
+  display: grid;
+  grid-template-columns: minmax(120px, 3.2fr) minmax(120px, 2fr) minmax(52px, 0.5fr) minmax(90px, 1fr);
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sum-topic:hover {
+  background: var(--bg-hover);
+}
+
+.sum-topic-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sum-topic-count {
+  color: var(--fg-muted);
+  font-size: var(--t-mini);
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .sum-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Wykres dzialow: pasek na dzial, dlugosc proporcjonalna do SP dzialu, kawalki wg statusu. */
+.sum-headline {
+  margin: 0;
+  font-size: var(--t-large);
+}
+
+.sum-headline b {
+  font-weight: var(--w-semibold);
+}
+
+.sum-headline-pct {
+  color: var(--accent-green);
+  font-weight: var(--w-semibold);
+}
+
+.sum-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sum-chart h3 {
+  margin: 0;
+  font-size: var(--t-small);
+}
+
+.sum-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+.sum-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.sum-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.sum-dot.is-wdrozone { background: var(--accent-green); }
+.sum-dot.is-pr { background: var(--accent); }
+.sum-dot.is-wtoku { background: var(--accent-amber); }
+.sum-dot.is-czeka { background: color-mix(in srgb, var(--fg) 30%, transparent); }
+.sum-dot.is-wstrzymane { background: var(--accent-orange); }
+
+.sum-chart-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 150px) minmax(0, 1fr) 110px;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.sum-chart-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-small);
+}
+
+.sum-chart-track {
+  display: block;
+  height: 22px;
+}
+
+.sum-chart-bar {
+  display: flex;
+  gap: 1px;
+  height: 100%;
+  min-width: 6px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.sum-chart-bar .sum-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-chart-bar .sum-seg.is-czeka {
+  color: var(--fg);
+}
+
+.sum-chart-done {
+  font-size: var(--t-mini);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-chart-done small {
+  color: var(--fg-muted);
+}
+
+.sum-plan {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--t-small);
+}
+
+.sum-plan b {
+  color: var(--fg);
+}
+
+.sum-eff {
+  margin: 0;
+  font-size: var(--t-small);
+}

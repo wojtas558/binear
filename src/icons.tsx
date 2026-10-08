@@ -284,6 +284,18 @@ export function PlanIcon() {
   );
 }
 
+/** Podsumowanie sprintu — kartka z wierszami i paskiem postepu. */
+export function SummaryIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+      <rect x="2" y="1.5" width="12" height="13" rx="1.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="4.5" y="4" width="7" height="1.6" rx="0.8" fill="currentColor" />
+      <rect x="4.5" y="7.2" width="4.5" height="1.6" rx="0.8" fill="currentColor" />
+      <rect x="4.5" y="10.4" width="6" height="1.6" rx="0.8" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Wykresy sprintu — slupki rosnace, czytelne w 16px bez zadnych detali. */
 export function ChartIcon() {
   return (
