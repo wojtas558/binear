@@ -8139,6 +8139,30 @@ a.mention:hover {
   flex: 0 0 var(--s3);
 }
 
+/* Koniec bloku „dodane w tej sesji" w panelu sprintu — ta sama kreska co granica wyzej, ale
+   neutralna: to nie ostrzezenie, tylko informacja, ze nizej obowiazuje wybrane sortowanie. */
+.plan-nowe {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s2) 0 var(--s1);
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.plan-nowe::before,
+.plan-nowe::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.plan-nowe::before {
+  flex: 0 0 var(--s3);
+}
+
 /* Warstwa nad wygaszonym paskiem — patrz komentarz w App.tsx. `pointer-events`
    wracaja do `auto`, bo rodzic je odcina i dymek by sie nie pokazal. */
 .scopebar-veil {

@@ -176,6 +176,7 @@ import {
   noteMine,
 } from './history';
 import { TaskCode } from './TaskCode';
+import { tylkoOstatnie, zapiszPrzeniesienie, type Dodane } from './planRecent';
 import { ImportantMarks } from './ImportantMarks';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
@@ -8525,6 +8526,9 @@ export default function App() {
   const [planZwiniete, setPlanZwiniete] = useState<number[]>(() =>
     Array.isArray(saved.planZwiniete) ? saved.planZwiniete.filter((v) => Number.isFinite(v)) : [],
   );
+  /* Kiedy (kolejnosc) zadanie weszlo do sprintu w widoku planowania — Bitrix tego nie trzyma. */
+  const [planDodane, setPlanDodane] = useState<Dodane>({});
+  const planDodaneNext = useRef(1);
   const [planSort, setPlanSort] = useState<{ by: PlanSortBy; dir: 'asc' | 'desc' }[]>(
     () => saved.planSort ?? (SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[]),
   );
@@ -10452,6 +10456,19 @@ export default function App() {
         setPlanTura((t) => t + list.length);
       }
       /*
+       * Numery „dodane w tej sesji" rezerwujemy dla calej paczki od razu (kolejnosc), ale znacznik
+       * zakladamy dopiero po UDANYM przeniesieniu — nieudane nie ma czego wyrozniac.
+       */
+      const zapis = zapiszPrzeniesienie({}, list, sprintId !== null, planDodaneNext.current);
+      planDodaneNext.current = zapis.nastepny;
+      const oznacz = (id: number) =>
+        setPlanDodane((d) => {
+          const x = { ...d };
+          if (sprintId === null) delete x[id];
+          else x[id] = zapis.dodane[id];
+          return tylkoOstatnie(x);
+        });
+      /*
        * ODPOWIEDZIALNY PRZY WEJSCIU DO SPRINTU. Zadanie spoza IT, ktore ktos bierze z rejestru do
        * sprintu, przechodzi na konto-zaslepke IT; jesli odpowiedzialny jest z IT, zostaje (patrz
        * `planAssign.ts`). Dotyczy tylko tej drogi — rejestr → sprint — a gdy spis pracownikow nie
@@ -10485,6 +10502,7 @@ export default function App() {
             () => moveToSprint(id, sprintId ?? backlogId ?? 0),
             'sprint',
           );
+          if (wSprincie) oznacz(id);
           if (!wSprincie || nowy === null) return;
           const zmieniony = await mutate(
             id,
@@ -11752,6 +11770,7 @@ export default function App() {
             onPrzeniesienie={() => setPlanPrzeniesienie((v) => !v)}
             onTylkoDoStartu={() => setPlanTylkoDoStartu((v) => !v)}
             sort={planSort}
+            dodane={planDodane}
             kierownicy={kierownicy}
             sortFields={PLAN_SORTS}
             onSort={(next) => setPlanSort(next as { by: PlanSortBy; dir: 'asc' | 'desc' }[])}

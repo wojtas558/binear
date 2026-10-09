@@ -22,6 +22,7 @@
  * decyzje podejmuje `onDragEnd` w App.tsx, w jednym wspolnym `DndContext`.
  */
 
+import { ostatnioDodaneNaGorze, type Dodane } from './planRecent';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useDroppable } from '@dnd-kit/core';
@@ -311,6 +312,7 @@ function Pane({
   people,
   renderRow,
   ponad,
+  nowe,
   collapsible = false,
   compare,
   carry,
@@ -339,6 +341,11 @@ function Pane({
    * w sprintach pytanie nie ma sensu, bo one sa juz policzone.
    */
   ponad?: (t: Task) => boolean;
+  /**
+   * Czy zadanie zostalo przeciagniete do tego sprintu w tej sesji. Takie leza na gorze panelu
+   * (`ostatnioDodaneNaGorze`), wiec pod nimi stoi kreska — nizej dziala juz wybrane sortowanie.
+   */
+  nowe?: (t: Task) => boolean;
   collapsible?: boolean;
   /** Odniesienie: ile SP zespol NAPRAWDE dowiozl ostatnio. */
   compare?: { label: string; points: number; wlasne?: boolean };
@@ -611,8 +618,15 @@ function Pane({
                  kazdego wiersza. Lista jest posortowana tak, ze przekraczajace
                  leza na koncu, wiec granica jest dokladnie jedna. */
               const granica = za && !(i > 0 && (ponad?.(tasks[i - 1]) ?? false));
+              /* Koniec bloku „dodane w tej sesji": pierwsze zadanie spoza niego, gdy blok cos ma. */
+              const poNowych = i > 0 && nowe !== undefined && nowe(tasks[i - 1]) && !nowe(t);
               return (
                 <Fragment key={t.id}>
+                  {poNowych && (
+                    <div className="plan-nowe" role="separator">
+                      <span>↑ dodane w tej sesji</span>
+                    </div>
+                  )}
                   {granica && (
                     <div className="plan-granica" role="separator">
                       <span>nie mieści się w pozostałych punktach</span>
@@ -664,6 +678,7 @@ export function Planning({
   onPrzeniesienie,
   sort,
   sortFields,
+  dodane,
   onSort,
   kierownicy = BEZ_KIEROWNIKOW,
 }: {
@@ -760,6 +775,11 @@ export function Planning({
    */
   sort: { by: string; dir: 'asc' | 'desc' }[];
   sortFields: { key: string; label: string }[];
+  /**
+   * Kolejnosc wejscia do sprintu w tej sesji — ostatnio przeciagniete ma byc na gorze, ale tylko w
+   * KOLEJNYM sprincie: to jego sie teraz wypelnia. Trwajacy sprint zostaje w wybranym sortowaniu.
+   */
+  dodane: Dodane;
   onSort: (next: { by: string; dir: 'asc' | 'desc' }[]) => void;
 }) {
   /*
@@ -801,14 +821,22 @@ export function Planning({
     );
   }, [rejestrTasks, plannable, teraz, tylkoDoStartu]);
 
+  const jestNowe = useCallback((t: Task) => dodane[t.id] !== undefined, [dodane]);
+
   const inActive = useMemo(
     () =>
       activeSprint ? tasks.filter((t) => t.sprintId === activeSprint.id && inSprintView(t)) : [],
     [tasks, activeSprint, inSprintView],
   );
   const inNext = useMemo(
-    () => (nextSprint ? tasks.filter((t) => t.sprintId === nextSprint.id && inSprintView(t)) : []),
-    [tasks, nextSprint, inSprintView],
+    () =>
+      nextSprint
+        ? ostatnioDodaneNaGorze(
+            tasks.filter((t) => t.sprintId === nextSprint.id && inSprintView(t)),
+            dodane,
+          )
+        : [],
+    [tasks, nextSprint, inSprintView, dodane],
   );
 
   /*
@@ -1495,6 +1523,7 @@ export function Planning({
             grow="calc(1 - var(--plan-split))"
             sprintId={nextSprint.id}
             tasks={inNext}
+            nowe={jestNowe}
             people={people}
             renderRow={renderRow}
             collapsible
