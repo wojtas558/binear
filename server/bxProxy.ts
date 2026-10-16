@@ -2,6 +2,11 @@ import type { Connect, Plugin } from 'vite';
 import { loadEnv } from 'vite';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const run = promisify(execFile);
 
@@ -34,6 +39,10 @@ const ALLOWED = new Set([
   'task.item.update', // legacy CTaskItem::update — jedyna droga zapisu DEPENDS_ON (zadania powiazane)
   'task.stages.movetask',
   'tasks.api.scrum.task.update', // sprint <-> backlog; przynaleznosc trzyma scrum, nie pole zadania
+  // zarzadzanie epikami projektu (okno „Tagi i epiki")
+  'tasks.api.scrum.epic.add',
+  'tasks.api.scrum.epic.update',
+  'tasks.api.scrum.epic.delete',
   /*
    * KARTA na tablicy sprintu. Bez niej wejscie do sprintu jest tylko wpisem w
    * bazie: zadanie ma sprint i etap, ale na tablicy Bitriksa karty nie ma, wiec
@@ -132,6 +141,26 @@ function contentDisposition(name: string): string {
   return `inline; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
+/**
+ * Przegladarka do generowania PDF (headless `--print-to-pdf`). Najpierw `BX_PDF_BROWSER` z .env, potem
+ * typowe sciezki Edge / Chrome / Chromium. `null`, gdy zadnej nie ma — front pobiera wtedy plik HTML.
+ */
+function findPdfBrowser(custom: string | undefined): string | null {
+  const candidates = [
+    custom,
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  ];
+  return candidates.find((p): p is string => Boolean(p) && existsSync(p as string)) ?? null;
+}
+
 export function bxProxy(mode: string): Plugin {
   const env = loadEnv(mode, process.cwd(), '');
   const webhook = (env.BITRIX_WEBHOOK || '').replace(/\/+$/, '');
@@ -148,10 +177,10 @@ export function bxProxy(mode: string): Plugin {
     .split(',')
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
-  // Odliczanie do konca sprintu: ilu programistow liczymy (1 godzina = 1 SP na osobe)
+  // Odliczanie do konca sprintu: ilu programistow liczymy (1 godzina = 1 SP na osobe; moze byc ulamek — pol etatu to 0,5)
   // i czyje zadania nie wchodza do limitu. Patrz .env.example.
   const devsRaw = Number(env.BX_CAPACITY_DEVS);
-  const capacityDevs = Number.isInteger(devsRaw) && devsRaw > 0 ? devsRaw : 4;
+  const capacityDevs = Number.isFinite(devsRaw) && devsRaw > 0 ? devsRaw : 3.5;
   const capacityExcludeIds = (env.BX_CAPACITY_EXCLUDE_IDS || '')
     .split(',')
     .map((s) => Number(s.trim()))
@@ -198,6 +227,52 @@ export function bxProxy(mode: string): Plugin {
        * „nowa wersja" wisialby w kolko. `repo`/`branch` tez z gita, bez zaszywania nazwy.
        * Puste pola, gdy `git` niedostepny — front wtedy po prostu nie sprawdza.
        */
+      /**
+       * HTML -> PDF przez przegladarke headless (Edge / Chrome sa na kazdym biurkowym komputerze), bez
+       * dodatkowych zaleznosci. Przyjmuje gotowy dokument HTML w ciele, oddaje bajty PDF. Dziala lokalnie
+       * (serwer deweloperski); bez przegladarki odpowiada 501, a front zapisuje wtedy zwykly plik HTML.
+       */
+      server.middlewares.use('/api/pdf', async (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end();
+          return;
+        }
+        const browser = findPdfBrowser(env.BX_PDF_BROWSER);
+        if (!browser) {
+          res.statusCode = 501;
+          res.end('Brak przegladarki do generowania PDF (ustaw BX_PDF_BROWSER).');
+          return;
+        }
+        const dir = await mkdtemp(join(tmpdir(), 'binear-pdf-'));
+        try {
+          const html = await readBody(req);
+          const input = join(dir, 'in.html');
+          const output = join(dir, 'out.pdf');
+          await writeFile(input, html, 'utf8');
+          await run(
+            browser,
+            [
+              '--headless=new',
+              '--disable-gpu',
+              '--no-pdf-header-footer',
+              `--user-data-dir=${join(dir, 'profile')}`,
+              `--print-to-pdf=${output}`,
+              pathToFileURL(input).href,
+            ],
+            { timeout: 60_000 },
+          );
+          const pdf = await readFile(output);
+          res.setHeader('content-type', 'application/pdf');
+          res.end(pdf);
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(e instanceof Error ? e.message : 'blad generowania PDF');
+        } finally {
+          await rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
+      });
+
       server.middlewares.use('/api/version', async (_req, res) => {
         const git = async (args: string[]): Promise<string> => {
           try {

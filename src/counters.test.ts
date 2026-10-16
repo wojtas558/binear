@@ -6,6 +6,7 @@ import {
   foldersOf,
   hasReconMarker,
   hasValueMessage,
+  pula,
   isCompleteByTags,
   isReconByTitle,
   needsChat,
@@ -36,8 +37,8 @@ const ctx = (o: Partial<CounterCtx> = {}): CounterCtx => ({
   sprintId: 70,
   closed: new Set(['5']),
   answered: new Set(),
+  chat: { recon: new Set<number>(), value: new Set<number>() } as CounterCtx['chat'],
   folders: new Set<number>(),
-  chat: { recon: new Set<number>(), strategic: new Set<number>() } as CounterCtx['chat'],
   ...o,
 });
 
@@ -46,7 +47,7 @@ describe('countAll', () => {
     zadanie({ id: 1, sprintId: 70, storyPoints: 8 }),
     zadanie({ id: 2, sprintId: 70, storyPoints: 4, status: '5' }),
     zadanie({ id: 3, tags: ['DO-STARTU'] }),
-    zadanie({ id: 4, tags: ['do-startu', 'OSZCZEDNOSC', 'zwrot-3'], storyPoints: 6 }),
+    zadanie({ id: 4, tags: ['do-startu', 'DZIAL', 'OSZCZEDNOSC', 'zwrot-3'], storyPoints: 6 }),
     zadanie({ id: 5, tags: ['DO-STARTU'], sprintId: 70 }),
     zadanie({ id: 6, tags: ['OCZEKUJE-NA-ODPOWIEDZ'] }),
     zadanie({ id: 7, tags: ['OCZEKUJE-NA-ODPOWIEDZ'] }),
@@ -109,10 +110,10 @@ describe('countAll', () => {
     expect([wynik.wycena.count, wynik.gotowe.count]).toEqual([1, 1]);
   });
 
-  describe('komplet do startu: wycena, kategoria i tag okresu zwrotu', () => {
+  describe('komplet do startu: pula, wycena, kategoria i tag okresu zwrotu', () => {
     const TERMIN = '2026-11-01T00:00:00+02:00';
     const start = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
-      zadanie({ id: 100, tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-6'], storyPoints: 6, ...o });
+      zadanie({ id: 100, tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC', 'ZWROT-6'], storyPoints: 6, ...o });
     const stan = (t: ReturnType<typeof zadanie>, o: Partial<CounterCtx> = {}) => {
       const w = countAll([t], ctx(o));
       return [w.wycena.count, w.gotowe.count];
@@ -127,44 +128,44 @@ describe('countAll', () => {
     });
 
     it('bez kategorii → do wyceny, choc ma wycene i tag zwrotu', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'ZWROT-6'] }))).toEqual([1, 0]);
+      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'ZWROT-6'] }))).toEqual([1, 0]);
     });
 
     it('bez tagu zwrotu → do wyceny', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'OSZCZEDNOSC'] }))).toEqual([1, 0]);
+      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC'] }))).toEqual([1, 0]);
     });
 
     it('kazdy z czterech tagow zwrotu wystarcza, takze bez wzgledu na wielkosc liter', () => {
       for (const tag of ['ZWROT-3', 'zwrot-6', 'Zwrot-12', 'ZWROT-12+']) {
-        expect(stan(start({ tags: ['DO-STARTU', 'RYZYKO', tag] }))).toEqual([0, 1]);
+        expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'RYZYKO', tag] }))).toEqual([0, 1]);
       }
     });
 
     it('tag zwrotu spoza listy (ZWROT-24) zwrotu nie daje', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'RYZYKO', 'ZWROT-24'] }))).toEqual([1, 0]);
+      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'RYZYKO', 'ZWROT-24'] }))).toEqual([1, 0]);
     });
 
     it('WYMOG nie potrzebuje okresu zwrotu, ale MUSI miec termin', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'WYMOG'], deadline: TERMIN }))).toEqual([0, 1]);
-      expect(stan(start({ tags: ['DO-STARTU', 'WYMOG'], deadline: null }))).toEqual([1, 0]);
+      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'WYMOG'], deadline: TERMIN }))).toEqual([0, 1]);
+      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'WYMOG'], deadline: null }))).toEqual([1, 0]);
     });
 
     it('WYMOG z terminem, ale bez wyceny → do wyceny', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'WYMOG'], storyPoints: null, deadline: TERMIN }))).toEqual([1, 0]);
+      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'WYMOG'], storyPoints: null, deadline: TERMIN }))).toEqual([1, 0]);
     });
 
     it('termin nie zastepuje tagu zwrotu zwyklego zadania', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'OSZCZEDNOSC'], deadline: TERMIN }))).toEqual([1, 0]);
+      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC'], deadline: TERMIN }))).toEqual([1, 0]);
     });
 
     it('kazda kategoria z listy liczy sie, takze BUG (bug tez ma okres zwrotu)', () => {
       for (const kat of ['bug', 'Oszczednosc', 'PRZYCHOD', 'ryzyko', 'ANALITYKA', 'UTRZYMANIE']) {
-        expect(stan(start({ tags: ['DO-STARTU', kat, 'ZWROT-3'] }))).toEqual([0, 1]);
+        expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', kat, 'ZWROT-3'] }))).toEqual([0, 1]);
       }
     });
 
     it('tag spoza listy kategorii (Wysoki) kategorii nie zastepuje', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'Wysoki', 'ZWROT-6'] }))).toEqual([1, 0]);
+      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'Wysoki', 'ZWROT-6'] }))).toEqual([1, 0]);
     });
 
     it('suma stanow dalej zgadza sie z „poza sprintem"', () => {
@@ -172,7 +173,7 @@ describe('countAll', () => {
         start({ id: 1 }),
         start({ id: 2, storyPoints: null }),
         start({ id: 3, tags: ['DO-STARTU'] }),
-        start({ id: 4, tags: ['DO-STARTU', 'WYMOG'], deadline: TERMIN }),
+        start({ id: 4, tags: ['DO-STARTU', 'DZIAL', 'WYMOG'], deadline: TERMIN }),
       ];
       const w = countAll(lista, ctx());
       expect(w.wycena.count + w.gotowe.count).toBe(4);
@@ -182,9 +183,9 @@ describe('countAll', () => {
 
   describe('rozpoznanie: gotowe do startu bez kategorii i zwrotu', () => {
     const rozp = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
-      zadanie({ id: 200, tags: ['DO-STARTU'], storyPoints: 4, ...o });
+      zadanie({ id: 200, tags: ['DO-STARTU', 'DZIAL'], storyPoints: 4, ...o });
     const stan = (t: ReturnType<typeof zadanie>, recon: Set<number> | null) => {
-      const w = countAll([t], ctx({ chat: recon ? { recon, strategic: new Set() } : null }));
+      const w = countAll([t], ctx({ chat: recon ? { recon, value: new Set() } : null }));
       return [w.wycena.count, w.gotowe.count];
     };
 
@@ -193,7 +194,7 @@ describe('countAll', () => {
     });
 
     it('takze analiza bledu (BUG) bez tagu zwrotu, jesli oznaczona jako rozpoznanie', () => {
-      expect(stan(rozp({ tags: ['DO-STARTU', 'BUG'] }), new Set([200]))).toEqual([0, 1]);
+      expect(stan(rozp({ tags: ['DO-STARTU', 'DZIAL', 'BUG'] }), new Set([200]))).toEqual([0, 1]);
     });
 
     it('bez oznaczenia to zwykle niekompletne zadanie → do wyceny', () => {
@@ -211,8 +212,8 @@ describe('countAll', () => {
     });
 
     it('zadanie z kompletem w tagach nie jest kandydatem — jego czatu nie czytamy', () => {
-      expect(needsChat(rozp({ tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(false);
-      expect(isCompleteByTags(rozp({ tags: ['DO-STARTU', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(true);
+      expect(needsChat(rozp({ tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(false);
+      expect(isCompleteByTags(rozp({ tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(true);
     });
 
     it('dopoki czaty sie czytaja (recon = null), zadanie z do 4 h nie jest jeszcze gotowe', () => {
@@ -242,51 +243,100 @@ describe('countAll', () => {
     });
 
     it('do 4 h z „rozpoznanie” albo „weryfikacja” w tytule to rozpoznanie bez czytania czatu', () => {
-      expect(isReconByTitle({ title: 'Rozpoznanie: sync stanów', storyPoints: 4 })).toBe(true);
-      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 3 })).toBe(true);
-      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 8 })).toBe(false);
-      expect(isReconByTitle({ title: 'Nowy ekran', storyPoints: 2 })).toBe(false);
+      expect(isReconByTitle({ title: 'Rozpoznanie: sync stanów', storyPoints: 4, tags: ['DZIAL'] })).toBe(true);
+      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 3, tags: ['RDZEN'] })).toBe(true);
+      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 8, tags: ['DZIAL'] })).toBe(false);
+      expect(isReconByTitle({ title: 'Nowy ekran', storyPoints: 2, tags: ['DZIAL'] })).toBe(false);
       expect(needsChat(rozp({ title: 'Rozpoznanie: sync stanów' }))).toBe(false);
       expect(stan(rozp({ title: 'Rozpoznanie: sync stanów' }), new Set())).toEqual([0, 1]);
     });
   });
 
-  describe('STRATEGIA: bez okresu zwrotu, z uzasadnieniem w wiadomosci WARTOSC', () => {
-    const strat = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
-      zadanie({ id: 300, tags: ['DO-STARTU', 'STRATEGIA'], storyPoints: 16, ...o });
-    const stan = (t: ReturnType<typeof zadanie>, strategic: Set<number> | null) => {
-      const w = countAll([t], ctx({ chat: strategic ? { recon: new Set(), strategic } : null }));
+  describe('pula: obowiazkowa, a RDZEN ma wartosc w wiadomosci WARTOSC zamiast kategorii i zwrotu', () => {
+    const TERMIN = '2026-11-01T00:00:00+02:00';
+    const z = (tags: string[], o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
+      zadanie({ id: 300, tags: ['DO-STARTU', ...tags], storyPoints: 16, ...o });
+    const stan = (t: ReturnType<typeof zadanie>, value: Set<number> | null = new Set(), recon: Set<number> = new Set()) => {
+      const w = countAll([t], ctx({ chat: value ? { recon, value } : null }));
       return [w.wycena.count, w.gotowe.count];
     };
 
-    it('kategoria + wiadomosc WARTOSC → gotowe, bez tagu ZWROT', () => {
-      expect(stan(strat(), new Set([300]))).toEqual([0, 1]);
+    it('pula to jeden z trzech tagow; przy dwoch liczy sie pierwszy z listy', () => {
+      expect(pula({ tags: ['dzial'] })).toBe('DZIAL');
+      expect(pula({ tags: ['Wysoki'] })).toBeNull();
+      expect(pula({ tags: ['DZIAL', 'CIAGLOSC', 'RDZEN'] })).toBe('CIAGLOSC');
+      expect(pula({ tags: ['DZIAL', 'RDZEN'] })).toBe('RDZEN');
     });
 
-    it('sam tag STRATEGIA bez uzasadnienia to jeszcze nie komplet', () => {
-      expect(stan(strat(), new Set())).toEqual([1, 0]);
-      expect(isCompleteByTags(strat())).toBe(false);
+    it('bez puli komplet nie istnieje: kategoria + zwrot → do wyceny', () => {
+      expect(stan(z(['OSZCZEDNOSC', 'ZWROT-3']))).toEqual([1, 0]);
+      expect(isCompleteByTags(z(['OSZCZEDNOSC', 'ZWROT-3']))).toBe(false);
     });
 
-    it('bez wyceny → do wyceny, choc ma uzasadnienie', () => {
-      expect(stan(strat({ storyPoints: null }), new Set([300]))).toEqual([1, 0]);
+    it('RDZEN + story pointy + wiadomosc WARTOSC, bez kategorii i zwrotu → gotowe', () => {
+      expect(stan(z(['RDZEN']), new Set([300]))).toEqual([0, 1]);
     });
 
-    it('tag ZWROT strategii nie potrzebny i niczego nie zmienia', () => {
-      expect(stan(strat({ tags: ['DO-STARTU', 'STRATEGIA', 'ZWROT-12'] }), new Set([300]))).toEqual([0, 1]);
+    it('RDZEN bez wiadomosci WARTOSC → do wyceny', () => {
+      expect(stan(z(['RDZEN']), new Set())).toEqual([1, 0]);
+      expect(isCompleteByTags(z(['RDZEN', 'OSZCZEDNOSC', 'ZWROT-3']))).toBe(false);
     });
 
-    it('czat strategii czytamy niezaleznie od wielkosci wyceny; dopoki sie czyta — „liczę”', () => {
-      expect(needsChat(strat({ storyPoints: 40 }))).toBe(true);
-      expect(stan(strat(), null)).toEqual([1, 0]);
+    it('RDZEN z WARTOSC, ale bez wyceny → do wyceny', () => {
+      expect(stan(z(['RDZEN'], { storyPoints: null }), new Set([300]))).toEqual([1, 0]);
+    });
+
+    it('CIAGLOSC z kategoria, ale bez ZWROT → do wyceny; ze ZWROT → gotowe', () => {
+      expect(stan(z(['CIAGLOSC', 'UTRZYMANIE']))).toEqual([1, 0]);
+      expect(stan(z(['CIAGLOSC', 'UTRZYMANIE', 'ZWROT-6']))).toEqual([0, 1]);
+    });
+
+    it('CIAGLOSC i DZIAL: sama wiadomosc WARTOSC kategorii nie zastepuje', () => {
+      expect(stan(z(['CIAGLOSC']), new Set([300]))).toEqual([1, 0]);
+      expect(stan(z(['DZIAL']), new Set([300]))).toEqual([1, 0]);
+    });
+
+    it('DZIAL z WYMOG i terminem → gotowe; bez terminu → do wyceny', () => {
+      expect(stan(z(['DZIAL', 'WYMOG'], { deadline: TERMIN }))).toEqual([0, 1]);
+      expect(stan(z(['DZIAL', 'WYMOG']))).toEqual([1, 0]);
+    });
+
+    it('rozpoznanie do 4 h: bez puli → do wyceny, z pula → gotowe (takze RDZEN)', () => {
+      const r = (tags: string[]) => z(tags, { storyPoints: 4, title: 'Rozpoznanie: sync stanów' });
+      expect(stan(r([]))).toEqual([1, 0]);
+      expect(stan(r(['DZIAL']))).toEqual([0, 1]);
+      expect(stan(r(['RDZEN']))).toEqual([0, 1]);
+      // rozpoznane z czatu (dopisek w WYCENIE), nie z tytulu
+      const bezTytulu = (tags: string[]) => z(tags, { storyPoints: 4 });
+      expect(stan(bezTytulu([]), new Set(), new Set([300]))).toEqual([1, 0]);
+      expect(stan(bezTytulu(['CIAGLOSC']), new Set(), new Set([300]))).toEqual([0, 1]);
+    });
+
+    it('tag STRATEGIA nie daje kompletu ani nie jest kategoria', () => {
+      expect(stan(z(['STRATEGIA']), new Set([300]))).toEqual([1, 0]);
+      expect(stan(z(['DZIAL', 'STRATEGIA', 'ZWROT-3']))).toEqual([1, 0]);
+      expect(stan(z(['RDZEN', 'STRATEGIA']), new Set())).toEqual([1, 0]);
+    });
+
+    it('czat czytamy dla RDZEN bez kompletu (takze powyzej 4 h), nie dla zadan bez puli', () => {
+      expect(needsChat(z(['RDZEN'], { storyPoints: 40 }))).toBe(true);
+      expect(needsChat(z(['DZIAL'], { storyPoints: 40 }))).toBe(false);
+      expect(needsChat(z(['DZIAL'], { storyPoints: 4 }))).toBe(true);
+      expect(needsChat(z([], { storyPoints: 4 }))).toBe(false);
+      expect(needsChat(z(['STRATEGIA'], { storyPoints: 4 }))).toBe(false);
+    });
+
+    it('dopoki czaty sie czytaja, RDZEN nie jest jeszcze gotowy', () => {
+      expect(stan(z(['RDZEN']), null)).toEqual([1, 0]);
     });
 
     it('czyta wiadomosc WARTOSC: z pogrubieniem, bez polskich znakow; nie myli z wyceną; system pomija', () => {
       const m = (text: string, authorId = 5): ChatMessage => ({ id: 1, authorId, text });
-      expect(hasValueMessage([m('[B]WARTOŚĆ: strategia[/B]\n\nUzasadnienie: cel.')])).toBe(true);
-      expect(hasValueMessage([m('WARTOSC - strategia')])).toBe(true);
+      expect(hasValueMessage([m('[B]WARTOŚĆ: rdzeń[/B]\n\nUzasadnienie: cel.')])).toBe(true);
+      expect(hasValueMessage([m('WARTOSC - zwrot 4 mies.')])).toBe(true);
+      expect(hasValueMessage([m('WARTOŚĆ: wymóg')])).toBe(true);
       expect(hasValueMessage([m('WYCENA: 16 h'), m('Ta wartość jest niska')])).toBe(false);
-      expect(hasValueMessage([m('WARTOŚĆ: strategia', 0)])).toBe(false);
+      expect(hasValueMessage([m('WARTOŚĆ: rdzeń', 0)])).toBe(false);
     });
   });
 
@@ -312,12 +362,12 @@ describe('countAll', () => {
 
     it('wymog przed wszystkim, potem przedzialy, na koncu brak', () => {
       expect(paybackRank(tags('WYMOG'))).toBe(0);
-      expect(paybackRank(tags('STRATEGIA'))).toBe(1);
-      expect(paybackRank(tags('OSZCZEDNOSC', 'ZWROT-3'))).toBe(2);
-      expect(paybackRank(tags('ZWROT-6'))).toBe(3);
-      expect(paybackRank(tags('ZWROT-12'))).toBe(4);
-      expect(paybackRank(tags('ZWROT-12+'))).toBe(5);
-      expect(paybackRank(tags('OSZCZEDNOSC'))).toBe(6);
+      expect(paybackRank(tags('OSZCZEDNOSC', 'ZWROT-3'))).toBe(1);
+      expect(paybackRank(tags('ZWROT-6'))).toBe(2);
+      expect(paybackRank(tags('ZWROT-12'))).toBe(3);
+      expect(paybackRank(tags('ZWROT-12+'))).toBe(4);
+      expect(paybackRank(tags('OSZCZEDNOSC'))).toBe(5);
+      expect(paybackRank(tags('STRATEGIA'))).toBe(5); // zwykly tag, nie ma juz wlasnej rangi
     });
   });
 
@@ -465,7 +515,7 @@ describe('countAll', () => {
 
   it('bug to cecha: zadanie z BUG jest tez w swoim stanie, wiec suma stanow sie nie zmienia', () => {
     const w = countAll(
-      [zadanie({ id: 70, tags: ['BUG', 'DO-STARTU', 'ZWROT-6'], storyPoints: 4 })],
+      [zadanie({ id: 70, tags: ['BUG', 'DO-STARTU', 'DZIAL', 'ZWROT-6'], storyPoints: 4 })],
       ctx(),
     );
     expect([w.wazne.count, w.gotowe.count, w.poza.count]).toEqual([1, 1, 1]);

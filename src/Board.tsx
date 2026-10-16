@@ -2,7 +2,7 @@ import { type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode 
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Epic, Stage, Task } from './bitrix';
 import { Avatar, CommentIcon, LinkIcon, ParentIcon, SubtaskIcon, tagHue } from './icons';
-import { shortDate, isImportant, isUnassigned, podzielNaTrafienia, stageOf, sumPoints, withoutBugTag } from './taskView';
+import { shortDate, isImportant, isLowPriority, isUnassigned, podzielNaTrafienia, stageOf, sumPoints, withoutBugTag } from './taskView';
 import { colDropId, dragId } from './dnd';
 import { HoverNote } from './HoverNote';
 import { TaskCode } from './TaskCode';
@@ -306,7 +306,7 @@ function BoardCard({
       {...listeners}
       className={`card${active ? ' card-active' : ''}${selected ? ' card-selected' : ''}${
         marked ? ' card-marked' : ''
-      }${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
+      }${isLowPriority(t) ? ' card-low' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
       onMouseDown={(e) => {
         // jak w liscie: bez zaznaczania tekstu przy Shift/Ctrl + klik
         if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault();

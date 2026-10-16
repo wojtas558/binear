@@ -58,6 +58,7 @@ import {
   WORK_END_HOUR,
   latestChange,
   moveToSprint,
+  moveToSprintViaEntry,
   deleteTask,
   moveToStage,
   setChecklistItem,
@@ -110,6 +111,7 @@ import {
   ListIcon,
   BoardIcon,
   ChartIcon,
+  SummaryIcon,
   ClipIcon,
   GripIcon,
   PersonIcon,
@@ -140,6 +142,7 @@ import {
   ElsewhereIcon,
   TrashIcon,
   PinIcon,
+  matrixColor,
   tagHue,
 } from './icons';
 import {
@@ -151,6 +154,7 @@ import {
   withoutBugTag,
   shortDate,
   isImportant,
+  isLowPriority,
   isUnassigned,
   setUnassignedId,
   stageOf,
@@ -180,24 +184,40 @@ import {
 import { TaskCode } from './TaskCode';
 import { tylkoOstatnie, zapiszPrzeniesienie, type Dodane } from './planRecent';
 import { ImportantMarks } from './ImportantMarks';
+import { ParentBar, parentBarTitle } from './ParentBar';
+import { groupChildren, parentProgress, type ParentProgress } from './parentProgress';
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
+import { SprintSummary } from './SprintSummary';
+import { TilesBar } from './TilesBar';
+import { TilesModal } from './TilesModal';
+import { groupedKeys, matchGrouped, moveCondition, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
+import {
+  groupedTiles,
+  groupTotals,
+  loadTiles,
+  sameView,
+  saveTiles,
+  shownValue,
+  type CustomTile,
+  type TileNumbers,
+  type TilesConfig,
+} from './customTiles';
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort';
 import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
-import { CountersBar, useAnsweredTasks, useChatFacts, useCounterHistory } from './CountersBar';
+import { useAnsweredTasks, useCounterHistory } from './CounterHistory';
 import { CapacityChip, useNow } from './CapacityChip';
-import { sprintCapacity } from './sprintClock';
+import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
+import { TeamModal } from './TeamModal';
+import { ManageModal } from './ManageModal';
+import { teamFirst } from './peopleOrder';
+import { budgetExcludedIds, loadTeam, saveTeam, teamHoursBetween, type TeamConfig } from './team';
 import { ownerOnEnteringSprint, type ItContext } from './planAssign';
 import { sumaDoLimitu } from './planCapacity';
 import {
-  COUNTERS,
-  counterDef,
-  countAll,
   foldersOf,
   paybackRank,
-  type CounterCtx,
-  type CounterKey,
   type DaySnapshot,
 } from './counters';
 import { CommandPalette, type Command } from './CommandPalette';
@@ -241,7 +261,7 @@ type PickerKind =
   | 'parent'
   | 'epic'
   | 'tags';
-type ViewMode = 'list' | 'board' | 'charts' | 'planning';
+type ViewMode = 'list' | 'board' | 'charts' | 'planning' | 'summary';
 
 /**
  * Wyglad terminu w wierszu listy. Trzy warianty ZOSTAJA na stale — nie sa
@@ -294,7 +314,9 @@ type FilterField =
   | 'epic'
   | 'points'
   | 'deadline'
-  | 'observer';
+  | 'observer'
+  | 'answered'
+  | 'kind';
 
 /**
  * Operatory jak w Linearze. Wymiary jednowartosciowe (osoba/priorytet/status/etap —
@@ -309,6 +331,8 @@ interface Condition {
   field: FilterField;
   op: FilterOp;
   values: string[];
+  /** Grupa LUB (nawias): warunki z tym samym `or` wystarczy spelnic jeden z nich. */
+  or?: string;
 }
 
 /** Lista warunkow — miedzy warunkami ORAZ, wewnatrz warunku decyduje operator. */
@@ -337,6 +361,8 @@ const FILTER_FIELDS: { field: FilterField; label: string; icon: ReactNode; divid
   { field: 'epic', label: 'Epik', icon: <LayersIcon />, divider: true },
   { field: 'tag', label: 'Tag', icon: <TagIcon /> },
   { field: 'points', label: 'Story points', icon: <HashIcon /> },
+  { field: 'answered', label: 'Odpowiedź w czacie', icon: <CommentIcon /> },
+  { field: 'kind', label: 'Rodzaj zadania', icon: <ParentIcon /> },
 ];
 
 const FILTER_LABEL = Object.fromEntries(FILTER_FIELDS.map((f) => [f.field, f.label])) as Record<
@@ -462,6 +488,7 @@ function rangeLabel(field: FilterField, values: string[]): string {
 // Stabilne id warunku — wystarczy monotoniczny licznik na czas zycia karty.
 let condSeq = 0;
 const newCondId = (): string => `c${++condSeq}`;
+const newGroupId = (): string => `g${++condSeq}`;
 
 /** Ile ikon pokazac w nachodzacym stosie na chipie, zanim przejdziemy na „+N". */
 const CHIP_STACK_MAX = 5;
@@ -574,8 +601,8 @@ interface Settings {
   planPrzeniesienie: boolean;
   /**
    * Czy KOLEJKA DZIALOW jest w uzyciu. Wylaczona zdejmuje zawezenie rejestru do
-   * epiku i do `DO-STARTU` — planowanie poza spotkaniem, gdy nikt nie wybiera po
-   * kolei, a chodzi o przejrzenie calego rejestru.
+   * epiku — planowanie poza spotkaniem, gdy nikt nie wybiera po kolei. Zawezenie do `DO-STARTU`
+   * zostaje (przelacznik „tylko DO-STARTU”): zadanie niegotowe nie nadaje sie do sprintu.
    */
   planKolejkaWl: boolean;
   /**
@@ -599,8 +626,6 @@ interface Settings {
   showEmpty: boolean;
   /** Karty licznikow pod naglowkiem (patrz `CountersBar`). */
   showCounters: boolean;
-  /** Kafelki licznikow schowane przez uzytkownika (olowek przy „Pokaż liczniki"). */
-  hiddenCounters: string[];
   /**
    * PUSTE kategorie (kolumny/grupy), ktore mimo braku zadan maja byc widoczne —
    * po NAZWIE, bo te same etapy maja rozne id w kazdym sprincie (patrz stageOrder).
@@ -637,8 +662,8 @@ const DEFAULT_SETTINGS: Settings = {
   showDone: false,
   planDone: false,
   planReview: true,
-  /* Domyslna kolejnosc waznosci: plomien (awaria) najpierw, potem STRATEGIA, okres zwrotu rosnaco,
-     tag „Wysoki" jako rozstrzygniecie remisu, a story pointy malejaco, bo tu wiecej znaczy wazniej.
+  /* Domyslna kolejnosc waznosci: plomien (awaria) najpierw, potem pula (CIAGLOSC, RDZEN, DZIAL), tag „Wysoki",
+     okres zwrotu rosnaco, a story pointy malejaco, bo tu wiecej znaczy wazniej.
      Zrodlo prawdy: PLAN_SORT_DOMYSLNY w planSort.ts (razem z migracja starego domyslnego). */
   planSort: PLAN_SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[],
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
@@ -658,7 +683,6 @@ const DEFAULT_SETTINGS: Settings = {
   planZwiniete: [],
   showEmpty: false,
   showCounters: true,
-  hiddenCounters: [],
   shownEmpty: [],
   detailWidth: 520,
   collapsed: [],
@@ -682,7 +706,7 @@ function loadSettings(): Settings {
       ...DEFAULT_SETTINGS,
       ...saved,
       sort: { ...DEFAULT_SETTINGS.sort, ...saved.sort },
-      // Zapisany jest caly stos — stary domyslny zamieniamy na nowy (STRATEGIA na gorze, zwrot).
+      // Zapisany jest caly stos — stary domyslny zamieniamy na nowy (pula, Wysoki, zwrot).
       planSort: (migratePlanSort(saved.planSort) as Settings['planSort'] | undefined) ?? DEFAULT_SETTINGS.planSort,
     };
   } catch {
@@ -737,7 +761,7 @@ function loadViews(): SavedView[] {
 /** Porownywalny odcisk widoku — bez `id`/`name`, z filtrami bez ulotnych id warunkow. */
 function viewFingerprint(v: Omit<SavedView, 'id' | 'name'>): string {
   return JSON.stringify({
-    filters: v.filters.map((c) => ({ field: c.field, op: c.op, values: c.values })),
+    filters: groupedKeys(v.filters, (c) => JSON.stringify([c.field, c.op, c.values])),
     query: v.query,
     groupBy: v.groupBy,
     subGroupBy: v.subGroupBy,
@@ -1872,7 +1896,7 @@ type Dir = 'asc' | 'desc';
  * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
  * na liscie i tak grupuje sie po etapie.
  */
-type PlanSortBy = SortBy | 'stage' | 'strategia' | 'wysoki' | 'sp' | 'zwrot';
+type PlanSortBy = SortBy | 'stage' | 'macierz' | 'pula' | 'wysoki' | 'sp' | 'zwrot';
 
 const SORTS: { key: SortBy; label: string }[] = [
   { key: 'updated', label: 'Zaktualizowane' },
@@ -1889,9 +1913,11 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
    * pozycje bylyby niewidoczne w liscie i nie dalo by sie poprawic zadnego z nich
    * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
    */
-  { key: 'strategia', label: 'Tag STRATEGIA' },
+  /* Macierz Eisenhowera: tagi A, B, C, D (A najwazniejsze). */
+  { key: 'macierz', label: 'Macierz (A–D)' },
+  { key: 'pula', label: 'Pula' },
   { key: 'wysoki', label: 'Tag „Wysoki”' },
-  /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), strategia, potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
+  /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
   { key: 'zwrot', label: 'Okres zwrotu' },
   { key: 'sp', label: 'Story pointy' },
   { key: 'stage', label: 'Etap w sprincie' },
@@ -2072,12 +2098,40 @@ function matchQuery(list: Task[], query: string, opisy?: Map<number, string> | n
  * wymiaru LUB, miedzy wymiarami ORAZ. Etap dopasowujemy po nazwie (etapy sa per
  * sprint), osobe po id — z konto-zaslepka i brakiem zbitymi do UNASSIGNED_ID.
  */
-function matchFilters(t: Task, conditions: Filters, stageNames: Map<number, string>): boolean {
-  return conditions.every((c) => matchCondition(t, c, stageNames));
+/**
+ * Dane spoza samego zadania, potrzebne dwóm filtrom:
+ *  - `answered`: zadania, w ktorych po naszych pytaniach ktos odpisal (czyta czaty, `null` = jeszcze liczymy),
+ *  - `folders`: zadania nadrzedne z otwartym podzadaniem.
+ */
+interface FilterCtx {
+  answered: ReadonlySet<number> | null;
+  folders: ReadonlySet<number>;
+}
+const NO_FILTER_CTX: FilterCtx = { answered: null, folders: new Set<number>() };
+
+function matchFilters(
+  t: Task,
+  conditions: Filters,
+  stageNames: Map<number, string>,
+  ctx: FilterCtx = NO_FILTER_CTX,
+): boolean {
+  return matchGrouped(conditions, (c) => matchCondition(t, c, stageNames, ctx));
 }
 
-function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>): boolean {
+function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>, ctx: FilterCtx): boolean {
   if (!c.values.length) return true; // niedokonczony warunek nie zawezaja
+
+  if (c.field === 'answered') {
+    const key = ctx.answered?.has(t.id) ? 'yes' : 'no';
+    const inSet = c.values.includes(key);
+    return c.op === 'isNot' ? !inSet : inSet;
+  }
+
+  if (c.field === 'kind') {
+    const key = ctx.folders.has(t.id) ? 'parent' : t.parentId ? 'child' : 'plain';
+    const inSet = c.values.includes(key);
+    return c.op === 'isNot' ? !inSet : inSet;
+  }
 
   if (c.field === 'tag') {
     // „Bez tagów" (NO_TAGS) pasuje do zadania z pusta lista tagow; reszta jak zwykle.
@@ -2813,6 +2867,35 @@ function ScopePicker({
  * tak samo we wszystkich przegladarkach. Pasek pojawia sie tylko przy najechaniu
  * i tylko gdy tresc naprawde wystaje.
  */
+/**
+ * Chip filtra, ktory da sie przeciagnac na miejsce innego (kolejnosc decyduje o tym, ktore chipy mozna
+ * polaczyc LUB). Jeden element jest naraz zrodlem i celem; klik w przyciski wewnatrz dziala, bo
+ * czujnik rusza dopiero po przesunieciu o kilka pikseli.
+ */
+function DraggableChip({ id, className, children }: { id: string; className: string; children: ReactNode }) {
+  const drag = useDraggable({ id: `chip:${id}` });
+  const drop = useDroppable({ id: `chip:${id}` });
+  return (
+    <div
+      ref={(el) => {
+        drag.setNodeRef(el);
+        drop.setNodeRef(el);
+      }}
+      className={`${className}${drag.isDragging ? ' filter-chip-dragging' : ''}${drop.isOver && !drag.isDragging ? ' filter-chip-over' : ''}`}
+      style={drag.transform ? { transform: `translate3d(${drag.transform.x}px, 0, 0)` } : undefined}
+      {...drag.listeners}
+      {...drag.attributes}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Czy zestaw filtrow ma niepusty warunek po statusie — wtedy zakonczone nie sa wstepnie ukrywane. */
+function touchesStatus(conds: readonly { field: string; values: readonly string[] }[]): boolean {
+  return conds.some((c) => c.field === 'status' && c.values.length > 0);
+}
+
 function ScrollX({
   children,
   onSpare,
@@ -3101,6 +3184,9 @@ function TagStrip({
 
 /** Tag Bitriksa. Odcien wyliczany z nazwy, wiec dla danego tagu stale ten sam. */
 function Tag({ name, onPick }: { name: string; onPick?: (name: string) => void }) {
+  const mx = matrixColor(name);
+  const tagClass = mx ? 'tag tag-matrix' : 'tag';
+  const tagStyle = mx ? ({ ['--mx' as string]: mx } as CSSProperties) : undefined;
   const body = (
     <>
       <span className="tag-dot" style={{ background: tagHue(name) }} />
@@ -3115,14 +3201,15 @@ function Tag({ name, onPick }: { name: string; onPick?: (name: string) => void }
    */
   if (!onPick) {
     return (
-      <span className="tag" title={name}>
+      <span className={tagClass} style={tagStyle} title={name}>
         {body}
       </span>
     );
   }
   return (
     <button
-      className="tag"
+      className={tagClass}
+      style={tagStyle}
       title={`Filtruj po tagu: ${name}`}
       onClick={(e) => {
         e.stopPropagation(); // klik w tag nie ma otwierac zadania
@@ -3305,6 +3392,7 @@ function TaskRow({
   childCount,
   hiddenSubCount,
   elsewhereSubCount,
+  progress,
   collapsed,
   marked,
   isNew,
@@ -3335,6 +3423,8 @@ function TaskRow({
   hiddenSubCount: number;
   /** Podzadania widoczne, ale w innej grupie — sa na liscie, tylko nie tutaj. */
   elsewhereSubCount: number;
+  /** Postep rodzica z podzadan (suma SP + pasek); `null` dla zadan bez podzadan. */
+  progress?: ParentProgress | null;
   collapsed: boolean;
   /** Nalezy do zaznaczenia wielokrotnego (Ctrl/Shift + klik). */
   marked: boolean;
@@ -3392,7 +3482,7 @@ function TaskRow({
       {...listeners}
       className={`row${active ? ' row-active' : ''}${selected ? ' row-selected' : ''}${
         marked ? ' row-marked' : ''
-      }${isImportant(task) ? ' row-important' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
+      }${isImportant(task) ? ' row-important' : ''}${isLowPriority(task) ? ' row-low' : ''}${busy ? ' row-busy' : ''}${isDragging ? ' row-dragging' : ''}`}
       /* Shift+klik zaznaczylby tekst miedzy wierszami, Ctrl+klik potrafi zaczac
          zaznaczanie w niektorych przegladarkach. Blokujemy TYLKO z modyfikatorem,
          zeby zwykle zaznaczanie i kopiowanie tytulu dzialalo dalej.
@@ -3572,8 +3662,18 @@ function TaskRow({
         </span>
       )}
 
+      {/* Rodzic: pasek z podzadan (kazde proporcjonalnie do SP: zrobione / w toku / czeka) i ich suma. */}
+      {progress && progress.points > 0 && (
+        <>
+          <ParentBar progress={progress} className="row-parent-bar" />
+          <HoverNote label="Suma SP podzadań" value={parentBarTitle(progress)} className="row-sp row-sp-sum">
+            Σ{progress.points}
+          </HoverNote>
+        </>
+      )}
+
       {/* Story pointy scruma — dociagane w tle, wiec pojawiaja sie chwile po liscie. */}
-      {task.storyPoints != null && (
+      {!(progress && progress.points > 0) && task.storyPoints != null && (
         <HoverNote label="Story points" value={task.storyPoints} className="row-sp">
           {task.storyPoints}
         </HoverNote>
@@ -5964,6 +6064,7 @@ function DetailPanel({
   const parent = task.parentId ? allTasks.find((t) => t.id === task.parentId) : undefined;
   const children = allTasks.filter((t) => t.parentId === task.id);
   const doneChildren = children.filter((t) => CLOSED_STATUSES.has(t.status)).length;
+  const childProgress = parentProgress(children);
 
   /*
    * Zadania POWIAZANE (Bitrix DEPENDS_ON). Poza danymi listy — dociagamy osobno per
@@ -6297,7 +6398,16 @@ function DetailPanel({
               <dt>Story points</dt>
               <dd>
                 <FieldButton kind="points" onPick={onPick}>
-                  {task.storyPoints != null ? task.storyPoints : '—'}
+                  {task.storyPoints ? (
+                    task.storyPoints
+                  ) : childProgress && childProgress.points > 0 ? (
+                    /* Rodzic nie ma wlasnych SP (punkty siedza na podzadaniach) — pokazujemy ich sume. */
+                    <span title="Zadanie nadrzędne nie ma własnych SP — suma z podzadań">Σ {childProgress.points}</span>
+                  ) : task.storyPoints != null ? (
+                    task.storyPoints
+                  ) : (
+                    '—'
+                  )}
                 </FieldButton>
               </dd>
             </>
@@ -6401,6 +6511,11 @@ function DetailPanel({
           <section className="subtasks">
             <h2>
               Podzadania · {doneChildren}/{children.length}
+              {childProgress && childProgress.points > 0 && (
+                <span className="subtasks-sum" title={parentBarTitle(childProgress)}>
+                  Σ {childProgress.points} SP
+                </span>
+              )}
               {hiddenChildren > 0 && (
                 <span
                   className="row-hidden-subs"
@@ -6411,6 +6526,7 @@ function DetailPanel({
                 </span>
               )}
             </h2>
+            {childProgress && <ParentBar progress={childProgress} className="subtasks-bar" />}
             {children.map((c) => {
               const hidden = !visibleIds.has(c.id);
               // Podzadanie widoczne, ale stojace w innej grupie niz rodzic —
@@ -6794,7 +6910,7 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ['R'], label: 'Odśwież dane z Bitriksa' },
   { keys: ['X'], label: 'Wyczyść filtry i wyszukiwanie' },
   { keys: ['V'], label: 'Zapisane widoki — potem 1…9 wybiera widok' },
-  { keys: ['1', '2', '3', '4'], label: 'Lista / Tablica / Wykresy / Planowanie' },
+  { keys: ['1', '2', '3', '4', '5'], label: 'Planowanie / Lista / Tablica / Wykresy / Podsumowanie' },
   { keys: ['W'], label: 'Sprint — wrzuć do sprintu albo do backlogu' },
   { keys: ['M'], label: 'Etap w sprincie' },
   { keys: ['A'], label: 'Osoba odpowiedzialna' },
@@ -7036,14 +7152,12 @@ function ViewMenu({
     scope: Scope;
     mine: boolean;
     unassigned: boolean;
-    done: boolean;
     /** Wariant kolorowania grup listy — do porownania na zywo. */
     tint: ListTint;
     deadline: DeadlineLook;
     empty: boolean;
     counters: boolean;
     /** Kafelki do wyboru w panelu olowka — klucz, podpis, czy widoczny. */
-    counterTiles: { key: string; label: string; shown: boolean }[];
     filtersOn: boolean;
     theme: Theme;
     font: Font;
@@ -7063,12 +7177,10 @@ function ViewMenu({
     scope: (s: Scope) => void;
     mine: () => void;
     unassigned: () => void;
-    done: () => void;
     tint: (v: ListTint) => void;
     deadline: (v: DeadlineLook) => void;
     empty: () => void;
     counters: () => void;
-    counterTile: (key: string) => void;
     toggleColumn: (name: string) => void;
     clearFilters: () => void;
     reload: () => void;
@@ -7095,12 +7207,6 @@ function ViewMenu({
 
   // Panel „Kolumny/Grupy" wyskakuje jako OSOBNY panel obok (panel w panelu), nie sekcja.
   const [colsOpen, setColsOpen] = useState(false);
-  /* Panel olowka przy „Pokaż liczniki": ktore kafelki maja byc widoczne. */
-  const [tilesOpen, setTilesOpen] = useState(false);
-  const tilesOff = !state.counters || planMode;
-  useEffect(() => {
-    if (tilesOff) setTilesOpen(false);
-  }, [tilesOff]);
   const [permsOpen, setPermsOpen] = useState(false);
   // Nazwa mowi, po co ten panel jest: trzymac PUSTE kategorie widoczne mimo braku zadan.
   const colTitle = boardMode
@@ -7132,6 +7238,14 @@ function ViewMenu({
         <div className="ds-tabs" role="tablist">
           <button
             role="tab"
+            aria-selected={state.view === 'planning'}
+            className={`ds-tab${state.view === 'planning' ? ' ds-tab-on' : ''}`}
+            onClick={() => on.view('planning')}
+          >
+            <PlanIcon /> Planowanie
+          </button>
+          <button
+            role="tab"
             aria-selected={state.view === 'list'}
             className={`ds-tab${state.view === 'list' ? ' ds-tab-on' : ''}`}
             onClick={() => on.view('list')}
@@ -7156,11 +7270,11 @@ function ViewMenu({
           </button>
           <button
             role="tab"
-            aria-selected={state.view === 'planning'}
-            className={`ds-tab${state.view === 'planning' ? ' ds-tab-on' : ''}`}
-            onClick={() => on.view('planning')}
+            aria-selected={state.view === 'summary'}
+            className={`ds-tab${state.view === 'summary' ? ' ds-tab-on' : ''}`}
+            onClick={() => on.view('summary')}
           >
-            <PlanIcon /> Planowanie
+            <SummaryIcon /> Podsumowanie
           </button>
         </div>
 
@@ -7280,34 +7394,11 @@ function ViewMenu({
           bo w Bitriksie to status 5 i 4, a nie jedno). Wygaszamy go tutaj,
           zamiast zostawiac przycisk, ktory nic nie robi.
         */}
-        {check('Pokaż zakończone', state.done, on.done, planMode)}
         {/* Liczniki sa tylko nad lista i tablica — w planowaniu nie ma ich czym chowac. */}
-        {/*
-          Olowek obok: dobor kafelkow. Wygaszony, gdy licznikow nie ma — nie ma
-          wtedy czego dobierac.
-        */}
-        {/*
-          Kolejnosc: podpis, olowek, przelacznik — przelacznik zostaje na prawej
-          krawedzi, w jednej linii z pozostalymi. Olowek NIE moze siedziec w
-          `<label>`: przycisk jest kontrolka, wiec label przejalby go i klik w
-          podpis otwieralby panel zamiast przelaczac. Stad `htmlFor`.
-        */}
         <div className={`ds-check ds-check-row${planMode ? ' ds-check-off' : ''}`}>
           <label htmlFor="ds-show-counters" className="ds-check-row-label">
-            Pokaż liczniki
+            Pokaż kafelki
           </label>
-          <button
-            className={`ds-check-edit${tilesOpen ? ' ds-check-edit-on' : ''}`}
-            disabled={tilesOff}
-            title={tilesOff ? 'Włącz liczniki, żeby wybrać kafelki' : 'Wybierz, które kafelki widać'}
-            onClick={() => {
-              setColsOpen(false);
-              setPermsOpen(false);
-              setTilesOpen((o) => !o);
-            }}
-          >
-            <PenIcon />
-          </button>
           <input
             id="ds-show-counters"
             type="checkbox"
@@ -7362,20 +7453,6 @@ function ViewMenu({
       </div>
 
       {permsOpen && <PermsFlyout left={flyLeft} top={top} width={flyW} />}
-
-      {/* Dobor kafelkow licznikow — ten sam panel obok co „Puste grupy". */}
-      {tilesOpen && (
-        <div className="menu view-cols-flyout" style={{ left: flyLeft, top, width: flyW }}>
-          <div className="ds-colhead">Kafelki liczników</div>
-          <div className="ds-colhint">Odznacz te, których nie potrzebujesz. Liczby się nie zmieniają.</div>
-          {state.counterTiles.map((t) => (
-            <label key={t.key} className="ds-check">
-              <span>{t.label}</span>
-              <input type="checkbox" checked={t.shown} onChange={() => on.counterTile(t.key)} />
-            </label>
-          ))}
-        </div>
-      )}
 
       {/* Panel w panelu — osobny, obok menu widoku; checkbox na kazda kolumne/grupe. */}
       {colsOpen && columns.length > 0 && (
@@ -8669,7 +8746,11 @@ export default function App() {
   // Domyslnie wlaczone — na starcie interesuja mnie moje zadania, nie caly zespol.
   const [onlyMine, setOnlyMine] = useState(saved.onlyMine);
   const [withUnassigned, setWithUnassigned] = useState(saved.withUnassigned);
-  const [showDone, setShowDone] = useState(saved.showDone);
+  /*
+   * Zakonczonych nie przelaczamy osobnym przelacznikiem: sa ukryte, dopoki nie dodasz filtra STATUSU —
+   * wtedy o tym, co widac, decyduje ten filtr (np. status = zakonczone pokazuje tylko zakonczone).
+   */
+  const showDone = useMemo(() => touchesStatus(filters), [filters]);
   const [planDone, setPlanDone] = useState(saved.planDone ?? false);
   const [planReview, setPlanReview] = useState(saved.planReview ?? true);
   /*
@@ -8720,9 +8801,6 @@ export default function App() {
   );
   const [showEmpty, setShowEmpty] = useState(saved.showEmpty);
   const [showCounters, setShowCounters] = useState(saved.showCounters ?? true);
-  const [hiddenCounters, setHiddenCounters] = useState<string[]>(() =>
-    Array.isArray(saved.hiddenCounters) ? saved.hiddenCounters.filter((k) => typeof k === 'string') : [],
-  );
   const [shownEmpty, setShownEmpty] = useState<string[]>(saved.shownEmpty);
   // W obrebie sprintu kazde zadanie ma etap, wiec grupowanie po etapie
   // odwzorowuje realny przeplyw (W toku -> Do zatwierdzenia / PR -> Wdrozone).
@@ -8796,7 +8874,13 @@ export default function App() {
 
   /** Usun jeden warunek (krzyzyk na chipie albo porzucony, pusty popover). */
   const removeCondition = useCallback(
-    (condId: string) => setFilters((f) => f.filter((c) => c.id !== condId)),
+    (condId: string) => setFilters((f) => normalizeGroups(f.filter((c) => c.id !== condId))),
+    [],
+  );
+
+  /** Lacznik miedzy chipem a jego poprzednikiem: ORAZ <-> LUB. */
+  const toggleJoinCond = useCallback(
+    (condId: string) => setFilters((f) => toggleJoin(f, condId, newGroupId)),
     [],
   );
 
@@ -8909,8 +8993,10 @@ export default function App() {
       ? 'Planowanie zestawia rejestr ze sprintami, więc zawsze patrzy na wszystkie zadania.'
       : viewMode === 'charts'
         ? 'Wykresy liczą cały projekt — zakres, filtry i szukanie ich nie dotyczą.'
-        : null;
-  const scope: Scope = activeSprint && viewMode !== 'planning' ? scopePref : 'all';
+        : viewMode === 'summary'
+          ? 'Podsumowanie liczy cały aktywny sprint — zakres, filtry i szukanie go nie dotyczą.'
+          : null;
+  const scope: Scope = activeSprint && viewMode !== 'planning' && viewMode !== 'summary' ? scopePref : 'all';
 
   /**
    * Zmiana projektu to inny zbior zadan, wiec caly stan chwilowy odnoszacy sie do
@@ -8929,7 +9015,6 @@ export default function App() {
       setFilters(EMPTY_FILTERS);
       setQuery('');
       setCursor(0);
-      setCard(null);
       selectProject(id);
     },
     [groupId, selectProject],
@@ -9098,20 +9183,54 @@ export default function App() {
     () => stages.filter((s) => sprintId !== null && s.sprintId === sprintId && s.type === 'NEW'),
     [stages, sprintId],
   );
+  /* Etapy „W toku" aktywnego sprintu — do podsumowania sprintu. */
+  const workStageIds = useMemo(() => new Set(stages.filter((s) => s.type === 'WORK').map((s) => s.id)), [stages]);
   const waitingStageIds = useMemo(() => new Set(waitingStages.map((s) => s.id)), [waitingStages]);
   const waitingStageNames = useMemo(() => new Set(waitingStages.map((s) => s.name)), [waitingStages]);
+  /* Zespol i grafik tygodniowy (zapis w przegladarce). Pusty zespol = moce liczone po staremu. */
+  const [team, setTeamState] = useState<TeamConfig>(loadTeam);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const teamIds = useMemo(() => new Set(team.members.map((m) => m.id)), [team]);
+  const [manageOpen, setManageOpen] = useState<null | 'tags' | 'epics'>(null);
+  const setTeam = useCallback((next: TeamConfig) => {
+    setTeamState(next);
+    saveTeam(next);
+  }, []);
+  /* Osoby, ktorych zadania nie zjadaja budzetu SP: ustawienie „Budzet" w zespole, a bez zespolu stara konfiguracja. */
+  const capacityExcluded = useMemo(
+    () => budgetExcludedIds(team) ?? config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED,
+    [team, config?.capacityExcludeIds],
+  );
+  const teamCapacity = useMemo(() => {
+    const end = sprintDeadline(activeSprint?.dateEnd ?? null);
+    return team.members.length > 0 && end ? teamHoursBetween(team, now, end) : null;
+  }, [team, now, activeSprint?.dateEnd]);
+  /* Moce na CALY aktywny sprint (od startu do konca) — do wydajnosci w podsumowaniu. */
+  const summaryCapacity = useMemo(() => {
+    const end = sprintDeadline(activeSprint?.dateEnd ?? null);
+    const start = activeSprint?.dateStart ? new Date(activeSprint.dateStart) : null;
+    if (!end || !start || Number.isNaN(start.getTime())) return { total: null, source: null } as const;
+    const from = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 8);
+    if (team.members.length > 0) {
+      const h = teamHoursBetween(team, from, sprintWorkEnd(end));
+      return h > 0 ? ({ total: h, source: 'grafik' } as const) : ({ total: null, source: null } as const);
+    }
+    const hours = workHoursBetween(from, sprintWorkEnd(end));
+    return hours > 0 ? ({ total: hours * (config?.capacityDevs ?? 4), source: 'konfiguracja' } as const) : ({ total: null, source: null } as const);
+  }, [activeSprint?.dateStart, activeSprint?.dateEnd, config?.capacityDevs, team]);
   const capacity = useMemo(
     () =>
       sprintCapacity({
         now,
         dateEnd: activeSprint?.dateEnd ?? null,
-        devs: config?.capacityDevs ?? 4,
+        devs: config?.capacityDevs ?? 3.5,
         sprintId,
         waitingStageIds,
-        excludedIds: config?.capacityExcludeIds ?? [],
+        excludedIds: capacityExcluded,
         tasks,
+        teamCapacity,
       }),
-    [now, activeSprint?.dateEnd, config?.capacityDevs, config?.capacityExcludeIds, sprintId, waitingStageIds, tasks],
+    [now, activeSprint?.dateEnd, config?.capacityDevs, capacityExcluded, sprintId, waitingStageIds, tasks, teamCapacity],
   );
   /* Chip tylko wtedy, gdy widok naprawde pokazuje ten sprint — w „Wszystkich" etap „Nowe"
      zlewa zadania z wielu sprintow i liczba nie odpowiadalaby temu, co widac. */
@@ -9122,7 +9241,6 @@ export default function App() {
    * przelacznikow i filtrow — bo odpowiadaja na pytanie „ile tego jest", a nie „ile
    * widze". Klikniecie karty podmienia liste na dokladnie te zadania, ktore liczy.
    */
-  const [card, setCard] = useState<CounterKey | null>(null);
   const answered = useAnsweredTasks(tasks, {
     closed: CLOSED_STATUSES,
     itDepartments: config?.itDepartments ?? [],
@@ -9133,91 +9251,88 @@ export default function App() {
   });
   /* Foldery liczymy z CALEJ listy — dziecko moze lezec w innym sprincie niz rodzic. */
   const folders = useMemo(() => foldersOf(tasks, CLOSED_STATUSES), [tasks]);
-  /* Fakty z czatow: rozpoznania i uzasadnienia STRATEGII — nie widac ich w tagach. */
-  const chatFacts = useChatFacts(tasks, {
-    closed: CLOSED_STATUSES,
-    sprintId,
-    groupId,
-    enabled: metaReady,
-  });
-  const counterCtx = useMemo<CounterCtx>(
-    () => ({ sprintId, closed: CLOSED_STATUSES, answered, chat: chatFacts, folders }),
-    [sprintId, answered, chatFacts, folders],
-  );
-  const counterDefs = useMemo(
-    () => COUNTERS.filter((d) => !d.needsSprint || activeSprint),
-    [activeSprint],
-  );
-  const counterValues = useMemo(
-    () => countAll(tasks, counterCtx, counterDefs),
-    [tasks, counterCtx, counterDefs],
-  );
-  /* Dopoki nie doszlo swieze pobranie ze story pointami, na ekranie jest migawka z
-     poprzedniej sesji — liczba bylaby wczorajsza, wiec pokazujemy wielokropek. */
-  const counterPending = useMemo(() => {
-    const s = new Set<CounterKey>();
-    for (const d of counterDefs) {
-      if (
-        !metaReady ||
-        ((d.key === 'odpowiedzi' || d.key === 'czeka') && answered === null) ||
-        (d.needsChatFacts && chatFacts === null)
-      ) {
-        s.add(d.key);
-      }
+  /* KAFELKI: zapisane widoki (zakres + filtry) z nazwa, kolorem, ikona i grupa. Konfiguracja zyje w przegladarce. */
+  const [tilesCfg, setTilesCfgState] = useState<TilesConfig>(loadTiles);
+  const setTilesCfg = useCallback((next: TilesConfig) => {
+    setTilesCfgState(next);
+    saveTiles(next);
+  }, []);
+  const [tilesOpen, setTilesOpen] = useState<null | 'new' | 'manage'>(null);
+  /* Warunki paska <-> zapisywalne (bez id). */
+  const toTileFilters = (f: Filters) =>
+    f.map((c) => ({ field: c.field, op: c.op, values: c.values, ...(c.or ? { or: c.or } : {}) }));
+  const filterCtx = useMemo<FilterCtx>(() => ({ answered, folders }), [answered, folders]);
+  const tileValues = useMemo(() => {
+    const m = new Map<string, TileNumbers>();
+    const childrenOf = groupChildren(tasks);
+    for (const tile of tilesCfg.tiles) {
+      const rows = tasks.filter((t) => {
+        const mineOrFree = t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
+        if (tile.onlyMine && !mineOrFree) return false;
+        if (!touchesStatus(tile.filters) && CLOSED_STATUSES.has(t.status)) return false;
+        const inSprint = sprintId !== null && t.sprintId === sprintId;
+        if (tile.scope === 'sprint' && !inSprint) return false;
+        if (tile.scope === 'outside' && inSprint) return false;
+        return matchFilters(t, tile.filters.map((c) => ({ ...c, id: '' })) as Filters, stageNames, filterCtx);
+      });
+      /*
+       * Rodzic niesie 0 SP, a praca siedzi w podzadaniach (jak na liscie, ktora pokazuje rodzicowi ich sume).
+       * Dolaczamy wiec SP podzadan rodzica, ale tylko tych, ktorych nie ma juz wsrod wierszy kafelka —
+       * inaczej kafelek obejmujacy i rodzica, i dzieci liczylby to samo dwa razy.
+       */
+      const inRows = new Set(rows.map((t) => t.id));
+      const points = rows.reduce(
+        (n, t) =>
+          n +
+          (t.storyPoints ?? 0) +
+          (childrenOf.get(t.id) ?? []).reduce((k, c) => (inRows.has(c.id) ? k : k + (c.storyPoints ?? 0)), 0),
+        0,
+      );
+      m.set(tile.id, { count: rows.length, points });
     }
-    return s;
-  }, [counterDefs, metaReady, answered, chatFacts]);
+    return m;
+  }, [tilesCfg.tiles, tasks, me, withUnassigned, sprintId, stageNames, filterCtx]);
+  /* Historia dzienna: wbudowane liczniki + wlasne kafelki (klucz "t:<id>") — stad strzalki wzgledem dnia poprzedniego. */
   const counterSnap = useMemo<DaySnapshot>(() => {
     const s: DaySnapshot = {};
-    for (const d of counterDefs) if (!counterPending.has(d.key)) s[d.key] = counterValues[d.key].count;
-    if (!counterPending.has('sprint') && counterValues.sprint?.points != null) {
-      s.sprintPoints = counterValues.sprint.points;
+    const byGroup = new Map<string, CustomTile[]>();
+    for (const t of tilesCfg.tiles) {
+      const v = tileValues.get(t.id);
+      if (v) s[`t:${t.id}`] = shownValue(t, v);
+      byGroup.set(t.group, [...(byGroup.get(t.group) ?? []), t]);
+    }
+    for (const [gid, list] of byGroup) {
+      const total = groupTotals(list, tileValues);
+      s[`g:${gid}`] = total.count;
+      s[`gs:${gid}`] = total.points;
     }
     return s;
-  }, [counterDefs, counterPending, counterValues]);
+  }, [tileValues, tilesCfg.tiles]);
   const counterPrev = useCounterHistory(groupId, counterSnap);
-  const cardTasks = useMemo(
-    () => (card ? tasks.filter((t) => counterDef(card).match(t, counterCtx)) : null),
-    [card, tasks, counterCtx],
+  const activeTileId = useMemo(
+    () =>
+      tilesCfg.tiles.find((t) =>
+        sameView(t, {
+          scope: scopePref,
+          filters: toTileFilters(filters),
+          onlyMine,
+          showDone,
+        }),
+      )?.id ?? null,
+    [tilesCfg.tiles, scopePref, filters, onlyMine, showDone],
   );
-  /*
-   * Karta USTAWIA pasek pod siebie: zakres, „Pokaż zakończone" i filtry maja
-   * mowic, co naprawde jest na liscie. Wczesniej karta podmieniala liste, a pasek
-   * dalej pokazywal np. „Aktywny sprint" nad zadaniami spoza sprintu.
-   *
-   * Karta liczy cala grupe, wiec filtry i „Tylko moje" schodza; zakonczone widac
-   * tylko przy „W sprincie" (tylko ona je liczy).
-   */
-  const stanKarty = (k: CounterKey) => ({
-    scope: (k === 'sprint' ? 'sprint' : k === 'poza' || k === 'wycena' ? 'outside' : 'all') as Scope,
-    done: k === 'sprint',
-  });
-  const pickCard = useCallback((k: CounterKey | null) => {
-    setCard(k);
-    if (!k) return;
-    const st = stanKarty(k);
-    setScope(st.scope);
-    setShowDone(st.done);
-    setOnlyMine(false);
-    setFilters(EMPTY_FILTERS);
-    /*
-     * Wyszukiwanie tez schodzi, tak jak przy wyborze widoku zapisanego (applyView):
-     * karta pokazuje to, co liczy, a wpisana wczesniej fraza zostawiala z niej pusta
-     * liste. SearchBox trzyma wlasny draft, wiec sam `setQuery` zostawilby w polu tekst.
-     * Po wybraniu karty mozna znowu szukac — fraza zaweza wtedy zawartosc karty.
-     */
+  const pickTile = (tile: CustomTile) => {
+    if (activeTileId === tile.id) {
+      setFilters(EMPTY_FILTERS); // ponowny klik: czyscimy filtry
+      return;
+    }
+    setScope(tile.scope);
+    setOnlyMine(tile.onlyMine);
+    setFilters(refreshGroups(tile.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })) as Filters);
     setQuery('');
     searchRef.current?.setValue('');
     setEditingViewId(null);
-  }, []);
-  /* Kazda RECZNA zmiana paska rozjezdza go z karta — wtedy wracasz do zwyklego
-     widoku. Porownujemy ze stanem karty zamiast reagowac na sama zmiane, bo
-     ustawienie paska przez karte tez jest zmiana. */
-  useEffect(() => {
-    if (!card) return;
-    const st = stanKarty(card);
-    if (scopePref !== st.scope || showDone !== st.done || onlyMine || anyFilter(filters)) setCard(null);
-  }, [card, filters, onlyMine, showDone, scopePref]);
+  };
 
   // Przelaczniki dzialaja niezaleznie od zakresu, zeby liczniki przy zakresach
   // pokazywaly to, co faktycznie zobaczysz po klliknieciu.
@@ -9232,10 +9347,10 @@ export default function App() {
         if (!showDone && CLOSED_STATUSES.has(t.status)) return false;
         // Filtry z paska (Linear) — patrz `matchFilters`. Sa w `base`, wiec liczniki
         // przy zakresach i decyzja o zamknieciu panelu tez je uwzgledniaja.
-        if (!matchFilters(t, filters, stageNames)) return false;
+        if (!matchFilters(t, filters, stageNames, filterCtx)) return false;
         return true;
       }),
-    [tasks, onlyMine, withUnassigned, showDone, filters, stageNames, me],
+    [tasks, onlyMine, withUnassigned, showDone, filters, stageNames, me, filterCtx],
   );
 
   // `base` po wyszukiwaniu, ale BEZ ograniczenia zakresem — wspolne dla licznikow
@@ -9275,8 +9390,8 @@ export default function App() {
    * z filtrow TRESCI (tylko moje, zakonczone, tag, szukanie) — patrz efekt nizej.
    */
   const panelIds = useMemo(
-    () => new Set([...queriedBase, ...(cardTasks ?? [])].map((t) => t.id)),
-    [queriedBase, cardTasks],
+    () => new Set(queriedBase.map((t) => t.id)),
+    [queriedBase],
   );
 
   /*
@@ -9298,8 +9413,6 @@ export default function App() {
   }, [queriedBase, query, opisyIndeks]);
 
   const filtered = useMemo(() => {
-    // Aktywna karta licznika: lista = dokladnie to, co karta liczy (plus szukanie).
-    if (cardTasks) return matchQuery(cardTasks, query, opisyIndeks);
     const inScope = base.filter((t) => {
       const inSprint = sprintId !== null && t.sprintId === sprintId;
       if (scope === 'sprint' && !inSprint) return false;
@@ -9307,7 +9420,7 @@ export default function App() {
       return true;
     });
     return matchQuery(inScope, query, opisyIndeks);
-  }, [base, scope, sprintId, query, opisyIndeks, cardTasks]);
+  }, [base, scope, sprintId, query, opisyIndeks]);
 
   /** Wszystkie tagi wystepujace w grupie, alfabetycznie, z liczba uzyc — do palety, filtra i edycji tagow. */
   const allTags = useMemo(() => tagCounts(tasks), [tasks]);
@@ -9335,6 +9448,9 @@ export default function App() {
       if (field === 'status') return labels.status[value] ?? value;
       if (field === 'epic')
         return value === '0' ? 'Bez epika' : (epicNames.get(Number(value))?.name ?? `#${value}`);
+      if (field === 'answered') return value === 'yes' ? 'Tak — ktoś odpowiedział' : 'Nie';
+      if (field === 'kind')
+        return value === 'parent' ? 'Nadrzędne (z otwartym podzadaniem)' : value === 'child' ? 'Podzadanie' : 'Zwykłe';
       if (field === 'tag' && value === NO_TAGS) return 'Bez tagów';
       if (field === 'points') return value === NO_POINTS ? 'Bez oszacowania' : `${value} SP`;
       if (field === 'deadline') return value === NO_DEADLINE ? 'Bez terminu' : dayLabel(Number(value));
@@ -9511,18 +9627,19 @@ export default function App() {
     const field = filters.find((c) => c.id === filterPick?.condId)?.field;
     if (!field) return [];
     if (field === 'assignee')
-      return people.map((p) => ({
+      return teamFirst(people, teamIds, new Set<number>([me ?? -1, UNASSIGNED_ID])).map(({ item: p, section }) => ({
         value: String(p.id),
         label: p.name,
         // „Nieprzypisane" to konto-zaslepka: pusty awatar, nie inicjal — tak samo jak
         // w wierszu listy, na karcie i w pickerze osoby.
         photo: p.id === UNASSIGNED_ID ? undefined : p.photo,
         icon: p.id === UNASSIGNED_ID ? <Avatar name={null} /> : undefined,
+        section,
       }));
     if (field === 'creator')
-      return creators.map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }));
+      return teamFirst(creators, teamIds).map(({ item: p, section }) => ({ value: String(p.id), label: p.name, photo: p.photo, section }));
     if (field === 'observer')
-      return observers.map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }));
+      return teamFirst(observers, teamIds).map(({ item: p, section }) => ({ value: String(p.id), label: p.name, photo: p.photo, section }));
     if (field === 'priority')
       return Object.entries(labels.priority).map(([value, label]) => ({
         value,
@@ -9551,6 +9668,17 @@ export default function App() {
       }
       return opts;
     }
+    if (field === 'answered')
+      return [
+        { value: 'yes', label: 'Tak — ktoś odpowiedział po naszych pytaniach' },
+        { value: 'no', label: 'Nie' },
+      ];
+    if (field === 'kind')
+      return [
+        { value: 'parent', label: 'Nadrzędne (z otwartym podzadaniem)' },
+        { value: 'child', label: 'Podzadanie' },
+        { value: 'plain', label: 'Zwykłe (bez podzadań)' },
+      ];
     if (field === 'deadline') {
       /*
        * Poza zakresem termin ma tylko JEDNO sensowne pytanie: czy w ogole jest.
@@ -9607,7 +9735,7 @@ export default function App() {
         icon: <span className="tag-dot" style={{ background: tagHue(tag) }} />,
       })),
     ];
-  }, [filters, filterPick, people, creators, observers, labels, stages, sprintId, stageMeta, allTags, epics, tasks]);
+  }, [filters, filterPick, people, teamIds, me, creators, observers, labels, stages, sprintId, stageMeta, allTags, epics, tasks]);
 
   /*
    * Klucze pustych grup dla danej osi — tylko etap i status maja skonczony, znany
@@ -9847,7 +9975,6 @@ export default function App() {
       szukajWOpisach: wOpisach,
       showEmpty,
       showCounters,
-      hiddenCounters,
       shownEmpty,
       detailWidth,
       collapsed: [...collapsed],
@@ -9858,7 +9985,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, hiddenCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, showDone, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -9921,7 +10048,7 @@ export default function App() {
     // Od teraz edytujemy TEN widok — takze gdy zastosowano go z klawiatury (v + 1-9).
     setEditingViewId(v.id);
     // Swieze id warunkow, zeby nie kolidowaly z licznikiem `condSeq` biezacej sesji.
-    setFilters(v.filters.map((c) => ({ ...c, id: newCondId() })));
+    setFilters(refreshGroups(v.filters, newGroupId).map((c) => ({ ...c, id: newCondId() })));
     // Wyszukiwanie: od razu do stanu i do widocznego pola (SearchBox ma wlasny draft).
     // Widoki zapisane przed dodaniem pola `query` nie maja go wcale — bez `?? ''`
     // setQuery(undefined) wywala matchQuery (query.trim) i cala aplikacja gasnie.
@@ -9934,7 +10061,6 @@ export default function App() {
     setScope(v.scope);
     setOnlyMine(v.onlyMine);
     setWithUnassigned(v.withUnassigned);
-    setShowDone(v.showDone);
     setShowEmpty(v.showEmpty);
     // Menu zostaje otwarte — mozna przeklikiwac widoki i patrzec na wynik bez
     // ponownego otwierania listy. Zamyka je klikniecie poza (backdrop) albo Esc.
@@ -10189,7 +10315,7 @@ export default function App() {
        * (W/M/A/P/S): wszystkie dzialaja na `current`, wiec na wykresach musi byc
        * pusty. Klawisze globalne (widoki, filtry, odswiezenie, sciagawka) zostaja.
        */
-      const rowless = viewMode === 'charts';
+      const rowless = viewMode === 'charts' || viewMode === 'summary';
       const current = rowless ? undefined : flat[cursor];
 
       if (rowless && ['j', 'k', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key))
@@ -10209,14 +10335,14 @@ export default function App() {
         if (current) setOpenId(current.id);
       } else if (e.key === 'r') {
         void reload();
-      } else if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') {
+      } else if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4' || e.key === '5') {
         /*
          * Widoki pod cyframi w KOLEJNOSCI ZAKLADEK z panelu widoku. Osobny
          * klawisz tylko dla wybranych bylby wyjatkiem bez reguly - kazdy widok
          * dostaje swoja cyfre.
          */
         e.preventDefault();
-        setViewMode((['list', 'board', 'charts', 'planning'] as const)[Number(e.key) - 1]);
+        setViewMode((['planning', 'list', 'board', 'charts', 'summary'] as const)[Number(e.key) - 1]);
       } else if (e.key === 'v') {
         /*
          * Menu kotwiczymy do PRZYCISKU, nie do srodka ekranu: to samo miejsce,
@@ -10460,6 +10586,13 @@ export default function App() {
     useSensor(KeyboardSensor),
   );
 
+  /** Przeciagniecie chipa filtra na inny zmienia kolejnosc warunkow. */
+  const onChipDragEnd = useCallback((e: DragEndEvent) => {
+    const from = String(e.active.id).replace(/^chip:/, '');
+    const to = e.over ? String(e.over.id).replace(/^chip:/, '') : '';
+    if (to && from !== to) setFilters((f) => moveCondition(f, from, to));
+  }, []);
+
   const onDragStart = useCallback((e: DragStartEvent) => setDraggingId(parseDrag(e.active.id)), []);
 
   /*
@@ -10605,6 +10738,11 @@ export default function App() {
    * Kolejny sprint do planowania: najwczesniejszy ze statusem `planned`.
    * Sprinty przychodza posortowane po dacie startu, wiec wystarczy pierwszy.
    */
+  /* Etapy „W toku" aktywnego sprintu — zadania w nich nie wchodza do mocy w widoku planowania. */
+  const etapyWToku = useMemo(
+    () => new Set(stages.filter((s) => s.type === 'WORK').map((s) => s.id)),
+    [stages],
+  );
   const nextSprint = useMemo(
     () => sprints.find((sp) => sp.status === 'planned') ?? null,
     [sprints],
@@ -10629,7 +10767,8 @@ export default function App() {
        * Tylko sprint PLANOWANY: przelozenie czegos do aktywnego albo z
        * powrotem do rejestru nie jest wyborem w tej rundzie.
        */
-      if (nextSprint !== null && sprintId === nextSprint.id) {
+      const celPlanowania = nextSprint ?? activeSprint;
+      if (celPlanowania !== null && sprintId === celPlanowania.id) {
         setPlanTura((t) => t + list.length);
       }
       /*
@@ -10656,7 +10795,7 @@ export default function App() {
             me,
             itUsers: config?.itUsers ?? NO_IDS,
             itDepartments: config?.itDepartments ?? NO_IDS,
-            kierownicy: config?.capacityExcludeIds ?? NO_IDS,
+            kierownicy: capacityExcluded,
             unassignedId: UNASSIGNED_ID,
             departmentsOf: new Map(directory.map((e) => [e.id, e.departments])),
           }
@@ -10675,8 +10814,9 @@ export default function App() {
           const nowy = itCtx && t ? ownerOnEnteringSprint(t, t.sprintId, sprintId, itCtx) : null;
           const wSprincie = await mutate(
             id,
-            { sprintId, stageId: null },
-            () => moveToSprint(id, sprintId ?? backlogId ?? 0),
+            { sprintId, stageId: stages.find((st) => st.sprintId === sprintId && st.type === 'NEW')?.id ?? null },
+            /* Do sprintu — przez kolumne wejsciowa (karta + numer IT-NNN); do rejestru — sama przynaleznosc. */
+            () => (sprintId === null ? moveToSprint(id, backlogId ?? 0) : moveToSprintViaEntry(id, sprintId)),
             'sprint',
           );
           if (wSprincie) oznacz(id);
@@ -10704,7 +10844,7 @@ export default function App() {
         return reload(true);
       });
     },
-    [nextSprint, mutate, backlogId, reload, directory, me, config, toast, tasks],
+    [nextSprint, activeSprint, mutate, backlogId, reload, directory, me, config, toast, tasks, stages],
   );
 
   /**
@@ -10759,7 +10899,7 @@ export default function App() {
    * Bez zadan kierownika: planowanie mierzy do tego limitu sam zespol, wiec
    * punkty kierownika w odniesieniu zawyzalyby wolne miejsce o jego udzial.
    */
-  const kierownicy = config?.capacityExcludeIds ?? NO_CAPACITY_EXCLUDED;
+  const kierownicy = capacityExcluded;
   const lastDone = useMemo(() => {
     const done = [...sprints].reverse().find((sp) => sp.status === 'completed');
     if (!done) return null;
@@ -10785,10 +10925,10 @@ export default function App() {
         const mineOrFree =
           t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
         if (onlyMine && !mineOrFree) return false;
-        if (!matchFilters(t, filters, stageNames)) return false;
+        if (!matchFilters(t, filters, stageNames, filterCtx)) return false;
         return true;
       }),
-    [tasks, onlyMine, withUnassigned, filters, stageNames, me],
+    [tasks, onlyMine, withUnassigned, filters, stageNames, me, filterCtx],
   );
 
   /*
@@ -10843,6 +10983,9 @@ export default function App() {
    * zalezala od tego, czego ktos wlasnie szukal. Rejestr przeciwnie: tam sie szuka
    * i zawezanie jest cala jego robota.
    */
+  /* Podzadania pogrupowane po rodzicu — z CALEJ listy, takze tych ukrytych filtrem. */
+  const childrenByParent = useMemo(() => groupChildren(tasks), [tasks]);
+
   const planAll = useMemo(() => [...tasks].sort(planCmp), [tasks, planCmp]);
 
   const onDragEnd = useCallback(
@@ -10984,6 +11127,12 @@ export default function App() {
 
     list.push(
       {
+        id: 'view-planning',
+        section: 'Widok',
+        label: 'Planowanie (rejestr obok sprintów)',
+        run: () => setViewMode('planning'),
+      },
+      {
         id: 'view-list',
         section: 'Widok',
         label: 'Lista',
@@ -11002,10 +11151,10 @@ export default function App() {
         run: () => setViewMode('charts'),
       },
       {
-        id: 'view-planning',
+        id: 'view-summary',
         section: 'Widok',
-        label: 'Planowanie (rejestr obok sprintów)',
-        run: () => setViewMode('planning'),
+        label: 'Podsumowanie sprintu (jak na radzie)',
+        run: () => setViewMode('summary'),
       },
       ...scopes.map((s) => ({
         id: `scope-${s.key}`,
@@ -11061,12 +11210,6 @@ export default function App() {
         section: 'Filtry',
         label: withUnassigned ? 'Ukryj nieprzypisane' : 'Pokaż też nieprzypisane',
         run: () => setWithUnassigned((v) => !v),
-      },
-      {
-        id: 'toggle-done',
-        section: 'Filtry',
-        label: showDone ? 'Ukryj zakończone' : 'Pokaż zakończone',
-        run: () => setShowDone((v) => !v),
       },
       {
         id: 'reload',
@@ -11323,19 +11466,20 @@ export default function App() {
         title: 'Osoba odpowiedzialna',
         // Zalogowany uzytkownik stoi na gorze (patrz sortowanie `people`); kreska
         // pod nim oddziela "ja" od pozostalych osob.
-        options: people.map((p, i) => ({
+        options: teamFirst(people, teamIds, new Set<number>([me ?? -1, UNASSIGNED_ID])).map(({ item: p, section }, i, all) => ({
           value: String(p.id),
           label: p.name,
           // „Nieprzypisane" to konto-zaslepka — pusty awatar (kolko-placeholder), ten sam
           // co przy nieprzypisanym zadaniu w wierszu; nie zdjecie/inicjal.
           photo: p.id === UNASSIGNED_ID ? undefined : p.photo,
           icon: p.id === UNASSIGNED_ID ? <Avatar name={null} /> : undefined,
-          // Kreska pod para „ja + Nieprzypisane" — oddziela skroty od reszty ludzi.
+          // Podpis grupy („Zespół" / „Pozostali"); bez zespolu kreska pod para „ja + Nieprzypisane".
+          section,
           divider:
             i > 0 &&
             p.id !== me &&
             p.id !== UNASSIGNED_ID &&
-            (people[i - 1].id === me || people[i - 1].id === UNASSIGNED_ID),
+            (all[i - 1].item.id === me || all[i - 1].item.id === UNASSIGNED_ID),
         })),
         apply: (value: string) => {
           const p = people.find((x) => x.id === Number(value));
@@ -11570,10 +11714,11 @@ export default function App() {
           <span className="mode-group" role="group" aria-label="Widok">
             {(
               [
-                { key: 'list', icon: <ListIcon />, label: 'Lista (1)' },
-                { key: 'board', icon: <BoardIcon />, label: 'Tablica (2)' },
-                { key: 'charts', icon: <ChartIcon />, label: 'Wykresy (3)' },
-                { key: 'planning', icon: <PlanIcon />, label: 'Planowanie (4)' },
+                { key: 'planning', icon: <PlanIcon />, label: 'Planowanie (1)' },
+                { key: 'list', icon: <ListIcon />, label: 'Lista (2)' },
+                { key: 'board', icon: <BoardIcon />, label: 'Tablica (3)' },
+                { key: 'charts', icon: <ChartIcon />, label: 'Wykresy (4)' },
+                { key: 'summary', icon: <SummaryIcon />, label: 'Podsumowanie sprintu (5)' },
               ] as const
             ).map((m) => (
               <button
@@ -11650,6 +11795,14 @@ export default function App() {
           </button>
           {/* Skroty byly kiedys wypisane w panelu bocznym. Po jego usunieciu zostal
               sam klawisz "?", ktory trzeba znac — stad jawny przycisk. */}
+          <button className="icon-btn header-team" onClick={() => setTeamOpen(true)} title="Zespół i grafik: role, moc, budżet SP, urlopy">
+            <PersonIcon />
+            <span>Zespół</span>
+          </button>
+          <button className="icon-btn header-team" onClick={() => setManageOpen('tags')} title="Zarządzanie tagami i epikami projektu">
+            <TagIcon />
+            <span>Tagi i epiki</span>
+          </button>
           <button
             className="icon-btn"
             onClick={() => {
@@ -11672,14 +11825,17 @@ export default function App() {
         {/* Liczniki pod samym naglowkiem, nad zakresem i filtrami: licza cala grupe,
             wiec stoja ponad tym, co pasek nizej zaweza. */}
         {showCounters && (viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
-          <CountersBar
-            defs={counterDefs.filter((d) => !hiddenCounters.includes(d.key))}
-            values={counterValues}
-            pending={counterPending}
-            prev={counterPrev}
-            active={card}
-            onPick={pickCard}
-          />
+          <>
+            <TilesBar
+              groups={groupedTiles(tilesCfg)}
+              values={tileValues}
+              prev={counterPrev}
+              activeId={activeTileId}
+              onPick={pickTile}
+              onAdd={() => setTilesOpen('new')}
+              onManage={() => setTilesOpen('manage')}
+            />
+          </>
         )}
 
         {/* Zakres jest zawsze na wierzchu — wyjscie poza aktywny sprint to jedno klikniecie. */}
@@ -11692,9 +11848,9 @@ export default function App() {
           przelaczeniu widoku — wygaszamy go i odcinamy od klikniec.
         */}
         <div
-          className={`scopebar${viewMode === 'charts' ? ' scopebar-locked' : ''}`}
-          title={viewMode === 'charts' ? 'Na wykresach te ustawienia nic nie zmieniają' : undefined}
-          aria-disabled={viewMode === 'charts' || undefined}
+          className={`scopebar${viewMode === 'charts' || viewMode === 'summary' ? ' scopebar-locked' : ''}`}
+          title={viewMode === 'charts' || viewMode === 'summary' ? 'W tym widoku te ustawienia nic nie zmieniają' : undefined}
+          aria-disabled={viewMode === 'charts' || viewMode === 'summary' || undefined}
         >
           {/*
             Przezroczysta warstwa na czas wykresow. Sam pasek ma odciete klikanie,
@@ -11719,10 +11875,7 @@ export default function App() {
             scopes={scopes}
             counts={scopeCounts}
             activeSprint={activeSprint}
-            onPick={(s) => {
-              setCard(null);
-              setScope(s);
-            }}
+            onPick={setScope}
             blokada={blokadaZakresu}
           />
 
@@ -11795,11 +11948,26 @@ export default function App() {
           {/* Chipy filtrow (przewijane POZIOMO), a TUZ ZA NIMI „+ Filtr" — dodawanie
               dopisuje kolejny chip na koncu, wiec przycisk stoi tam, gdzie pojawi sie efekt. */}
           {anyFilter(filters) && (
+            <DndContext sensors={sensors} onDragEnd={onChipDragEnd}>
             <ScrollX onSpare={onChipsSpare}>
               {filters
                 .filter((c) => c.values.length)
-              .map((c) => (
-                <div className="filter-chip" key={c.id}>
+              .map((c, i, vis) => (
+                <Fragment key={c.id}>
+                {i > 0 && (
+                  <button
+                    className={`filter-join${c.or && c.or === vis[i - 1].or ? ' filter-join-or' : ''}`}
+                    title={
+                      c.or && c.or === vis[i - 1].or
+                        ? 'LUB — wystarczy jeden z tych warunków. Kliknij, żeby rozdzielić (ORAZ).'
+                        : 'ORAZ — oba warunki naraz. Kliknij, żeby zamienić na LUB.'
+                    }
+                    onClick={() => toggleJoinCond(c.id)}
+                  >
+                    {c.or && c.or === vis[i - 1].or ? 'LUB' : 'ORAZ'}
+                  </button>
+                )}
+                <DraggableChip id={c.id} className={`filter-chip${c.or ? ' filter-chip-in-or' : ''}`}>
                   <button
                     className="filter-chip-main filter-chip-opbtn"
                     title="Zmień operator"
@@ -11856,9 +12024,11 @@ export default function App() {
                   >
                     <CloseIcon />
                   </button>
-                </div>
+                </DraggableChip>
+                </Fragment>
               ))}
             </ScrollX>
+            </DndContext>
           )}
 
           <button
@@ -11898,7 +12068,24 @@ export default function App() {
           onDragCancel={() => setDraggingId(null)}
         >
         {viewMode === 'charts' ? (
-          <Dashboard groupId={groupId} people={people} />
+          <Dashboard
+            groupId={groupId}
+            people={people}
+            team={team}
+            onOpenTeam={() => setTeamOpen(true)}
+          />
+        ) : viewMode === 'summary' ? (
+          <SprintSummary
+            sprint={activeSprint}
+            tasks={tasks}
+            workStageIds={workStageIds}
+            epicName={(id) => (id === null ? 'Bez epika' : (epicNames.get(id)?.name ?? `#${id}`))}
+            now={now}
+            teamCapacity={teamCapacity}
+            capacityTotal={summaryCapacity.total}
+            capacitySource={summaryCapacity.source}
+            onOpen={setOpenId}
+          />
         ) : viewMode === 'planning' ? (
           /*
            * Planowanie dostaje zadania PO filtrach i wyszukiwaniu — dzieki temu
@@ -11919,6 +12106,9 @@ export default function App() {
             rejestrTasks={planTasks}
             activeSprint={activeSprint}
             nextSprint={nextSprint}
+            etapyWToku={etapyWToku}
+            team={team}
+            onOpenTeam={() => setTeamOpen(true)}
             onCreateSprint={nastepnySprint && me !== null ? zalozSprint : undefined}
             lastDone={lastDone}
             people={people}
@@ -11968,6 +12158,7 @@ export default function App() {
                 selected={openId === t.id}
                 busy={pending.has(t.id)}
                 depth={0}
+                progress={parentProgress(childrenByParent.get(t.id))}
                 childCount={0}
                 hiddenSubCount={childStats.get(t.id)?.hidden ?? 0}
                 elsewhereSubCount={0}
@@ -12140,6 +12331,7 @@ export default function App() {
                       selected={openId === t.id}
                       busy={pending.has(t.id)}
                       depth={depth}
+                      progress={parentProgress(childrenByParent.get(t.id))}
                       childCount={visibleKids}
                       hiddenSubCount={childStats.get(t.id)?.hidden ?? 0}
                       elsewhereSubCount={(childStats.get(t.id)?.inFilter ?? 0) - visibleKids}
@@ -12171,7 +12363,7 @@ export default function App() {
                         setMenu({ taskId: t.id, targets: targetsFor(t.id), anchor });
                       }}
                       onTag={(name) => toggleTag(name)}
-                    />
+                          />
                           ))}
                       </DropZone>
                     );
@@ -12498,16 +12690,10 @@ export default function App() {
             scope,
             mine: onlyMine,
             unassigned: withUnassigned,
-            done: showDone,
             tint: listTint,
             deadline: deadlineLook,
             empty: showEmpty,
             counters: showCounters,
-            counterTiles: counterDefs.map((d) => ({
-              key: d.key,
-              label: d.label,
-              shown: !hiddenCounters.includes(d.key),
-            })),
             filtersOn: anyFilter(filters),
             theme,
             font,
@@ -12533,20 +12719,10 @@ export default function App() {
             scope: setScope,
             mine: () => setOnlyMine((v) => !v),
             unassigned: () => setWithUnassigned((v) => !v),
-            done: () => setShowDone((v) => !v),
             tint: setListTint,
             deadline: setDeadlineLook,
             empty: () => setShowEmpty((v) => !v),
-            /* Schowane karty nie zostawiaja wybranej — nie byloby jak z niej wyjsc. */
-            counters: () => {
-              setShowCounters((v) => !v);
-              setCard(null);
-            },
-            /* Schowanie wybranej karty wychodzi z jej widoku — jak przy schowaniu wszystkich. */
-            counterTile: (key) => {
-              setHiddenCounters((h) => (h.includes(key) ? h.filter((k) => k !== key) : [...h, key]));
-              if (card === key) setCard(null);
-            },
+            counters: () => setShowCounters((v) => !v),
             toggleColumn,
             clearFilters: () => setFilters(EMPTY_FILTERS),
             reload: () => void reload(),
@@ -12581,6 +12757,29 @@ export default function App() {
             setHistOpen(false);
             setHistFocus(null);
           }}
+        />
+      )}
+      {manageOpen && (
+        <ManageModal
+          tasks={tasks}
+          epics={epics}
+          groupId={groupId}
+          initialTab={manageOpen}
+          onChanged={() => void reload(true)}
+          onClose={() => setManageOpen(null)}
+        />
+      )}
+
+      {teamOpen && (
+        <TeamModal team={team} people={people} now={now} onChange={setTeam} onClose={() => setTeamOpen(false)} />
+      )}
+      {tilesOpen && (
+        <TilesModal
+          cfg={tilesCfg}
+          current={{ scope: scopePref, filters: toTileFilters(filters), onlyMine, showDone }}
+          startNew={tilesOpen === 'new'}
+          onChange={setTilesCfg}
+          onClose={() => setTilesOpen(null)}
         />
       )}
       {gapPrompt && (

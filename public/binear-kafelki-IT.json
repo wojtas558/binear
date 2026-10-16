@@ -1,0 +1,290 @@
+{
+  "binearTiles": 1,
+  "groups": [
+    {
+      "id": "gmv51m8wr1",
+      "name": "POZA SPRINTEM"
+    },
+    {
+      "id": "gmv52ixzd4",
+      "name": "SPRINT"
+    },
+    {
+      "id": "gmv52vhna1",
+      "name": "BEZ GRUPY",
+      "hideCaption": true
+    },
+    {
+      "id": "gmv52nkm66",
+      "name": "POZA SUMĄ"
+    }
+  ],
+  "tiles": [
+    {
+      "id": "tmv51m8wr2",
+      "name": "Do wywiadu",
+      "scope": "outside",
+      "filters": [
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "DO-WYWIADU"
+          ],
+          "or": "g4"
+        },
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "\u0000"
+          ],
+          "or": "g4"
+        },
+        {
+          "field": "kind",
+          "op": "isNot",
+          "values": [
+            "parent"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "orange",
+      "icon": "layers",
+      "group": "gmv51m8wr1"
+    },
+    {
+      "id": "tmv51oqne3",
+      "name": "Czeka na odpowiedź",
+      "scope": "outside",
+      "filters": [
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "OCZEKUJE-NA-ODPOWIEDZ"
+          ]
+        },
+        {
+          "field": "answered",
+          "op": "is",
+          "values": [
+            "no"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "#e879a6",
+      "icon": "history",
+      "group": "gmv51m8wr1"
+    },
+    {
+      "id": "tmv52czwp1",
+      "name": "Do analizy odpowiedzi",
+      "scope": "outside",
+      "filters": [
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "OCZEKUJE-NA-ODPOWIEDZ"
+          ]
+        },
+        {
+          "field": "answered",
+          "op": "is",
+          "values": [
+            "yes"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "amber",
+      "icon": "comment",
+      "group": "gmv51m8wr1"
+    },
+    {
+      "id": "tmv52ec3t2",
+      "name": "Do wyceny",
+      "scope": "outside",
+      "filters": [
+        {
+          "field": "points",
+          "op": "is",
+          "values": [
+            "\u0000"
+          ],
+          "or": "g5"
+        },
+        {
+          "field": "tag",
+          "op": "noneOf",
+          "values": [
+            "DZIAL",
+            "RDZEN",
+            "CIAGLOSC"
+          ],
+          "or": "g5"
+        },
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "DO-STARTU"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "purple",
+      "icon": "hash",
+      "group": "gmv51m8wr1"
+    },
+    {
+      "id": "tmv52fyzo3",
+      "name": "Gotowe do startu",
+      "scope": "outside",
+      "filters": [
+        {
+          "field": "points",
+          "op": "isNot",
+          "values": [
+            "\u0000"
+          ]
+        },
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "DO-STARTU"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "teal",
+      "icon": "check",
+      "group": "gmv51m8wr1"
+    },
+    {
+      "id": "tmv52ixzd5",
+      "name": "Sprint",
+      "scope": "sprint",
+      "filters": [
+        {
+          "field": "stage",
+          "op": "isNot",
+          "values": [
+            "Wdrożone",
+            "Pull Request",
+            "Do zatwierdzenia"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "green",
+      "icon": "calendar",
+      "group": "gmv52ixzd4"
+    },
+    {
+      "id": "tmv52nkm67",
+      "name": "Odłożone",
+      "scope": "all",
+      "filters": [
+        {
+          "field": "status",
+          "op": "is",
+          "values": [
+            "6"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "grey",
+      "icon": "layers",
+      "group": "gmv52nkm66"
+    },
+    {
+      "id": "tmv52ov5u1",
+      "name": "Koncepcja",
+      "scope": "all",
+      "filters": [
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "KONCEPCJA"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "blue",
+      "icon": "bulb",
+      "group": "gmv52nkm66"
+    },
+    {
+      "id": "tmv52qbrs2",
+      "name": "Foldery",
+      "scope": "outside",
+      "filters": [
+        {
+          "field": "kind",
+          "op": "is",
+          "values": [
+            "parent"
+          ]
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "#8b949e",
+      "icon": "subtask",
+      "group": "gmv52nkm66"
+    },
+    {
+      "id": "tmv52vhna2",
+      "name": "Ważne",
+      "scope": "all",
+      "filters": [
+        {
+          "field": "priority",
+          "op": "is",
+          "values": [
+            "2"
+          ],
+          "or": "g11"
+        },
+        {
+          "field": "tag",
+          "op": "anyOf",
+          "values": [
+            "BUG"
+          ],
+          "or": "g11"
+        }
+      ],
+      "onlyMine": false,
+      "showDone": false,
+      "measure": "count",
+      "color": "red",
+      "icon": "flame",
+      "group": "gmv52vhna1"
+    }
+  ]
+}

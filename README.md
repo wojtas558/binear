@@ -109,6 +109,48 @@ with names (`{"243":{"id":243,"title":"EMX"}}`), so no dictionary query is neede
 Clicking a tag filters the list (shown in the scope bar, cleared with ✕). Tags are
 also a palette section with usage counts.
 
+## Sprint summary view
+
+The fifth view mode (key `5`, "Podsumowanie sprintu") shows the **active sprint** the way it is discussed
+at the Priority Council, from live data — so it works *before* the sprint is closed (closing moves the
+undelivered tasks to the next sprint and the picture is gone):
+
+- five tiles: **delivered**, **waiting for deployment** (PR), **in progress**, **waiting**, **on hold** — SP and
+  number of tasks — plus one proportional bar and a one-line summary (finished = delivered + PR);
+- a table **per department** (epic): totals, a bar and the SP per state; unfold a department to see its
+  **topics** (parent tasks), each with its own bar — a click opens the task;
+- only leaf tasks are counted (a parent with subtasks in the sprint is a folder, its points sit on the
+  subtasks), a topic and a department come from the root task; tasks without SP are counted but add no
+  points. State comes from the Bitrix status (5 delivered, 4 PR, 6 on hold, 3 or the "In progress" stage in
+  progress, the rest waiting). Scope, filters and search do not apply here.
+
+## Custom tiles
+
+Besides the built-in counters (which encode the IT task process) you can build your own tiles — useful for any
+department. A tile is a **saved view**: a scope (active sprint / outside / all), the filters from the filter bar,
+and the *only mine* / *show completed* switches, plus how it looks:
+
+- **name, colour (8 swatches), icon (15)**, and what it counts — **tasks** or the **sum of SP**;
+- a **group** with its own caption; groups and tiles can be reordered (↑ ↓) and moved between groups;
+- click a tile to apply its view, click it again to clear the filters; a tile is highlighted while the list
+  shows exactly its view.
+
+Create one with the **+** button (it saves the *current* view) and manage them with the **pencil** (rename, recolour,
+regroup, reorder, replace a tile's filters with the current view, delete). Colours: 8 swatches or any colour from the
+colour picker; 50 icons. Each group caption shows the **sum of its tiles** (tasks and SP) and the **change against the
+previous day**, like the built-in set; every tile shows its own change too (history is kept per browser).
+Tiles are separate views and may overlap, so a group sum is the sum of its tiles, not the number of distinct tasks.
+
+The configuration lives in this browser (`localStorage`, key `binear.tiles.v1`). **Export / import** a JSON file
+to move a department's set to another browser; an import *adds* tiles and groups (new ids), it never overwrites.
+
+## Filters added for tiles
+
+Two new filter dimensions (also usable on the filter bar): **Odpowiedź w czacie** (yes — someone answered after our
+questions / no; read from the task chats, so it is empty until they load) and **Rodzaj zadania** (parent with an open
+subtask / subtask / plain). Together with the existing *no estimate*, *no epic*, *no tags*, *no deadline* and
+*unassigned* values they cover "missing X" tiles.
+
 ## Counters
 
 A row of cards under the header answers "what is there to do in the register",
@@ -120,8 +162,8 @@ following the steps of the task audit. Left to right:
 | **To interview** | outside the sprint, tagged `DO-WYWIADU` **or with no readiness tag at all** (new tasks, or ones tagged only `BUG`, `Wysoki`…) |
 | **Waiting for an answer** | outside the sprint, tagged `OCZEKUJE-NA-ODPOWIEDZ`, nobody outside IT has answered yet |
 | **Answers to read** | the same tag, and someone outside IT answered with substance after our last round of questions |
-| **To estimate** | outside the sprint, `DO-STARTU`, but **missing any of the three**: story points, a benefit category tag, or a payback period |
-| **Ready to start** | outside the sprint, `DO-STARTU`, with **all three** — can be pulled into a sprint |
+| **To estimate** | outside the sprint, `DO-STARTU`, but **not complete**: no pool (`CIAGLOSC` / `RDZEN` / `DZIAL`), no story points, or — per pool — no category and payback period (`RDZEN`: no `WARTOŚĆ` message) |
+| **Ready to start** | outside the sprint, `DO-STARTU`, with a pool, story points and the value its pool asks for — can be pulled into a sprint |
 | **In sprint** | every task of the active sprint, done ones too, with the SP sum |
 | **Ważne** (important) *(stands alone, no group caption, between "Sprint" and "Poza sumą")* | open tasks with the **flame** (Bitrix high priority) **or** the `BUG` tag, in the sprint or outside it, deferred excluded — each task counted once |
 | **Concept** *(in "Poza sumą")* | open tasks tagged `KONCEPCJA`, in the sprint or outside it — ideas too early to count, so outside the sprint they are in **no** state card (an important one among them still shows under Ważne) |
@@ -142,61 +184,61 @@ clicking it lists them.
 The numbers are **global**: the whole group, regardless of scope, `Only mine`,
 `Completed` and filters. The point is to see whether the register holds 200 or 220
 tasks, not how many the current view shows. Clicking a card replaces the list
-with exactly the tasks it counts (search still applies); clicking it again, or
-changing scope, filters or toggles, returns to the normal view. Tag names match
+with exactly the tasks it counts (search still applies); filters you add afterwards (epic,
+tag, ...) narrow the card instead of leaving it; clicking it again, or changing scope
+or toggles, returns to the normal view. Tag names match
 case-insensitively, as in Bitrix.
 
-**What "ready" means.** A `DO-STARTU` task needs three things to be ready to start, and all
-three are read from the task list itself — no chat requests for them:
+**What "ready" means.** A `DO-STARTU` task is ready to start when it has a **pool**, an
+**estimate**, and the value that its pool asks for:
 
+- **a pool** — exactly one of `CIAGLOSC` (continuity), `RDZEN` (core) or `DZIAL` (department).
+  Mandatory: **without a pool a task is never ready** and sits on "To estimate", reconnaissance
+  included. If a task carries two, the first in that order counts;
 - **story points** (the estimate);
-- **a benefit category** — one tag out of `BUG`, `OSZCZEDNOSC`, `PRZYCHOD`, `RYZYKO`,
-  `ANALITYKA`, `UTRZYMANIE`, `WYMOG`, `STRATEGIA` (a tag outside this list, e.g. `Wysoki`, is not a category);
-- **a payback period** — one of the tags `ZWROT-3` (up to 3 months), `ZWROT-6` (3–6),
-  `ZWROT-12` (6–12) or `ZWROT-12+` (over 12, or "can't be counted"). The number is the band's
-  upper bound. The tag is a copy of the band written into the task's `WARTOŚĆ` chat message by
-  the value script, so a correction is a re-run that swaps the tag. If a task somehow carries two
-  of them, the worst one counts.
+- **`CIAGLOSC` and `DZIAL`** — a benefit category (one tag out of `BUG`, `OSZCZEDNOSC`,
+  `PRZYCHOD`, `RYZYKO`, `ANALITYKA`, `UTRZYMANIE`, `WYMOG`; a tag outside this list, e.g.
+  `Wysoki` or `STRATEGIA`, is not a category) and a payback period — one of `ZWROT-3` (up to 3
+  months), `ZWROT-6` (3–6), `ZWROT-12` (6–12) or `ZWROT-12+` (over 12, or "can't be counted"). The
+  tag is a copy of the band written into the task's `WARTOŚĆ` chat message by the value script. If a
+  task carries two of them, the worst one counts. `WYMOG` (law, contract, a counterparty) has no
+  payback period but **must have a deadline** (Bitrix's own `Termin` field);
+- **`RDZEN`** — a `WARTOŚĆ` message in the task chat (its first line can be `WARTOŚĆ: rdzeń`,
+  `WARTOŚĆ: zwrot …` or `WARTOŚĆ: wymóg`). Category and `ZWROT` are **not** required, and the tag
+  alone doesn't complete it — the chat does.
 
-Two categories have no payback period:
+The old `STRATEGIA` tag is now an ordinary tag outside every list: it completes nothing and has no
+place in the sort.
 
-- `WYMOG` (law, contract, a counterparty) has a deadline instead of a ranking: it needs **no
-  payback period but must have a deadline** (Bitrix's own `Termin` field).
-- `STRATEGIA` (strategically important, can't be honestly counted in time or money) has **no payback
-  tag either**; instead it needs the one-sentence justification in the task's `WARTOŚĆ` chat
-  message — so the tag alone doesn't complete it, the chat does. Only the IT manager or the board
-  gives it, never the requesting department.
-
-**Reconnaissance is the one exception to the category.** A task the estimate script marked as
-reconnaissance or a bug analysis (`--rozpoznanie`: up to 4 h, its result is the estimate and the
-value of the real task) is ready with just an estimate — no category, no payback tag. It is
+**Reconnaissance** (up to 4 h, `--rozpoznanie`: its result is the estimate and the value of the real
+task) is ready with just a pool and an estimate — no category, no payback tag, no `WARTOŚĆ`. It is
 recognised the way the audit does it: by the line in its `WYCENA` chat message (`Rozpoznanie — bez
 okresu zwrotu`, or the older opening of the justification: Rozpoznanie / Weryfikacja / Przegląd kodu
 / Sprawdzenie), or — with no chat read at all — by a title with "rozpoznanie" or "weryfikacja" on an
 estimate of up to 4 h.
 
-**Chats are read for two things only**, and only for open `DO-STARTU` tasks outside the sprint whose
-completeness a chat decides: tasks up to 4 h without a complete set of tags (reconnaissance) and
-`STRATEGIA` tasks (justification). Everything else — category, payback, deadline — comes from the
-task list. While those chats load, both cards show `…` rather than a wrong number, and if chats can't
-be read at all (no `im` scope) they stay on `…`.
+**Chats are read for two things only**, and only for open `DO-STARTU` tasks with a pool, outside the
+sprint, whose completeness a chat decides: tasks up to 4 h without a complete set of tags
+(reconnaissance) and `RDZEN` tasks (the `WARTOŚĆ` message). Everything else comes from the task list.
+While those chats load, both cards show `…` rather than a wrong number, and if chats can't be read at
+all (no `im` scope) they stay on `…`.
 
-Missing any of the above puts the task on **To estimate**, not **Ready to start**.
+Missing any of the above (pool included) puts the task on **To estimate**, not **Ready to start**.
 
 **Planning: sort order.** The default stack is, in this order: the **Bitrix priority (flame)**,
-**`STRATEGIA`**, **payback ascending**, the `Wysoki` tag, and story points descending.
+the **pool**, the `Wysoki` tag, **payback ascending**, and story points descending.
 
-- The flame means an outage (the company can't work), so nothing overtakes it — not even `STRATEGIA`.
-- `STRATEGIA` is next: the board decides its order, so it doesn't mix with the rest (several of them
-  fall through to the next levels).
-- Then **payback** sets the queue — `ZWROT-3`, `ZWROT-6`, `ZWROT-12`, `ZWROT-12+`, with `WYMOG`
-  first (nearest deadline first) and tasks without a payback tag last. A `ZWROT-3` task without
-  `Wysoki` comes before a `ZWROT-12` one that has it.
-- `Wysoki` only decides ties **within** the same payback band, and story points break what is left.
+- The flame means an outage (the company can't work), so nothing overtakes it — not even a pool.
+- The **pool** goes next, in the order `CIAGLOSC` → `RDZEN` → `DZIAL` → no pool, so one pool is
+  worked through before the next.
+- Within a pool `Wysoki` comes first, then **payback** — `ZWROT-3`, `ZWROT-6`, `ZWROT-12`,
+  `ZWROT-12+`, with `WYMOG` first (nearest deadline first) and tasks without a payback tag last.
+  `RDZEN` tasks usually have no payback, so there story points (or the manual order) decide.
+- Story points descending break what is left.
 
-Every level is a sort level (**Tag STRATEGIA**, **Okres zwrotu**, **Tag Wysoki**…) you can reorder,
+Every level is a sort level (**Pula**, **Tag Wysoki**, **Okres zwrotu**…) you can reorder,
 reverse or drop from the sort menu. Sorting hides nothing: the register still shows every
-`DO-STARTU` task, also those with no payback worked out yet.
+`DO-STARTU` task, also those with no pool or payback worked out yet.
 
 The sort is saved in the browser as a whole stack, so someone who never touched it would keep the old
 default for good. A saved stack that is exactly one of the old defaults is replaced by the new one; a
@@ -237,7 +279,15 @@ the tooltip. Numbers are rounded to whole values; the colour is computed from th
   on the Monday at 9:00, so that Monday's 8–9 counts as the last hour. Holidays are
   not subtracted.
 - **Capacity** = hours × developers (1 h = 1 SP per person). Developers come from
-  `BX_CAPACITY_DEVS` (default 4).
+  `BX_CAPACITY_DEVS` in full-time equivalents, fractions allowed (default 3.5: three full-time
+  developers plus one half-time).
+- **Team and weekly schedule.** Instead of a fixed number of developers you can describe the team in
+  the app: planning view → **Options → Team and schedule…**. Pick people, set each one's FTE (1, 0.75,
+  0.5, 0.25) and untick the days someone is away (everyone is present Mon–Fri by default, so only
+  exceptions are stored). Capacity = FTE × 8 h per ticked working day; with a team entered it replaces
+  `BX_CAPACITY_DEVS` in the countdown chip and, when the SP-per-sprint field is empty, becomes the
+  planning limit (from now, or from the sprint start, until its end). An empty team keeps the old
+  behaviour. The configuration lives only in this browser (`localStorage`).
 - **Waiting** = tasks of the active sprint on the `NEW` stage that have an estimate.
   Tasks in progress are not counted: we don't know how far along they are.
 - **Left out of the limit**: tasks assigned to the accounts in

@@ -16,6 +16,8 @@ export function useNow(intervalMs = 60_000): Date {
 }
 
 /* Pełne liczby: godziny i punkty pokazujemy bez ułamka — kolor liczy się z dokładnych wartości. */
+/** Etaty z przecinkiem: 3,5 zamiast 3.5 (zaokraglone do dwoch miejsc). */
+const etaty = (n: number) => n.toLocaleString("pl-PL", { maximumFractionDigits: 2 });
 const num = (n: number) => n.toLocaleString('pl-PL', { maximumFractionDigits: 0 });
 
 /** Kolor dopisku w dymku — te same trzy barwy co sam chip. */
@@ -45,7 +47,7 @@ export function CapacityChip({ cap }: { cap: SprintCapacity }) {
       label="Do końca sprintu"
       value={
         <>
-          {num(cap.hoursLeft)} h roboczych × {cap.devs} os. = {num(cap.capacity)} SP do zrobienia
+          {num(cap.hoursLeft)} h roboczych × {etaty(cap.devs)} os. = {num(cap.capacity)} SP do zrobienia
           <br />
           Czeka na start: {num(cap.demand)} SP
           {cap.excluded > 0 && (

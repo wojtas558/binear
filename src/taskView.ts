@@ -180,6 +180,15 @@ export const isFlame = (t: { priority: string }): boolean => t.priority === '2';
 export const hasBugTag = (t: { tags: string[] }): boolean => t.tags.some((g) => g.toUpperCase() === 'BUG');
 
 /** Zadanie jest wazne: plomien Bitriksa albo tag BUG. */
+/**
+ * Zadanie malo wazne wg macierzy Eisenhowera: ma tag D i zaden z A, B, C. Takie zadania wyszarzamy na liscie
+ * i na tablicy, zeby nie odciagaly wzroku od reszty.
+ */
+export const isLowPriority = (t: { tags: string[] }): boolean => {
+  const letters = new Set(t.tags.map((g) => g.trim().toUpperCase()));
+  return letters.has('D') && !letters.has('A') && !letters.has('B') && !letters.has('C');
+};
+
 export const isImportant = (t: { priority: string; tags: string[] }): boolean => isFlame(t) || hasBugTag(t);
 
 /** Tagi bez BUG — ten tag zastepuje robak przed tytulem, wiec drugi raz jako etykieta zbedny. */

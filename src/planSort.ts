@@ -7,7 +7,7 @@
  * byl niewidoczny w kodzie, a widoczny dopiero w kolejnosci wierszy.
  */
 import type { Task } from './bitrix';
-import { hasTag, TAG_STRATEGIA } from './counters';
+import { pula, TAGS_PULA } from './counters';
 
 export type Cmp = (a: Task, b: Task) => number;
 
@@ -34,38 +34,71 @@ export function stackComparator(levels: Cmp[], tail: Cmp): Cmp {
   };
 }
 
+/** Story pointy w wybranym kierunku; zadania bez wyceny zawsze na koncu, takze przy malejacym. */
+const spComparator =
+  (dir: 'asc' | 'desc'): Cmp =>
+  (a, b) => {
+    const x = a.storyPoints;
+    const y = b.storyPoints;
+    const missA = x == null || x === 0;
+    const missB = y == null || y === 0;
+    if (missA !== missB) return missA ? 1 : -1;
+    const d = (x ?? 0) - (y ?? 0);
+    return dir === 'asc' ? d : -d;
+  };
+
 /** Termin zadania jako czas; brak terminu idzie na koniec (najdalej). */
 const deadlineTime = (t: Task): number => {
   const ms = t.deadline ? Date.parse(t.deadline) : NaN;
   return Number.isNaN(ms) ? Number.MAX_SAFE_INTEGER : ms;
 };
 
-/** Ma tag STRATEGIA — ranga 0, inaczej 1. Strategia idzie na sam poczatek, przed wszystkim innym. */
-const strategiaRank = (t: Task) => (hasTag(t, TAG_STRATEGIA) ? 0 : 1);
+/** Pula: CIAGLOSC, RDZEN, DZIAL (w tej kolejnosci), bez puli na koncu. */
+const pulaRank = (t: Task) => {
+  const p = pula(t);
+  return p === null ? TAGS_PULA.length : TAGS_PULA.indexOf(p);
+};
+
+/**
+ * Macierz Eisenhowera: tag A, B, C albo D (ranga 0–3), bez tagu na koncu. Przy kilku tagach liczy sie najwazniejszy.
+ * Tagi to dokladnie jedna litera — „BUG" ani „B2B" nie sa macierza.
+ */
+export const TAGS_MACIERZ = ['A', 'B', 'C', 'D'] as const;
+export const macierzRank = (t: Task): number => {
+  const ranks = t.tags.map((g) => TAGS_MACIERZ.indexOf(g.trim().toUpperCase() as (typeof TAGS_MACIERZ)[number])).filter((i) => i >= 0);
+  return ranks.length ? Math.min(...ranks) : TAGS_MACIERZ.length;
+};
 
 /** Ma tag „Wysoki" (bez wzgledu na wielkosc liter) — ranga 0, inaczej 1. */
 const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki') ? 0 : 1);
 
 /**
- * Domyslna kolejnosc waznosci:
+ * Domyslna kolejnosc waznosci (macierz Eisenhowera):
  *   1. priorytet Bitriksa — plomien to awaria, firma nie moze pracowac, wiec nic go nie wyprzedza,
- *   2. STRATEGIA (o jej kolejnosci decyduje rada, wiec nie miesza sie z reszta),
- *   3. okres zwrotu rosnaco (ZWROT-3 przed ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu
- *      na koncu) — to on ustawia kolejke,
- *   4. tag „Wysoki" — dopiero rozstrzyga remis w obrebie tego samego zwrotu, a nie przeskakuje
- *      zadania o lepszym zwrocie,
- *   5. story pointy malejaco.
+ *   2. macierz: tag A, B, C, D (bez tagu na koncu),
+ *   3. okres zwrotu rosnaco (ZWROT-3 przed ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu na koncu),
+ *   4. story pointy rosnaco — mniejsze pierwsze, bez wyceny na koncu.
+ * Pula i tag „Wysoki" zostaja dostepne jako poziomy, tylko nie sa juz w domyslnym stosie.
  */
 export const PLAN_SORT_DOMYSLNY: PlanSortLevel[] = [
   { by: 'priority', dir: 'asc' },
-  { by: 'strategia', dir: 'asc' },
+  { by: 'macierz', dir: 'asc' },
   { by: 'zwrot', dir: 'asc' },
+  { by: 'sp', dir: 'asc' },
+];
+
+/** Domyslny stos z pulami (przed macierza) — kto go nie ruszal, dostaje nowy. */
+const DOMYSLNY_Z_PULA: PlanSortLevel[] = [
+  { by: 'priority', dir: 'asc' },
+  { by: 'pula', dir: 'asc' },
   { by: 'wysoki', dir: 'asc' },
+  { by: 'zwrot', dir: 'asc' },
   { by: 'sp', dir: 'desc' },
 ];
 
 /** Dawne domyslne stosy — kto ich nie ruszal, dostaje nowy domyslny, a nie zamrozony stary. */
 const STARE_DOMYSLNE: PlanSortLevel[][] = [
+  DOMYSLNY_Z_PULA,
   [
     { by: 'priority', dir: 'asc' },
     { by: 'wysoki', dir: 'asc' },
@@ -84,6 +117,13 @@ const STARE_DOMYSLNE: PlanSortLevel[][] = [
     { by: 'zwrot', dir: 'asc' },
     { by: 'sp', dir: 'desc' },
   ],
+  [
+    { by: 'priority', dir: 'asc' },
+    { by: 'strategia', dir: 'asc' },
+    { by: 'zwrot', dir: 'asc' },
+    { by: 'wysoki', dir: 'asc' },
+    { by: 'sp', dir: 'desc' },
+  ],
 ];
 
 const takSamo = (a: PlanSortLevel[], b: PlanSortLevel[]) =>
@@ -95,7 +135,11 @@ const takSamo = (a: PlanSortLevel[], b: PlanSortLevel[]) =>
  */
 export function migratePlanSort(saved: PlanSortLevel[] | undefined): PlanSortLevel[] | undefined {
   if (!saved) return undefined;
-  return STARE_DOMYSLNE.some((s) => takSamo(saved, s)) ? PLAN_SORT_DOMYSLNY : saved;
+  if (STARE_DOMYSLNE.some((s) => takSamo(saved, s))) return PLAN_SORT_DOMYSLNY;
+  /* Wlasny stos: poziom „strategia" (tag STRATEGIA juz nic nie znaczy) zamieniamy na „pula" w tym samym miejscu. */
+  return saved.some((l) => l.by === 'strategia')
+    ? saved.map((l) => (l.by === 'strategia' ? { ...l, by: 'pula' } : l))
+    : saved;
 }
 
 /**
@@ -133,16 +177,19 @@ export function planComparator(
     const f: Cmp =
       lvl.by === 'stage'
         ? (a, b) => deps.stageRank(a) - deps.stageRank(b)
-        : lvl.by === 'strategia'
-          ? (a, b) => strategiaRank(a) - strategiaRank(b)
+        : lvl.by === 'pula'
+          ? (a, b) => pulaRank(a) - pulaRank(b)
           : lvl.by === 'wysoki'
           ? (a, b) => wysokiRank(a) - wysokiRank(b)
           : lvl.by === 'sp'
-            ? (a, b) => (a.storyPoints ?? 0) - (b.storyPoints ?? 0)
-            : lvl.by === 'zwrot'
+            ? spComparator(lvl.dir)
+            : lvl.by === 'macierz'
+              ? (a, b) => macierzRank(a) - macierzRank(b)
+              : lvl.by === 'zwrot'
               ? byPayback
               : (a, b) => deps.axis(lvl.by, a, b);
-    return lvl.dir === 'asc' ? f : (a, b) => -f(a, b);
+    /* SP ma wlasny kierunek (zadania bez wyceny zawsze na koncu), wiec nie przechodzi przez odwrocenie. */
+    return lvl.by === 'sp' || lvl.dir === 'asc' ? f : (a, b) => -f(a, b);
   });
 
   /* Remis po CALYM stosie, tak samo jak w liscie: moje wyzej, potem po id malejaco. */

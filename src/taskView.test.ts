@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasBugTag, isImportant, isFlame, podzielNaTrafienia, relativeAge, tagCounts, tagsForWidth, withoutBugTag } from './taskView';
+import { hasBugTag, isImportant, isLowPriority, isFlame, podzielNaTrafienia, relativeAge, tagCounts, tagsForWidth, withoutBugTag } from './taskView';
 
 /** Skrot do czytelnych asercji: „ab[cd]ef" znaczy, ze `cd` jest podswietlone. */
 const zapis = (text: string, fraza: string) =>
@@ -162,5 +162,15 @@ describe('relativeAge', () => {
 
   it('ujemny wiek (zegar cofnięty) nie wychodzi poniżej zera', () => {
     expect(relativeAge(-30_000)).toBe('przed chwilą');
+  });
+});
+
+describe('isLowPriority (macierz: tag D bez A, B, C)', () => {
+  it('samo D to malo wazne; D z wazniejsza litera albo bez D nie', () => {
+    expect(isLowPriority({ tags: ['D'] })).toBe(true);
+    expect(isLowPriority({ tags: ['d', 'ZWROT-3'] })).toBe(true);
+    expect(isLowPriority({ tags: ['D', 'B'] })).toBe(false);
+    expect(isLowPriority({ tags: ['BUG'] })).toBe(false);
+    expect(isLowPriority({ tags: [] })).toBe(false);
   });
 });

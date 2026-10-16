@@ -132,7 +132,7 @@ describe('sortowanie po zwrocie', () => {
     expect(ids(tasks, zwrot, d)).toEqual([11, 10, 12, 2]);
   });
 
-  it('strategia osobnym blokiem tuz po wymogach, przed przedzialami', () => {
+  it('STRATEGIA to zwykly tag: sortowanie po zwrocie jej nie wyroznia', () => {
     const tasks = [
       task(2, { tags: ['ZWROT-3'] }),
       task(20, { tags: ['STRATEGIA'] }),
@@ -140,7 +140,7 @@ describe('sortowanie po zwrocie', () => {
       task(3, { tags: ['ZWROT-12+'] }),
       task(5),
     ];
-    expect(ids(tasks, zwrot, d)).toEqual([10, 20, 2, 3, 5]);
+    expect(ids(tasks, zwrot, d)).toEqual([10, 2, 3, 20, 5]);
   });
 
   it('w tym samym przedziale rozstrzyga kolejny poziom stosu', () => {
@@ -156,81 +156,93 @@ describe('sortowanie po zwrocie', () => {
   });
 });
 
-describe('domyslna kolejnosc planowania: plomien, strategia, zwrot, Wysoki, SP', () => {
+describe('stos z pulami: plomien, pula, Wysoki, zwrot, SP malejaco', () => {
   const d = { ...deps, paybackRank };
+  const STOS_PULA = [
+    { by: 'priority', dir: 'asc' },
+    { by: 'pula', dir: 'asc' },
+    { by: 'wysoki', dir: 'asc' },
+    { by: 'zwrot', dir: 'asc' },
+    { by: 'sp', dir: 'desc' },
+  ] as const;
 
-  it('domyslny stos to priorytet, strategia, zwrot, Wysoki, SP', () => {
-    expect(PLAN_SORT_DOMYSLNY.map((l) => l.by)).toEqual(['priority', 'strategia', 'zwrot', 'wysoki', 'sp']);
-  });
-
-  it('plomien (priorytet 2) jest nad wszystkim — takze nad strategia', () => {
+  it('plomien (priorytet 2) jest nad wszystkim — takze nad pula', () => {
     const tasks = [
-      task(1, { priority: '1', tags: ['STRATEGIA'] }),
-      task(2, { priority: '2', tags: ['ZWROT-12+'] }),
-      task(3, { priority: '1', tags: ['ZWROT-3'] }),
+      task(1, { priority: '1', tags: ['CIAGLOSC'] }),
+      task(2, { priority: '2', tags: ['DZIAL', 'ZWROT-12+'] }),
+      task(3, { priority: '1', tags: ['RDZEN'] }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1, 3]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1, 3]);
   });
 
-  it('STRATEGIA jest nad zwrotem i nad tagiem Wysoki', () => {
-    const tasks = [
-      task(1, { tags: ['Wysoki', 'ZWROT-3'] }),
-      task(2, { tags: ['ZWROT-3'] }),
-      task(3, { tags: ['STRATEGIA'] }),
-    ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 1, 2]);
-  });
-
-  it('zwrot rozstrzyga PRZED tagiem Wysoki: ZWROT-3 bez Wysoki wyprzedza ZWROT-12 z Wysoki', () => {
-    const tasks = [
-      task(1, { tags: ['Wysoki', 'ZWROT-12'] }),
-      task(2, { tags: ['ZWROT-3'] }),
-      task(3, { tags: ['Wysoki'] }),
-    ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1, 3]);
-  });
-
-  it('w obrebie tego samego zwrotu tag Wysoki idzie wyzej, potem SP malejaco', () => {
-    const tasks = [
-      task(1, { tags: ['ZWROT-6'], storyPoints: 20 }),
-      task(2, { tags: ['ZWROT-6', 'Wysoki'], storyPoints: 4 }),
-      task(3, { tags: ['ZWROT-6'], storyPoints: 8 }),
-    ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1, 3]);
-  });
-
-  it('po strategii i priorytecie porzadkuje zwrot rosnaco: ZWROT-3, 6, 12, 12+, a zadania bez zwrotu zostaja na koncu', () => {
-    const tasks = [
-      task(1, { tags: ['ZWROT-12+'] }),
-      task(2),
-      task(3, { tags: ['ZWROT-3'] }),
-      task(4, { tags: ['ZWROT-12'] }),
-      task(5, { tags: ['ZWROT-6'] }),
-    ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 5, 4, 1, 2]);
-  });
-
-  it('wymog (z terminem) idzie przed przedzialami zwrotu', () => {
+  it('pule ida kolejno: CIAGLOSC, RDZEN, DZIAL, a zadania bez puli na koncu', () => {
     const tasks = [
       task(1, { tags: ['ZWROT-3'] }),
-      task(2, { tags: ['WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
+      task(2, { tags: ['DZIAL', 'ZWROT-3'] }),
+      task(3, { tags: ['RDZEN'] }),
+      task(4, { tags: ['CIAGLOSC', 'ZWROT-12+'] }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([4, 3, 2, 1]);
   });
 
-  it('sortowanie niczego nie ukrywa — zadania bez wyliczonego zwrotu tez sa na liscie', () => {
-    const tasks = [task(1), task(2, { tags: ['ZWROT-6'] }), task(3, { tags: ['STRATEGIA'] })];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toHaveLength(3);
+  it('pula jest nad tagiem Wysoki i nad zwrotem', () => {
+    const tasks = [
+      task(1, { tags: ['DZIAL', 'Wysoki', 'ZWROT-3'] }),
+      task(2, { tags: ['RDZEN'] }),
+    ];
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1]);
   });
 
-  it('kilka strategii: kolejny poziom stosu rozstrzyga (o kolejnosci decyduje rada, nie zwrot)', () => {
-    const tasks = [task(1, { tags: ['STRATEGIA', 'ZWROT-12+'] }), task(2, { tags: ['STRATEGIA', 'ZWROT-3'] })];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
+  it('w obrebie puli tag Wysoki rozstrzyga PRZED zwrotem', () => {
+    const tasks = [
+      task(1, { tags: ['DZIAL', 'ZWROT-3'] }),
+      task(2, { tags: ['DZIAL', 'Wysoki', 'ZWROT-12'] }),
+      task(3, { tags: ['DZIAL'] }),
+    ];
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1, 3]);
   });
 
-  it('poziom strategia mozna odwrocic albo wyjac ze stosu', () => {
-    const tasks = [task(1, { tags: ['STRATEGIA'] }), task(2)];
-    expect(ids(tasks, [{ by: 'strategia', dir: 'desc' }], d)).toEqual([2, 1]);
+  it('w RDZEN bez zwrotu po Wysoki decyduja story pointy malejaco', () => {
+    const tasks = [
+      task(1, { tags: ['RDZEN'], storyPoints: 4 }),
+      task(2, { tags: ['RDZEN'], storyPoints: 20 }),
+      task(3, { tags: ['RDZEN', 'Wysoki'], storyPoints: 2 }),
+    ];
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([3, 2, 1]);
+  });
+
+  it('w obrebie tej samej puli i Wysoki zwrot rosnaco: ZWROT-3, 6, 12, 12+, a bez zwrotu na koncu', () => {
+    const tasks = [
+      task(1, { tags: ['DZIAL', 'ZWROT-12+'] }),
+      task(2, { tags: ['DZIAL'] }),
+      task(3, { tags: ['DZIAL', 'ZWROT-3'] }),
+      task(4, { tags: ['DZIAL', 'ZWROT-12'] }),
+      task(5, { tags: ['DZIAL', 'ZWROT-6'] }),
+    ];
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([3, 5, 4, 1, 2]);
+  });
+
+  it('wymog (z terminem) idzie przed przedzialami zwrotu w tej samej puli', () => {
+    const tasks = [
+      task(1, { tags: ['DZIAL', 'ZWROT-3'] }),
+      task(2, { tags: ['DZIAL', 'WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
+    ];
+    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1]);
+  });
+
+  it('sortowanie niczego nie ukrywa — zadania bez puli tez sa na liscie', () => {
+    const tasks = [task(1), task(2, { tags: ['ZWROT-6'] }), task(3, { tags: ['RDZEN'] })];
+    expect(ids(tasks, [...STOS_PULA], d)).toHaveLength(3);
+  });
+
+  it('dwie pule na jednym zadaniu: liczy sie pierwsza z listy', () => {
+    const tasks = [task(1, { tags: ['DZIAL', 'RDZEN'] }), task(2, { tags: ['CIAGLOSC', 'DZIAL'] })];
+    expect(ids(tasks, [{ by: 'pula', dir: 'asc' }], d)).toEqual([2, 1]);
+  });
+
+  it('poziom pula mozna odwrocic albo wyjac ze stosu', () => {
+    const tasks = [task(1, { tags: ['CIAGLOSC'] }), task(2)];
+    expect(ids(tasks, [{ by: 'pula', dir: 'desc' }], d)).toEqual([2, 1]);
     expect(ids(tasks, [{ by: 'sp', dir: 'desc' }], d)).toEqual([2, 1]); // remis → id malejaco
   });
 });
@@ -257,6 +269,30 @@ describe('migratePlanSort', () => {
     ).toEqual(PLAN_SORT_DOMYSLNY);
   });
 
+  it('poprzedni domyslny (strategia, zwrot, Wysoki) tez zamienia na nowy', () => {
+    expect(
+      migratePlanSort([
+        { by: 'priority', dir: 'asc' as const },
+        { by: 'strategia', dir: 'asc' as const },
+        { by: 'zwrot', dir: 'asc' as const },
+        { by: 'wysoki', dir: 'asc' as const },
+        { by: 'sp', dir: 'desc' as const },
+      ]),
+    ).toEqual(PLAN_SORT_DOMYSLNY);
+  });
+
+  it('wlasny stos z poziomem strategia dostaje pule w tym samym miejscu i kierunku', () => {
+    expect(
+      migratePlanSort([
+        { by: 'sp', dir: 'desc' as const },
+        { by: 'strategia', dir: 'desc' as const },
+      ]),
+    ).toEqual([
+      { by: 'sp', dir: 'desc' },
+      { by: 'pula', dir: 'desc' },
+    ]);
+  });
+
   it('obecny domyslny przechodzi bez zmian', () => {
     expect(migratePlanSort(PLAN_SORT_DOMYSLNY)).toEqual(PLAN_SORT_DOMYSLNY);
   });
@@ -270,5 +306,57 @@ describe('migratePlanSort', () => {
 
   it('brak zapisu → brak wartosci (wchodzi domyslny z ustawien)', () => {
     expect(migratePlanSort(undefined)).toBeUndefined();
+  });
+});
+
+describe('domyslna kolejnosc planowania: plomien, macierz A-D, zwrot, mniejsze SP', () => {
+  const d = { ...deps, paybackRank };
+
+  it('domyslny stos to priorytet, macierz, zwrot, SP rosnaco', () => {
+    expect(PLAN_SORT_DOMYSLNY).toEqual([
+      { by: 'priority', dir: 'asc' },
+      { by: 'macierz', dir: 'asc' },
+      { by: 'zwrot', dir: 'asc' },
+      { by: 'sp', dir: 'asc' },
+    ]);
+  });
+
+  it('macierz idzie A, B, C, D, a bez tagu na koncu; BUG i B2B to nie macierz', () => {
+    const tasks = [
+      task(1, { tags: ['BUG'] }),
+      task(2, { tags: ['D'] }),
+      task(3, { tags: ['a'] }),
+      task(4, { tags: ['C'] }),
+      task(5, { tags: ['B'] }),
+      task(6, { tags: ['B2B'] }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 5, 4, 2, 6, 1]);
+  });
+
+  it('plomien jest nad macierza', () => {
+    const tasks = [task(1, { tags: ['A'] }), task(2, { priority: '2', tags: ['D'] })];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
+  });
+
+  it('w obrebie litery najpierw zwrot, potem mniejsze SP, a bez wyceny na koncu', () => {
+    const tasks = [
+      task(1, { tags: ['B', 'ZWROT-6'], storyPoints: 2 }),
+      task(2, { tags: ['B', 'ZWROT-3'], storyPoints: 20 }),
+      task(3, { tags: ['B', 'ZWROT-3'], storyPoints: 4 }),
+      task(4, { tags: ['B', 'ZWROT-3'] }),
+    ];
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 2, 4, 1]);
+  });
+
+  it('stary domyslny stos z pulami jest zastepowany nowym', () => {
+    expect(
+      migratePlanSort([
+        { by: 'priority', dir: 'asc' },
+        { by: 'pula', dir: 'asc' },
+        { by: 'wysoki', dir: 'asc' },
+        { by: 'zwrot', dir: 'asc' },
+        { by: 'sp', dir: 'desc' },
+      ]),
+    ).toEqual(PLAN_SORT_DOMYSLNY);
   });
 });

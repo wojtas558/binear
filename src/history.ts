@@ -500,6 +500,10 @@ export const WRITE_METHODS = new Set([
   /* Zalozenie kolejnego sprintu z widoku planowania. Tak jak wyzej: bez wpisu
      tutaj `call` potraktowalby to jak odczyt i wpuscil do laczenia zapytan. */
   'tasks.api.scrum.sprint.add',
+  /* Epiki projektu — okno „Tagi i epiki". */
+  'tasks.api.scrum.epic.add',
+  'tasks.api.scrum.epic.update',
+  'tasks.api.scrum.epic.delete',
   'task.checklistitem.complete',
   'task.checklistitem.renew',
 ]);
@@ -679,6 +683,12 @@ export function describe(
     }
     case 'tasks.task.delete':
       return mark('delete', '', 'usunięcie zadania');
+    case 'tasks.api.scrum.epic.add':
+      return mark('epic', '', `epik dodany: „${cut(fields.name)}”`);
+    case 'tasks.api.scrum.epic.update':
+      return mark('epic', '', `epik #${str(params.id)} zmieniony${fields.name ? `: „${cut(fields.name)}”` : ''}`);
+    case 'tasks.api.scrum.epic.delete':
+      return mark('delete', '', `epik #${str(params.id)} usunięty`);
     case 'tasks.api.scrum.task.update':
       if ('entityId' in fields)
         return arrow('sprint', 'entityId', (x) => name('sprint', x), fields.entityId);

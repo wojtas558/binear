@@ -27,6 +27,8 @@ export interface Option {
   hint?: string;
   /** Kreska NAD ta pozycja — dzis oddziela zalogowanego uzytkownika od reszty osob. */
   divider?: boolean;
+  /** Podpis grupy NAD ta pozycja (np. „Zespół") — dzieli liste na nazwane sekcje. */
+  section?: string;
   /** Klucz zakladki (segments) w Pickerze — dzis "sprint" / "outside" dla rodzica. */
   group?: string;
 }
@@ -300,7 +302,11 @@ export function Picker({
           {shown.map((o, i) => (
             <Fragment key={o.value}>
               {/* Kreska tylko MIEDZY pozycjami — na samej gorze listy nie ma czego dzielic. */}
-              {o.divider && i > 0 && <div className="picker-sep" />}
+              {o.section ? (
+                <div className="picker-section">{o.section}</div>
+              ) : (
+                o.divider && i > 0 && <div className="picker-sep" />
+              )}
               <button
                 className={`picker-item${i === cursor ? ' picker-item-active' : ''}${
                   sel.has(o.value) ? ' picker-item-on' : ''

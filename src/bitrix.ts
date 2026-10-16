@@ -807,6 +807,21 @@ export async function fetchEpics(groupId: number): Promise<Epic[]> {
   }
 }
 
+/** Dodaje epik do projektu (okno „Tagi i epiki"). Kolor jako #rrggbb. */
+export async function addEpic(groupId: number, name: string, color: string): Promise<void> {
+  await call('tasks.api.scrum.epic.add', { fields: { groupId, name, description: '', color } });
+}
+
+/** Zmienia nazwe i/albo kolor epiku. */
+export async function editEpic(id: number, fields: { name?: string; color?: string }): Promise<void> {
+  await call('tasks.api.scrum.epic.update', { id, fields });
+}
+
+/** Usuwa epik; zadania zostaja, tracac przypisanie. W UI zawsze za potwierdzeniem. */
+export async function deleteEpic(id: number): Promise<void> {
+  await call('tasks.api.scrum.epic.delete', { id });
+}
+
 /**
  * Czy w grupie zmienilo sie cokolwiek od podanego znacznika.
  *
@@ -2261,6 +2276,27 @@ export async function moveToSprint(
    * wyprzedzac w kolejce.
    */
   return queued(() => enterSprint(taskId, entityId, stageId));
+}
+
+/**
+ * Wejscie do sprintu z rejestru: PRZEZ kolumne wejsciowa (typ NEW) tego sprintu.
+ *
+ * Sama przynaleznosc (`moveToSprint` bez etapu) zostawia zadanie w sprincie, ale bez karty na
+ * tablicy i bez etapu — widok sprintu uznaje je wtedy za „poza sprintem", a automatyzacja
+ * nadajaca numer IT-NNN nie odpala sie wcale. Widoczne od chwili, gdy planuje sie prosto w
+ * AKTYWNYM sprincie (w planowanym tablicy jeszcze nie ma, wiec nic tego nie zdradzalo).
+ *
+ * Gdy etapow sprintu nie da sie pobrac, zostaje sama przynaleznosc — zadanie ma trafic do sprintu
+ * nawet za cene braku karty.
+ */
+export async function moveToSprintViaEntry(
+  taskId: number,
+  entityId: number,
+): Promise<{ status: string } | undefined> {
+  const entry = (await fetchStages([entityId]).catch(() => [] as Stage[])).find(
+    (st) => st.type === 'NEW',
+  )?.id;
+  return moveToSprint(taskId, entityId, entry);
 }
 
 async function enterSprint(

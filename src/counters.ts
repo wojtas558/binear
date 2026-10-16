@@ -71,12 +71,6 @@ export const TAG_KONCEPCJA = 'KONCEPCJA';
  * i już istnieje jako tag; pozostałe to nowe tagi z zasad wartości zadań.
  */
 export const TAG_WYMOG = 'WYMOG';
-/**
- * Zadanie strategiczne, którego korzyści nie da się przeliczyć na czas ani pieniądze. Nie ma okresu
- * zwrotu ani tagu ZWROT — zamiast tego ma jedno zdanie uzasadnienia w wiadomości WARTOŚĆ. Nadaje je
- * wyłącznie kierownik IT albo zarząd; o kolejności decyduje rada.
- */
-export const TAG_STRATEGIA = 'STRATEGIA';
 export const TAGS_KATEGORIA = [
   TAG_BUG,
   'OSZCZEDNOSC',
@@ -85,8 +79,18 @@ export const TAGS_KATEGORIA = [
   'ANALITYKA',
   'UTRZYMANIE',
   TAG_WYMOG,
-  TAG_STRATEGIA,
 ];
+
+/**
+ * PULA zadania — z czyjego budżetu godzin ono jest: ciągłość (utrzymanie), rdzeń (rozwój produktu)
+ * albo dział (zamówione przez dział). Obowiązkowa: bez puli zadanie nigdy nie jest kompletne.
+ * Kolejność listy rozstrzyga, gdy zadanie ma dwie — liczy się pierwsza.
+ */
+export const TAGS_PULA = ['CIAGLOSC', 'RDZEN', 'DZIAL'] as const;
+export type Pula = (typeof TAGS_PULA)[number];
+
+/** Pula zadania albo `null`. Zadanie ma najwyżej jedną; przy dwóch wygrywa pierwsza z `TAGS_PULA`. */
+export const pula = (t: Pick<Task, 'tags'>): Pula | null => TAGS_PULA.find((g) => hasTag(t, g)) ?? null;
 
 /** Bitrix nie rozroznia wielkosci liter w tagach — „do-startu" to ten sam tag. */
 export const hasTag = (t: Pick<Task, 'tags'>, tag: string): boolean =>
@@ -112,11 +116,13 @@ export interface CounterCtx {
  *  - `recon` — oznaczone jako rozpoznanie albo analiza błędu (dopisek w wiadomości WYCENA); takie
  *    zadanie jest gotowe bez kategorii i bez okresu zwrotu, bo wartość liczymy dopiero przy właściwym
  *    zadaniu, które z niego powstanie,
- *  - `strategic` — zadania STRATEGIA, które mają już wiadomość WARTOŚĆ z uzasadnieniem.
+ *  - `value` — zadania z wiadomością WARTOŚĆ (pierwsza linia np. „WARTOŚĆ: rdzeń", „WARTOŚĆ: zwrot …",
+ *    „WARTOŚĆ: wymóg"). Dla puli RDZEN to jedyny ślad wartości, bo takie zadanie nie ma ani
+ *    kategorii, ani tagu ZWROT.
  */
 export interface ChatFacts {
   recon: ReadonlySet<number>;
-  strategic: ReadonlySet<number>;
+  value: ReadonlySet<number>;
 }
 
 type CounterTask = Pick<
@@ -137,6 +143,7 @@ export function foldersOf(
   for (const t of tasks) if (t.parentId !== null && !closed.has(t.status)) folders.add(t.parentId);
   return folders;
 }
+
 
 export interface CounterDef {
   key: CounterKey;
@@ -195,50 +202,65 @@ const wasAnswered = (t: CounterTask, ctx: CounterCtx) => ctx.answered?.has(t.id)
 export const hasCategory = (t: Pick<CounterTask, 'tags'>): boolean =>
   TAGS_KATEGORIA.some((g) => hasTag(t, g));
 
-/** Wymóg i strategia nie mają okresu zwrotu — jedno ma termin, drugie uzasadnienie. */
-export const needsPayback = (t: Pick<CounterTask, 'tags'>): boolean =>
-  !hasTag(t, TAG_WYMOG) && !hasTag(t, TAG_STRATEGIA);
+/** Wymóg nie ma okresu zwrotu — ma termin. */
+export const needsPayback = (t: Pick<CounterTask, 'tags'>): boolean => !hasTag(t, TAG_WYMOG);
 
 /**
- * Komplet z SAMEJ listy zadań (bez czatu): wycena, kategoria i — zależnie od kategorii —
+ * Komplet z SAMEJ listy zadań (bez czatu): pula, wycena i — dla CIAGLOSC i DZIAL — kategoria oraz
  * tag okresu zwrotu albo termin.
  *
- *  - zwykłe zadanie: tag okresu zwrotu (ZWROT-3 / ZWROT-6 / ZWROT-12 / ZWROT-12+), który
- *    `wartosc.mjs` kopiuje z przedziału w wiadomości WARTOŚĆ,
- *  - WYMOG: termin (pole „Termin" zadania) — wymóg nie ma rankingu, ma datę,
- *  - STRATEGIA: z tagów sama się nie kompletuje — uzasadnienie siedzi w czacie (`ChatFacts.strategic`).
+ *  - bez puli: nigdy,
+ *  - CIAGLOSC / DZIAL: kategoria + tag okresu zwrotu (ZWROT-3 / ZWROT-6 / ZWROT-12 / ZWROT-12+),
+ *    który `wartosc.mjs` kopiuje z przedziału w wiadomości WARTOŚĆ; WYMOG ma zamiast zwrotu termin
+ *    (pole „Termin" zadania) — wymóg nie ma rankingu, ma datę,
+ *  - RDZEN: z tagów sam się nie kompletuje — wartość siedzi w wiadomości WARTOŚĆ w czacie
+ *    (`ChatFacts.value`), kategoria i ZWROT nie są wymagane.
  */
-export const isCompleteByTags = (t: CounterTask): boolean =>
-  t.storyPoints != null &&
-  hasCategory(t) &&
-  !hasTag(t, TAG_STRATEGIA) &&
-  (needsPayback(t) ? paybackBand(t) !== null : t.deadline != null);
+export const isCompleteByTags = (t: CounterTask): boolean => {
+  const p = pula(t);
+  return (
+    p !== null &&
+    p !== 'RDZEN' &&
+    t.storyPoints != null &&
+    hasCategory(t) &&
+    (needsPayback(t) ? paybackBand(t) !== null : t.deadline != null)
+  );
+};
 
 /**
  * Rozpoznanie mieści się w 4 godzinach (`gotowe.mjs --rozpoznanie`). Poznajemy je po dopisku w
  * wiadomości WYCENA albo — jak w audycie — po tytule („rozpoznanie…", „weryfikacja…") przy wycenie do 4 h.
  */
 export const RECON_MAX_HOURS = 4;
-export const isReconByTitle = (t: Pick<CounterTask, 'title' | 'storyPoints'>): boolean =>
-  t.storyPoints != null && t.storyPoints <= RECON_MAX_HOURS && /rozpoznani|weryfikacj/i.test(t.title);
+export const isReconByTitle = (t: Pick<CounterTask, 'title' | 'storyPoints' | 'tags'>): boolean =>
+  pula(t) !== null &&
+  t.storyPoints != null &&
+  t.storyPoints <= RECON_MAX_HOURS &&
+  /rozpoznani|weryfikacj/i.test(t.title);
 
-/** Zadanie, którego kompletność rozstrzyga czat: może być rozpoznaniem albo strategią z uzasadnieniem. */
+/**
+ * Zadanie, którego kompletność rozstrzyga czat: może być rozpoznaniem albo — z pulą RDZEN —
+ * mieć wiadomość WARTOŚĆ. Bez puli czat niczego nie zmienia (zadanie i tak nie jest kompletne).
+ */
 export const needsChat = (t: CounterTask): boolean =>
   t.storyPoints != null &&
+  pula(t) !== null &&
   !isReconByTitle(t) &&
-  ((t.storyPoints <= RECON_MAX_HOURS && !isCompleteByTags(t)) || hasTag(t, TAG_STRATEGIA));
+  !isCompleteByTags(t) &&
+  (t.storyPoints <= RECON_MAX_HOURS || pula(t) === 'RDZEN');
 
 /**
  * Czy zadanie z DO-STARTU ma komplet: kompletne w tagach, rozpoznanie (po tytule albo z czatu) albo
- * strategia z uzasadnieniem. Dopóki czaty się czytają (`chat === null`), zadanie, które od nich zależy,
+ * RDZEN z wiadomością WARTOŚĆ — zawsze z pulą i wyceną. Dopóki czaty się czytają (`chat === null`), zadanie, które od nich zależy,
  * nie jest jeszcze ani kompletne, ani niekompletne — kafelki dostają wtedy znak „liczę" (`needsChatFacts`).
  */
 const isComplete = (t: CounterTask, ctx: CounterCtx) =>
   isCompleteByTags(t) ||
-  (t.storyPoints != null &&
+  (pula(t) !== null &&
+    t.storyPoints != null &&
     (isReconByTitle(t) ||
       (ctx.chat?.recon.has(t.id) ?? false) ||
-      (hasTag(t, TAG_STRATEGIA) && (ctx.chat?.strategic.has(t.id) ?? false))));
+      (pula(t) === 'RDZEN' && (ctx.chat?.value.has(t.id) ?? false))));
 
 /*
  * Kolejnosc = kolejnosc pracy w audycie: skala rejestru, potem stany od „trzeba zapytac"
@@ -289,10 +311,9 @@ export const COUNTERS: CounterDef[] = [
     inSum: true,
     label: 'Do wyceny',
     hint:
-      'Poza sprintem, z tagiem DO-STARTU, ale bez kompletu: brakuje story pointów, ' +
-      'kategorii korzyści albo tagu okresu zwrotu (ZWROT-3 … ZWROT-12+). WYMOG potrzebuje ' +
-      'terminu zamiast zwrotu, STRATEGIA — uzasadnienia w wiadomości WARTOŚĆ, rozpoznanie nie ' +
-      'potrzebuje żadnego z nich — uzupełnij wycenę i wartość.',
+      'Poza sprintem, z tagiem DO-STARTU, ale bez kompletu. Pula obowiązkowa (CIAGLOSC / RDZEN / ' +
+      'DZIAL). CIAGLOSC i DZIAL: kategoria i okres zwrotu (WYMOG: termin). RDZEN: wiadomość ' +
+      'WARTOŚĆ z uzasadnieniem. Rozpoznanie: sama wycena do 4 h, z pulą.',
     match: (t, ctx) => outside(t, ctx) && isStartu(t) && !isComplete(t, ctx),
     needsMeta: true,
     needsChatFacts: true,
@@ -303,9 +324,9 @@ export const COUNTERS: CounterDef[] = [
     inSum: true,
     label: 'Gotowe do startu',
     hint:
-      'Poza sprintem, z tagiem DO-STARTU i kompletem: wycena, kategoria korzyści i okres ' +
-      'zwrotu (WYMOG: termin; STRATEGIA: uzasadnienie; rozpoznanie: sama wycena) — można je wziąć ' +
-      'do sprintu.',
+      'Poza sprintem, z tagiem DO-STARTU i kompletem. Pula obowiązkowa (CIAGLOSC / RDZEN / ' +
+      'DZIAL). CIAGLOSC i DZIAL: kategoria i okres zwrotu (WYMOG: termin). RDZEN: wiadomość ' +
+      'WARTOŚĆ z uzasadnieniem. Rozpoznanie: sama wycena do 4 h, z pulą — można je wziąć do sprintu.',
     match: (t, ctx) => outside(t, ctx) && isStartu(t) && isComplete(t, ctx),
     needsMeta: true,
     needsChatFacts: true,
@@ -464,16 +485,13 @@ export function paybackBand(t: Pick<Task, 'tags'>): PaybackBand | null {
  * Miejsce zadania w sortowaniu „po zwrocie" — mniejsza liczba idzie wyżej.
  *
  *   0    WYMOG (ma termin, wchodzi poza rankingiem, więc na początku)
- *   1    STRATEGIA (bez liczb, o kolejności decyduje rada — więc osobnym blokiem tuż po wymogach,
- *        a nie wciśnięta w któryś przedział)
- *   2–5  przedział: do 3, 3–6, 6–12, ponad 12 miesięcy
- *   6    brak okresu zwrotu (jeszcze niepoliczony) — na końcu
+ *   1–4  przedział: do 3, 3–6, 6–12, ponad 12 miesięcy
+ *   5    brak okresu zwrotu (jeszcze niepoliczony, albo RDZEN) — na końcu
  */
 export function paybackRank(t: Pick<Task, 'tags'>): number {
   if (hasTag(t, TAG_WYMOG)) return 0;
-  if (hasTag(t, TAG_STRATEGIA)) return 1;
   const band = paybackBand(t);
-  return band ? 2 + PAYBACK_BANDS.findIndex((b) => b.key === band) : PAYBACK_BANDS.length + 2;
+  return band ? 1 + PAYBACK_BANDS.findIndex((b) => b.key === band) : PAYBACK_BANDS.length + 1;
 }
 
 /**
@@ -492,8 +510,8 @@ export function hasReconMarker(messages: ChatMessage[]): boolean {
 
 /**
  * Wiadomość „WARTOŚĆ" w czacie zadania — początek wiadomości po zdjęciu znaczników, bez względu na
- * wielkość liter i polskie znaki: „WARTOŚĆ: strategia", „[B]Wartość[/B] …". Dla STRATEGII to jedyny
- * ślad uzasadnienia, bo takie zadanie nie ma tagu ZWROT.
+ * wielkość liter i polskie znaki: „WARTOŚĆ: rdzeń", „[B]Wartość[/B] …". Dla puli RDZEN to jedyny
+ * ślad wartości, bo takie zadanie nie ma ani kategorii, ani tagu ZWROT.
  */
 export const VALUE_MESSAGE = /^warto[śs][ćc](?=$|[\s:.,;\-–—])/i;
 
@@ -548,7 +566,9 @@ export function answerState(messages: ChatMessage[], isIt: (authorId: number) =>
 // ─── Historia dzien po dniu ──────────────────────────────────────────────────
 
 /** Stan licznikow jednego dnia. Klucz `sprintPoints` = suma SP sprintu. */
-export type DaySnapshot = Partial<Record<CounterKey | 'sprintPoints', number>>;
+export type DaySnapshot = Partial<
+  Record<CounterKey | 'sprintPoints' | `t:${string}` | `g:${string}` | `gs:${string}`, number>
+>;
 /** Dzien (RRRR-MM-DD, czas lokalny) → stan. */
 export type CounterHistory = Record<string, DaySnapshot>;
 
