@@ -2355,9 +2355,10 @@ input[type='search']::-webkit-search-decoration {
 
 .row {
   display: flex;
-  align-items: center;
+  /* Kilka linii (konfigurator karty): prefiks stoi przy pierwszej, nie na srodku wysokosci. */
+  align-items: flex-start;
   gap: var(--s2);
-  height: var(--row-h);
+  min-height: var(--row-h);
   /* Z lewej ciasniej niz z prawej — checkbox ma stac blisko krawedzi. */
   padding: 0 var(--s4) 0 var(--s3);
   cursor: pointer;
@@ -2424,6 +2425,7 @@ input[type='search']::-webkit-search-decoration {
 /* Stale szerokosci kolumn — inaczej dluzsze kody (#114937 vs IT-747)
    przesuwaly tytuly i cala lista wygladala na krzywa. */
 .row > svg,
+.row-zone > svg,
 .prio-spacer {
   flex: 0 0 16px;
   width: 16px;
@@ -3755,15 +3757,49 @@ img.avatar {
 
 /* ── Panel szczegolow ───────────────────────────────────────────────────── */
 
-/* Szerokosc ustawiana inline ze stanu (chwyt na lewej krawedzi) i zapamietywana. */
+/*
+ * Panel zadania, dwa warianty do wyboru w menu widoku („Panel zadania"):
+ *  - kolumna gridu (`detail-column`): lista sie zweza, nic nie jest zasloniete,
+ *  - szuflada z prawej (`detail-drawer`): panel NAKRYWA widok, wiec otwarcie zadania nie przestawia
+ *    ukladu pod spodem — lista, tablica i planowanie zostaja dokladnie tam, gdzie byly.
+ * Szerokosc ustawiana inline ze stanu (chwyt na lewej krawedzi) i zapamietywana.
+ */
 .detail {
   position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-width: 100vw;
   overflow: hidden;
   background: var(--bg-panel);
   border-left: 1px solid var(--border);
+}
+
+.detail-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
+  animation: detail-in 140ms ease-out;
+}
+
+@keyframes detail-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-drawer {
+    animation: none;
+  }
 }
 
 .detail-resizer {
@@ -9966,4 +10002,232 @@ a.mention:hover {
 .row-low.row-selected,
 .card-low.card-selected {
   opacity: 0.9;
+}
+
+/*
+ * Pasek terminu: pelny to 30 dni, potem kurczy sie i zmienia kolor od zieleni do czerwieni
+ * (patrz deadlines.ts). Obwodka i wypelnienie dziela `--due-color`, wiec pusty pasek tuz przed
+ * terminem albo po nim dalej swieci kolorem alarmu.
+ */
+.due-bar {
+  flex: 0 0 auto;
+  /* Wypelnienie przy PRAWEJ krawedzi: pasek kurczy sie od lewej do prawej. */
+  display: inline-flex;
+  justify-content: flex-end;
+  width: 30px;
+  height: 8px;
+  margin-right: 4px;
+  border: 1px solid var(--due-color);
+  border-radius: 4px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.due-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--due-color);
+}
+
+.row-due {
+  width: 104px;
+}
+
+/* Zakladki Rejestr / Terminy w naglowku lewego panelu planowania. */
+.plan-tabs {
+  display: flex;
+  gap: var(--s2);
+}
+
+.plan-tab {
+  padding: 0 0 2px;
+  border-bottom: 2px solid transparent;
+  font-size: var(--t-regular);
+  font-weight: var(--w-semibold);
+  color: var(--fg-dim);
+}
+
+.plan-tab.is-on {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+/* Terminy czekaja na decyzje — zakladka swieci, zanim ktos w nia wejdzie. */
+.plan-tab.is-alarm:not(.is-on) {
+  color: var(--accent-orange);
+}
+
+.plan-tab-n {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: var(--t-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dopisek pod wierszem listy „Terminy": dlaczego to zadanie tu jest. */
+.plan-termin-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--s3) var(--s2) 36px;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.plan-termin-chip {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.plan-termin-chip.is-hard {
+  color: var(--danger);
+}
+
+.plan-termin-chip.is-soft,
+.plan-termin-chip.is-warn {
+  color: var(--accent-orange);
+}
+
+.plan-termin-hours {
+  margin-left: 4px;
+}
+
+.plan-termin-chip.is-red {
+  color: hsl(5 70% 50%);
+  font-weight: var(--w-semibold);
+}
+
+.plan-termin-chip.is-yellow {
+  color: hsl(42 92% 48%);
+  font-weight: var(--w-semibold);
+}
+
+/* ── Konfigurator karty: prefiks, linie i strony wiersza ───────────────── */
+
+/* Zaznaczenie, znak waznosci i podzadania — zawsze w pierwszej linii, w jednej kolumnie. */
+.row-prefix {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 0 0 auto;
+  height: var(--row-h);
+}
+
+.row-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.row-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--row-h);
+  min-width: 0;
+}
+
+.row-zone {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+/* Lewa strona rosnie — tytul (jesli tu jest) zabiera wolne miejsce i spycha prawa strone do krawedzi. */
+.row-zone-left {
+  flex: 1;
+  justify-content: flex-start;
+}
+
+/* Tytul w strefie nie rosnie — inaczej wypychal elementy stojace za nim pod prawa krawedz. Kurczy sie z wielokropkiem. */
+.row-zone .row-title {
+  flex: 0 1 auto;
+}
+
+.row-zone-right {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+/* Kolejne linie: drobniejsze i przygaszone, zeby pierwsza zostala glowna. */
+.row-line + .row-line {
+  height: calc(var(--row-h) * 0.8);
+  font-size: var(--t-mini);
+}
+
+.rl-hint {
+  margin: 0;
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+}
+
+.rl-line {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 2fr) minmax(0, 1fr) auto;
+  gap: var(--s2);
+  align-items: stretch;
+}
+
+.rl-line-nr {
+  align-self: center;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.rl-zone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.rl-zone-right {
+  justify-content: flex-end;
+}
+
+.rl-zone-over {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+
+.rl-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-hover);
+  font-size: var(--t-mini);
+  cursor: grab;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.rl-chip-req {
+  border-color: var(--accent);
+}
+
+.rl-empty {
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.rl-actions {
+  display: flex;
+  gap: var(--s2);
+}
+
+.rl-pool-head {
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
 }

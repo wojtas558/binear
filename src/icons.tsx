@@ -231,6 +231,18 @@ export function ChevronIcon({ open }: { open: boolean }) {
 }
 
 /** Ikona grupowania — trzy poziome bloki o roznej dlugosci. */
+/** Suwaki — ustawienia widoku. */
+export function SlidersIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+      <path d="M2 4h7M13 4h1M2 12h1M7 12h7M2 8h3M9 8h5" />
+      <circle cx="11" cy="4" r="1.6" />
+      <circle cx="5" cy="12" r="1.6" />
+      <circle cx="7" cy="8" r="1.6" />
+    </svg>
+  );
+}
+
 export function GroupIcon() {
   return (
     <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden>

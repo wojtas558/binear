@@ -1,7 +1,9 @@
 import {
   Fragment,
+  createContext,
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -102,6 +104,7 @@ import {
   Avatar,
   ChevronIcon,
   GroupIcon,
+  SlidersIcon,
   HistoryIcon,
   PlanIcon,
   PriorityIcon,
@@ -211,6 +214,9 @@ import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator } from './planSort'
 import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
 import { useAnsweredTasks, useChatFacts, useCounterHistory } from './CounterHistory';
 import { CapacityChip, useNow } from './CapacityChip';
+import { deadlineBar, deadlineLevel, LEVEL_COLOR, type DeadlineLevel } from './deadlines';
+import { DEFAULT_ROW_LAYOUT, normalizeRowLayout, type RowElement, type RowLayout } from './rowLayout';
+import { RowLayoutModal } from './RowLayoutModal';
 import { sprintCapacity, sprintDeadline, sprintWorkEnd, workHoursBetween } from './sprintClock';
 import { TeamModal } from './TeamModal';
 import { ManageModal } from './ManageModal';
@@ -293,6 +299,17 @@ type ViewMode = 'list' | 'board' | 'charts' | 'planning' | 'summary';
  *  `chip` — data zmiany zawsze, a termin w osobnym, zarezerwowanym slocie obok.
  */
 type DeadlineLook = 'off' | 'mark' | 'chip';
+/**
+ * Panel zadania: `drawer` — szuflada z prawej, nakrywa widok i nie przestawia ukladu;
+ * `column` — dodatkowa kolumna, lista sie zweza, ale nic nie jest zasloniete (gdy po prawej
+ * stronie listy sa dane, ktore trzeba widziec razem z zadaniem).
+ */
+type DetailMode = 'drawer' | 'column';
+const DETAIL_MODES: { key: DetailMode; label: string }[] = [
+  { key: 'drawer', label: 'Szuflada (nakrywa listę)' },
+  { key: 'column', label: 'Kolumna (zwęża listę)' },
+];
+
 const DEADLINE_LOOKS: { key: DeadlineLook; label: string }[] = [
   { key: 'off', label: 'Bez wyróżnienia' },
   { key: 'mark', label: 'W miejscu daty' },
@@ -591,6 +608,10 @@ interface Settings {
   listTint: ListTint;
   /** Wyglad terminu w wierszu — patrz `DeadlineLook`. */
   deadlineLook: DeadlineLook;
+  /** Uklad wiersza listy z konfiguratora karty — patrz rowLayout.ts. */
+  rowLayout: RowLayout;
+  /** Panel zadania jako szuflada albo kolumna — patrz `DetailMode`. */
+  detailMode: DetailMode;
   /*
    * Czy wyszukiwarka zaglada takze do OPISOW. Wylaczone domyslnie, bo wlaczenie
    * kosztuje jednorazowe pobranie okolo 1,9 MB (patrz `descCache.ts`) — decyzja
@@ -693,6 +714,8 @@ const DEFAULT_SETTINGS: Settings = {
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
   listTint: 'fade',
   deadlineLook: 'mark',
+  rowLayout: DEFAULT_ROW_LAYOUT,
+  detailMode: 'drawer',
   szukajWOpisach: false,
   planMoce: null,
   planKolejka: [],
@@ -730,6 +753,7 @@ function loadSettings(): Settings {
       ...DEFAULT_SETTINGS,
       ...saved,
       sort: { ...DEFAULT_SETTINGS.sort, ...saved.sort },
+      rowLayout: normalizeRowLayout(saved.rowLayout),
       // Zapisany jest caly stos — stary domyslny zamieniamy na nowy (pula, Wysoki, zwrot).
       planSort: (migratePlanSort(saved.planSort) as Settings['planSort'] | undefined) ?? DEFAULT_SETTINGS.planSort,
     };
@@ -1934,7 +1958,7 @@ function nest(tasks: Task[], collapsedTasks: Set<number>): RowNode[] {
 
 const PRIORITY_RANK: Record<string, number> = { '2': 0, '1': 1, '0': 2 };
 
-type SortBy = 'updated' | 'created' | 'priority' | 'deadline' | 'title';
+type SortBy = 'updated' | 'created' | 'priority' | 'deadline' | 'title' | 'planning';
 type Dir = 'asc' | 'desc';
 
 /*
@@ -1945,9 +1969,11 @@ type Dir = 'asc' | 'desc';
  * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
  * na liscie i tak grupuje sie po etapie.
  */
-type PlanSortBy = SortBy | 'stage' | 'macierz' | 'pula' | 'wysoki' | 'sp' | 'zwrot';
+type PlanSortBy = SortBy | 'stage' | 'macierz' | 'pula' | 'wysoki' | 'sp' | 'zwrot' | 'terminy';
 
 const SORTS: { key: SortBy; label: string }[] = [
+  /* Dynamicznie czyta aktualny stos sortowania z widoku planowania (domyslny albo ulozony przez uzytkownika). */
+  { key: 'planning', label: 'Jak w planowaniu' },
   { key: 'updated', label: 'Zaktualizowane' },
   { key: 'created', label: 'Utworzone' },
   { key: 'priority', label: 'Priorytet' },
@@ -1962,6 +1988,8 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
    * pozycje bylyby niewidoczne w liscie i nie dalo by sie poprawic zadnego z nich
    * z osobna — a przy planowaniu wlasnie tak sie z tym pracuje.
    */
+  /* Terminy: kolor paska (czerwony przed zoltym), w obrebie koloru data terminu. */
+  { key: 'terminy', label: 'Terminy (kolor, data)' },
   /* Macierz Eisenhowera: tagi A, B, C, D (A najwazniejsze). */
   { key: 'macierz', label: 'Macierz (A–D)' },
   { key: 'pula', label: 'Pula' },
@@ -1970,7 +1998,7 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
   { key: 'zwrot', label: 'Okres zwrotu' },
   { key: 'sp', label: 'Story pointy' },
   { key: 'stage', label: 'Etap w sprincie' },
-  ...SORTS,
+  ...SORTS.filter((s) => s.key !== 'planning'),
 ];
 
 const time = (iso: string | null) => {
@@ -2010,8 +2038,10 @@ export interface SortOpts {
  * przebija ono wybranego sortowania). Na koniec stabilny remis po id. Ten sam porzadek
  * uzywa lista (w `bucket`) i tablica — zeby sortowanie znaczylo to samo w obu.
  */
-function taskComparator(sort: SortOpts, me: number | null) {
+function taskComparator(sort: SortOpts, me: number | null, planCmp?: (a: Task, b: Task) => number) {
   const dirMul = sort.dir === 'asc' ? 1 : -1;
+  /* „Jak w planowaniu": caly stos z widoku planowania jest jednym porownaniem, ktore ma wlasny ogon. */
+  if (sort.by === 'planning' && planCmp) return (a: Task, b: Task) => planCmp(a, b) * dirMul;
   const mineRank = (t: Task) => (me !== null && t.responsibleId === me ? 0 : 1);
   return (a: Task, b: Task) =>
     compareBy(sort.by, a, b) * dirMul || mineRank(a) - mineRank(b) || b.id - a.id;
@@ -2056,11 +2086,13 @@ function bucket(
   sort: SortOpts,
   /** Klucze grup, ktore maja istniec nawet bez zadan — "Pokaż puste kolumny". */
   extraKeys: string[] = [],
+  /** Komparator widoku planowania — dla sortowania „Jak w planowaniu". */
+  planCmp?: (a: Task, b: Task) => number,
 ): Group[] {
   /* Bez grupowania: jedna grupa z PUSTA etykieta — render pomija wtedy naglowek,
      dokladnie tak jak przy wylaczonym podgrupowaniu. */
   if (by === 'flat') {
-    return [{ key: '', label: '', order: 0, tasks: [...tasks].sort(taskComparator(sort, me)) }];
+    return [{ key: '', label: '', order: 0, tasks: [...tasks].sort(taskComparator(sort, me, planCmp)) }];
   }
 
   const buckets = new Map<string, Task[]>();
@@ -2084,7 +2116,7 @@ function bucket(
   // Puste grupy do domalowania — tylko te, ktorych jeszcze nie ma z zadan.
   for (const k of extraKeys) if (!buckets.has(k)) buckets.set(k, []);
 
-  const cmp = taskComparator(sort, me);
+  const cmp = taskComparator(sort, me, planCmp);
 
   return [...buckets.entries()]
     .map(([key, list]) => {
@@ -3439,9 +3471,12 @@ function DueHover({
   zrobione,
   oddaneDnia,
   className,
+  level,
   children,
 }: {
   deadline: string;
+  /** Poziom pilnosci (patrz `useDeadlineLevel`) — gdy jest, to on wyznacza kolor, a nie tony wiersza. */
+  level?: DeadlineLevel | null;
   /** Praca oddana — patrz `oddane`. Termin traci wtedy ton i licznik. */
   zrobione: boolean;
   /** `closedDate` — moment oddania. Dzieki niemu karta mowi, czy zdazono. */
@@ -3464,12 +3499,64 @@ function DueHover({
       value={shortDate(deadline)}
       note={due.distance}
       noteColor={
-        spoznione ? 'color-mix(in oklab, hsl(5 52% 55%) 45%, var(--fg-dim))' : dueFill(due.days, zrobione)
+        level
+          ? LEVEL_COLOR[level]
+          : spoznione
+            ? 'color-mix(in oklab, hsl(5 52% 55%) 45%, var(--fg-dim))'
+            : dueFill(due.days, zrobione)
       }
       className={className}
+      style={level ? { color: LEVEL_COLOR[level] } : undefined}
     >
       {children}
     </HoverNote>
+  );
+}
+
+/** Koniec obecnego sprintu (poniedzialek nastepnej rady) — od niego zalezy kolor paska terminu. */
+const DeadlineCouncilCtx = createContext<Date | null>(null);
+
+/** Uklad wiersza listy z konfiguratora karty (patrz rowLayout.ts). */
+const RowLayoutCtx = createContext<RowLayout>(DEFAULT_ROW_LAYOUT);
+
+/** Tag macierzy Eisenhowera — dokladnie jedna litera A–D. */
+const jestMacierz = (g: string) => /^[ABCD]$/i.test(g.trim());
+
+/**
+ * Poziom pilnosci terminu zadania (czerwony / zolty / zielony) albo `null`, gdy zadanie nie ma terminu
+ * albo praca jest juz oddana. JEDNO zrodlo koloru: ten sam poziom barwi pasek, date w wierszu,
+ * dopisek pod kursorem i date w panelu szczegolow — inaczej kazde z tych miejsc mialoby wlasna
+ * skale i to samo zadanie wygladalo w nich inaczej.
+ */
+function useDeadlineLevel(task: Pick<Task, 'deadline' | 'storyPoints' | 'tags' | 'status'>): DeadlineLevel | null {
+  const council = useContext(DeadlineCouncilCtx);
+  if (!task.deadline || oddane(task.status)) return null;
+  return deadlineLevel(task, council);
+}
+
+/**
+ * Pasek odliczajacy do terminu. DLUGOSC mowi, ile dni zostalo (pelny to 30, potem pasek sie kurczy),
+ * a KOLOR, w ktorym sprincie zadanie musi sie znalezc: zielony — ani w obecnym, ani w nastepnym,
+ * zolty — w nastepnym, czerwony — w obecnym. Kolor liczy sie z terminu i wyceny, wiec dwa zadania
+ * z tym samym terminem moga miec rozny (patrz `deadlineLevel`). Obwodka ma kolor wypelnienia, dzieki
+ * czemu pusty pasek tez swieci. Praca oddana nie ma czego odliczac — tam paska nie rysujemy.
+ */
+function DueBar({ level, days }: { level: DeadlineLevel; days: number }) {
+  const { fill } = deadlineBar(days);
+  const tytul: Record<typeof level, string> = {
+    red: 'Musi wejść w obecnym sprincie',
+    yellow: 'Musi wejść w następnym sprincie',
+    green: 'Nie musi wejść ani w tym, ani w następnym sprincie',
+  };
+  return (
+    <span
+      className="due-bar"
+      title={tytul[level]}
+      style={{ ['--due-color' as string]: LEVEL_COLOR[level] }}
+      aria-hidden
+    >
+      <span className="due-bar-fill" style={{ width: `${Math.round(fill * 100)}%` }} />
+    </span>
   );
 }
 
@@ -3545,6 +3632,7 @@ function TaskRow({
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({ id: dragId(task.id) });
+  const terminLevel = useDeadlineLevel(task);
 
   /*
    * Kursor przewijamy do widoku, ale NIE przy pierwszym renderze wiersza. Inaczej
@@ -3561,6 +3649,205 @@ function TaskRow({
     }
     if (active) ref.current?.scrollIntoView({ block: 'nearest' });
   }, [active]);
+
+  const rowLayout = useContext(RowLayoutCtx);
+  /* Tagi bez BUG (ten jest znakiem waznosci), podzielone na litere macierzy A–D i reszte. */
+  const tagi = withoutBugTag(task.tags);
+  const tagiMacierz = tagi.filter(jestMacierz);
+  const tagiReszta = tagi.filter((g) => !jestMacierz(g));
+  const el: Record<RowElement, ReactNode> = {
+    parent: <>
+      {parentRef && (
+        <button
+          className="row-parent"
+          title={`Podzadanie: ${parentRef.label} ${parentRef.title}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenParent(parentRef.id);
+          }}
+        >
+          <ParentIcon />
+          {parentRef.label}
+        </button>
+      )}
+    </>,
+    title: <>
+      <span className="row-title">
+        {podzielNaTrafienia(task.title || task.rawTitle, fraza).map((k, i) =>
+          k.hit ? <mark key={i}>{k.text}</mark> : k.text,
+        )}
+      </span>
+    </>,
+    epic: <>
+      {epic &&
+        (() => {
+          const col = epic.color ? `#${epic.color}` : tagHue(epic.name);
+          return (
+            <button
+              type="button"
+              className="row-epic"
+              title={`Epik: ${epic.name} — kliknij, aby filtrować`}
+              style={{
+                borderColor: `color-mix(in srgb, ${col} 26%, transparent)`,
+                background: `color-mix(in srgb, ${col} 9%, transparent)`,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (task.epicId != null) onEpic?.(task.epicId);
+              }}
+            >
+              {epic.name}
+            </button>
+          );
+        })()}
+    </>,
+    matrix: tagiMacierz.length > 0 && <TagStrip tags={tagiMacierz} limit={tagiMacierz.length} onPick={onTag} />,
+    /* Liczba tagow w wierszu zalezy od szerokosci listy — reszta jako "+N". */
+    tags: tagiReszta.length > 0 && <TagStrip tags={tagiReszta} limit={tagLimit} onPick={onTag} />,
+    subs: <>
+      {(elsewhereSubCount > 0 || hiddenSubCount > 0) && (
+        <span
+          className="row-subs"
+          title={[
+            elsewhereSubCount > 0
+              ? `${elsewhereSubCount} podzadań jest w innych grupach — szukaj ich pod ich własnym etapem/osobą`
+              : '',
+            hiddenSubCount > 0
+              ? `${hiddenSubCount} podzadań ukrytych przez bieżący filtr — poluzuj filtry, żeby je zobaczyć`
+              : '',
+          ]
+            .filter(Boolean)
+            .join('\n')}
+        >
+          <SubtaskIcon />
+          {elsewhereSubCount > 0 && <span className="row-subs-elsewhere">{elsewhereSubCount}</span>}
+          {elsewhereSubCount > 0 && hiddenSubCount > 0 && <span className="row-subs-sep">·</span>}
+          {hiddenSubCount > 0 && <span className="row-subs-hidden">{hiddenSubCount}</span>}
+        </span>
+      )}
+    </>,
+    related: <>
+      {hasRelated && (
+        <span className="row-related" title="Ma powiązane zadania">
+          <LinkIcon />
+        </span>
+      )}
+    </>,
+    new: <>
+      {isNew && (
+        <span className="row-new" title="Pojawiło się od Twojego poprzedniego uruchomienia">
+          nowe
+        </span>
+      )}
+    </>,
+    comments: <>
+      {task.newComments > 0 && (
+        <span
+          className="row-unread"
+          title={`Nieprzeczytane komentarze: ${task.newComments}`}
+        >
+          <CommentIcon />
+          {task.newComments}
+        </span>
+      )}
+    </>,
+    points: <>
+      {progress && progress.points > 0 && (
+        <>
+          <ParentBar progress={progress} className="row-parent-bar" />
+          <HoverNote label="Suma SP podzadań" value={parentBarTitle(progress)} className="row-sp row-sp-sum">
+            Σ{progress.points}
+          </HoverNote>
+        </>
+      )}
+
+      {/* Story pointy scruma — dociagane w tle, wiec pojawiaja sie chwile po liscie. */}
+      {/* Rodzic z wlasnymi SP pokazuje je obok sumy podzadan — wczesniej suma je zaslaniala. */}
+      {task.storyPoints != null && (!(progress && progress.points > 0) || task.storyPoints > 0) && (
+        <HoverNote label="Story points" value={task.storyPoints} className="row-sp">
+          {task.storyPoints}
+        </HoverNote>
+      )}
+    </>,
+    deadline: <>
+      {deadlineLook === 'chip' ? (
+        <>
+          {/*
+            Slot terminu ZAWSZE zajety, takze bez terminu. Inaczej tytuly w kolejnych
+            wierszach konczylyby sie w roznych miejscach i prawa kolumna skakalaby
+            za kazdym zadaniem, ktore termin ma.
+          */}
+          {(() => {
+            if (!task.deadline) return <span className="row-due" />;
+            const due = dueInfo(task.deadline, oddane(task.status));
+            return (
+              <DueHover
+                deadline={task.deadline}
+                zrobione={oddane(task.status)}
+                oddaneDnia={task.closedDate}
+                className={`row-due${due.tone ? ` due-${due.tone}` : ''}`}
+                level={terminLevel}
+              >
+                {terminLevel && <DueBar level={terminLevel} days={due.days} />}
+                <CalendarIcon />
+                {due.label}
+              </DueHover>
+            );
+          })()}
+          <span className="row-meta" title="Ostatnia zmiana">
+            {shortDate(task.changedDate)}
+          </span>
+        </>
+      ) : deadlineLook === 'off' ? (
+        /* Bez wyroznienia: jedna data, bez ikony i bez koloru — dokladnie to, co
+           bylo tu wczesniej. Termin wciaz bije date zmiany, bo to on jest
+           terminem; roznicy po prostu nie widac. */
+        <span className="row-meta">{shortDate(task.deadline || task.changedDate)}</span>
+      ) : task.deadline ? (
+        /* Jedno miejsce jak dotad, ale termin ma ikone i jasniejszy kolor —
+           data zmiany zostaje przygaszona, wiec widac, ktora jest ktora. Pilny
+           termin barwi sie tak samo jak w wariancie z zetonem. */
+        <DueHover
+          deadline={task.deadline}
+          zrobione={oddane(task.status)}
+          oddaneDnia={task.closedDate}
+          className={`row-meta row-deadline${(() => {
+            const tone = dueInfo(task.deadline, oddane(task.status)).tone;
+            return tone ? ` due-${tone}` : '';
+          })()}`}
+          level={terminLevel}
+        >
+          {terminLevel && <DueBar level={terminLevel} days={dueInfo(task.deadline, false).days} />}
+          <CalendarIcon />
+          {shortDate(task.deadline)}
+        </DueHover>
+      ) : (
+        <span className="row-meta" title="Ostatnia zmiana">
+          {shortDate(task.changedDate)}
+        </span>
+      )}
+    </>,
+    more: <>
+      <button
+        className="row-more"
+        title="Akcje"
+        onClick={(e) => {
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          onMenu({ left: r.left, top: r.bottom + 4, bottom: r.bottom + 4 });
+        }}
+      >
+        <MoreIcon />
+      </button>
+    </>,
+    avatar: <>
+      {isUnassigned(task.responsibleId) ? (
+        <Avatar name={null} />
+      ) : (
+        <Avatar name={task.responsibleName} photo={task.responsiblePhoto} />
+      )}
+    </>,
+  };
 
   return (
     <div
@@ -3593,6 +3880,7 @@ function TaskRow({
       role="button"
       tabIndex={-1}
     >
+      <div className="row-prefix">
       {/* Checkbox pojawia sie na hover (i zostaje, gdy cos juz jest zaznaczone) —
           zaznaczanie myszka bez trzymania modyfikatorow. */}
       <button
@@ -3644,206 +3932,28 @@ function TaskRow({
         />
       )}
 
-      {/* Pierscien pokazuje ETAP — to on niesie stan pracy. Poza sprintem
-          etapu nie ma, wiec awaryjnie pokazujemy wbudowany status. */}
+      {/* Pierscien pokazuje ETAP — to on niesie stan pracy. Poza sprintem etapu nie ma,
+          wiec awaryjnie pokazujemy wbudowany status. */}
       {stage ? (
         <StageIcon progress={stage.progress} color={stage.color} />
       ) : (
         <StatusIcon status={task.status} />
       )}
       <TaskCode code={task.code ?? `#${task.id}`} copy={task.code ?? String(task.id)} onCopied={onCopied} />
-      {/* Rodzic poza grupa — bez tego wiersz udawalby zadanie samodzielne. */}
-      {parentRef && (
-        <button
-          className="row-parent"
-          title={`Podzadanie: ${parentRef.label} ${parentRef.title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenParent(parentRef.id);
-          }}
-        >
-          <ParentIcon />
-          {parentRef.label}
-        </button>
-      )}
-
-      <span className="row-title">
-        {podzielNaTrafienia(task.title || task.rawTitle, fraza).map((k, i) =>
-          k.hit ? <mark key={i}>{k.text}</mark> : k.text,
-        )}
-      </span>
-
-      {/* Epik ZAWSZE przed tagami: nalezy do zadania na stale, a tagi przychodza
-          i znikaja — stojac za nimi skakal w bok przy kazdej zmianie etykiet.
-          Klik fi klik filtruje liste po tym epiku. */}
-      {epic &&
-        (() => {
-          const col = epic.color ? `#${epic.color}` : tagHue(epic.name);
-          return (
-            <button
-              type="button"
-              className="row-epic"
-              title={`Epik: ${epic.name} — kliknij, aby filtrować`}
-              style={{
-                borderColor: `color-mix(in srgb, ${col} 26%, transparent)`,
-                background: `color-mix(in srgb, ${col} 9%, transparent)`,
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (task.epicId != null) onEpic?.(task.epicId);
-              }}
-            >
-              {epic.name}
-            </button>
-          );
-        })()}
-      {/* Liczba tagow w wierszu zalezy od szerokosci listy — reszta jako "+N". */}
-      {withoutBugTag(task.tags).length > 0 && (
-        <TagStrip tags={withoutBugTag(task.tags)} limit={tagLimit} onPick={onTag} />
-      )}
-
+      </div>
 
       {/*
-        Jeden znacznik "⑂" na oba rodzaje niewidocznych tutaj podzadan, dwie liczby:
-        pierwsza (przygaszona) = ile jest w INNYCH grupach (widoczne, tylko nie tu);
-        druga (akcent) = ile UKRYL filtr (nie widac nigdzie). Rozne kolory zamiast
-        dwoch osobnych plakietek — mniej szumu w wierszu, a znaczenie zostaje.
-        Wlasna klasa, NIE `.row-sub`: to co innego niz "+N" od tagow.
+        Reszta wiersza wedlug konfiguratora karty: linie, a w kazdej strona lewa i prawa.
+        Element spoza ukladu jest ukryty (patrz rowLayout.ts).
       */}
-      {(elsewhereSubCount > 0 || hiddenSubCount > 0) && (
-        <span
-          className="row-subs"
-          title={[
-            elsewhereSubCount > 0
-              ? `${elsewhereSubCount} podzadań jest w innych grupach — szukaj ich pod ich własnym etapem/osobą`
-              : '',
-            hiddenSubCount > 0
-              ? `${hiddenSubCount} podzadań ukrytych przez bieżący filtr — poluzuj filtry, żeby je zobaczyć`
-              : '',
-          ]
-            .filter(Boolean)
-            .join('\n')}
-        >
-          <SubtaskIcon />
-          {elsewhereSubCount > 0 && <span className="row-subs-elsewhere">{elsewhereSubCount}</span>}
-          {elsewhereSubCount > 0 && hiddenSubCount > 0 && <span className="row-subs-sep">·</span>}
-          {hiddenSubCount > 0 && <span className="row-subs-hidden">{hiddenSubCount}</span>}
-        </span>
-      )}
-      {/* Plakietka „ma powiazane zadania" (DEPENDS_ON) — sama ikona lancucha, bo liczby
-          nie mamy w danych listy (patrz fetchRelatedPresence). */}
-      {hasRelated && (
-        <span className="row-related" title="Ma powiązane zadania">
-          <LinkIcon />
-        </span>
-      )}
-      {/* Dwa rozne sygnaly, wiec dwa rozne ksztalty: "nowe" to cale zadanie,
-          dymek to dyskusja w srodku zadania, ktore juz znasz. */}
-      {isNew && (
-        <span className="row-new" title="Pojawiło się od Twojego poprzedniego uruchomienia">
-          nowe
-        </span>
-      )}
-      {task.newComments > 0 && (
-        <span
-          className="row-unread"
-          title={`Nieprzeczytane komentarze: ${task.newComments}`}
-        >
-          <CommentIcon />
-          {task.newComments}
-        </span>
-      )}
-
-      {/* Rodzic: pasek z podzadan (kazde proporcjonalnie do SP: zrobione / w toku / czeka) i ich suma. */}
-      {progress && progress.points > 0 && (
-        <>
-          <ParentBar progress={progress} className="row-parent-bar" />
-          <HoverNote label="Suma SP podzadań" value={parentBarTitle(progress)} className="row-sp row-sp-sum">
-            Σ{progress.points}
-          </HoverNote>
-        </>
-      )}
-
-      {/* Story pointy scruma — dociagane w tle, wiec pojawiaja sie chwile po liscie. */}
-      {/* Rodzic z wlasnymi SP pokazuje je obok sumy podzadan — wczesniej suma je zaslaniala. */}
-      {task.storyPoints != null && (!(progress && progress.points > 0) || task.storyPoints > 0) && (
-        <HoverNote label="Story points" value={task.storyPoints} className="row-sp">
-          {task.storyPoints}
-        </HoverNote>
-      )}
-
-      {deadlineLook === 'chip' ? (
-        <>
-          {/*
-            Slot terminu ZAWSZE zajety, takze bez terminu. Inaczej tytuly w kolejnych
-            wierszach konczylyby sie w roznych miejscach i prawa kolumna skakalaby
-            za kazdym zadaniem, ktore termin ma.
-          */}
-          {(() => {
-            if (!task.deadline) return <span className="row-due" />;
-            const due = dueInfo(task.deadline, oddane(task.status));
-            return (
-              <DueHover
-                deadline={task.deadline}
-                zrobione={oddane(task.status)}
-                oddaneDnia={task.closedDate}
-                className={`row-due${due.tone ? ` due-${due.tone}` : ''}`}
-              >
-                <CalendarIcon />
-                {due.label}
-              </DueHover>
-            );
-          })()}
-          <span className="row-meta" title="Ostatnia zmiana">
-            {shortDate(task.changedDate)}
-          </span>
-        </>
-      ) : deadlineLook === 'off' ? (
-        /* Bez wyroznienia: jedna data, bez ikony i bez koloru — dokladnie to, co
-           bylo tu wczesniej. Termin wciaz bije date zmiany, bo to on jest
-           terminem; roznicy po prostu nie widac. */
-        <span className="row-meta">{shortDate(task.deadline || task.changedDate)}</span>
-      ) : task.deadline ? (
-        /* Jedno miejsce jak dotad, ale termin ma ikone i jasniejszy kolor —
-           data zmiany zostaje przygaszona, wiec widac, ktora jest ktora. Pilny
-           termin barwi sie tak samo jak w wariancie z zetonem. */
-        <DueHover
-          deadline={task.deadline}
-          zrobione={oddane(task.status)}
-          oddaneDnia={task.closedDate}
-          className={`row-meta row-deadline${(() => {
-            const tone = dueInfo(task.deadline, oddane(task.status)).tone;
-            return tone ? ` due-${tone}` : '';
-          })()}`}
-        >
-          <CalendarIcon />
-          {shortDate(task.deadline)}
-        </DueHover>
-      ) : (
-        <span className="row-meta" title="Ostatnia zmiana">
-          {shortDate(task.changedDate)}
-        </span>
-      )}
-
-      {/* Prawy przycisk nie jest odkrywalny — to samo menu pod widocznym przyciskiem. */}
-      <button
-        className="row-more"
-        title="Akcje"
-        onClick={(e) => {
-          e.stopPropagation();
-          const r = e.currentTarget.getBoundingClientRect();
-          onMenu({ left: r.left, top: r.bottom + 4, bottom: r.bottom + 4 });
-        }}
-      >
-        <MoreIcon />
-      </button>
-
-      {/* Zaslepka -> pusty awatar, zeby nie wygladalo na przypisane. */}
-      {isUnassigned(task.responsibleId) ? (
-        <Avatar name={null} />
-      ) : (
-        <Avatar name={task.responsibleName} photo={task.responsiblePhoto} />
-      )}
+      <div className="row-body">
+        {rowLayout.lines.map((line, i) => (
+          <div key={i} className="row-line">
+            <div className="row-zone row-zone-left">{line.left.map((id) => <Fragment key={id}>{el[id]}</Fragment>)}</div>
+            <div className="row-zone row-zone-right">{line.right.map((id) => <Fragment key={id}>{el[id]}</Fragment>)}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -5766,7 +5876,8 @@ function FieldButton({
  * polnocy. Bitrix trzyma termin z godzina, ale binear ustawia go polem `type="date"`,
  * wiec godzina i tak jest umowna i nie ma czego odliczac dokladniej.
  */
-function DeadlineLeft({ value, zrobione }: { value: string; zrobione: boolean }) {
+function DeadlineLeft({ value, zrobione, task }: { value: string; zrobione: boolean; task?: Task }) {
+  const level = useDeadlineLevel(task ?? { deadline: null, storyPoints: null, tags: [], status: '' });
   /*
    * Przerysowanie O POLNOCY. Bez tego okno zostawione na noc pokazuje rano wczorajsze
    * "dziś". Celujemy w najblizsza polnoc, zamiast budzic sie co minute: ta wartosc
@@ -5812,7 +5923,7 @@ function DeadlineLeft({ value, zrobione }: { value: string; zrobione: boolean })
    * Praca ODDANA zostaje szara bez wzgledu na date — tez z `dueFill`.
    */
   return (
-    <span className="dd-deadline" style={{ color: dueFill(days, zrobione) }}>
+    <span className="dd-deadline" style={{ color: level ? LEVEL_COLOR[level] : dueFill(days, zrobione) }}>
       {label}
     </span>
   );
@@ -5959,6 +6070,7 @@ function DetailPanel({
   groupOf,
   canStoryPoints,
   width,
+  mode,
   onResize,
   onOpenTask,
   onRelatedChange,
@@ -5995,6 +6107,8 @@ function DetailPanel({
   /** Czy projekt ma scrum — tylko wtedy story pointy maja sens (edytowalny wiersz). */
   canStoryPoints: boolean;
   width: number;
+  /** Szuflada albo kolumna — patrz `DetailMode`. */
+  mode: DetailMode;
   onResize: (px: number) => void;
   onOpenTask: (id: number) => void;
   onPick: (kind: PickerKind, anchor: Anchor) => void;
@@ -6299,7 +6413,7 @@ function DetailPanel({
   const mine = detail?.taskId === task.id ? detail : null;
 
   return (
-    <aside className="detail" style={{ width }}>
+    <aside className={`detail detail-${mode}`} style={{ width }}>
       <div className="detail-resizer" onMouseDown={startResize} title="Przeciągnij, aby zmienić szerokość" />
       <div className="detail-head">
         {/*
@@ -6429,7 +6543,7 @@ function DetailPanel({
           <dt>Termin</dt>
           <dd className="dd-deadline-cell">
             <DateField value={task.deadline} onChange={onDeadline} />
-            {task.deadline && <DeadlineLeft value={task.deadline} zrobione={oddane(task.status)} />}
+            {task.deadline && <DeadlineLeft value={task.deadline} zrobione={oddane(task.status)} task={task} />}
           </dd>
 
           {/* ── kto ─────────────────────────────────────────────────────── */}
@@ -7248,6 +7362,7 @@ function ViewMenu({
     /** Wariant kolorowania grup listy — do porownania na zywo. */
     tint: ListTint;
     deadline: DeadlineLook;
+    detailMode: DetailMode;
     empty: boolean;
     counters: boolean;
     /** Kafelki do wyboru w panelu olowka — klucz, podpis, czy widoczny. */
@@ -7272,6 +7387,8 @@ function ViewMenu({
     unassigned: () => void;
     tint: (v: ListTint) => void;
     deadline: (v: DeadlineLook) => void;
+    rowLayout: () => void;
+    detailMode: (v: DetailMode) => void;
     empty: () => void;
     counters: () => void;
     toggleColumn: (name: string) => void;
@@ -7283,11 +7400,10 @@ function ViewMenu({
   };
 }) {
   const Control = DisplaySelect;
-  /* 440, nie 300: zakladki widoku („Planowanie", a od piatej takze „Podsumowanie") nie
-     miescily sie obok ikon i podpis wchodzil na sasiedni. Szerszy panel daje tez oddech
-     wierszom „etykieta + kontrolka" ponizej. */
-  const width = 440;
-  const height = 510;
+  /* 540: piec zakladek („Podsumowanie" najdluzsze) miesci sie w jednym rzedzie, a wiersze
+     „etykieta + kontrolka" maja miejsce na dluzsze nazwy opcji (wczesniej 440). */
+  const width = Math.min(540, window.innerWidth - 24);
+  const height = 560;
   const rowClass = 'ds-row';
   // Tablica to zawsze kanban po etapach — grupowanie i podgrupowanie jej nie dotycza,
   // wiec na tablicy oba wiersze sa wyszarzone i nieklikalne (patrz .ds-row-off).
@@ -7371,6 +7487,7 @@ function ViewMenu({
           </button>
         </div>
 
+        <div className="ds-colhead">Układ listy</div>
         <div className={groupRow}>
           <span className="ds-label">Grupowanie</span>
           <Control
@@ -7438,6 +7555,7 @@ function ViewMenu({
           />
         </div>
 
+        <div className="ds-colhead">Wygląd</div>
         <div className={rowClass}>
           <span className="ds-label">Motyw</span>
           <Control
@@ -7466,6 +7584,30 @@ function ViewMenu({
             options={DEADLINE_LOOKS.map((d) => ({ value: d.key, label: d.label }))}
             onPick={(v) => on.deadline(v as DeadlineLook)}
           />
+        </div>
+
+        {/* Panel zadania: szuflada nakrywa liste, kolumna ja zweza — gdy po prawej sa wazne dane. */}
+        <div className={rowClass}>
+          <span className="ds-label">Panel zadania</span>
+          <Control
+            value={state.detailMode}
+            options={DETAIL_MODES.map((d) => ({ value: d.key, label: d.label }))}
+            onPick={(v) => on.detailMode(v as DetailMode)}
+          />
+        </div>
+
+        {/* Konfigurator karty: co po lewej, co po prawej, w ilu liniach. */}
+        <div className={rowClass}>
+          <span className="ds-label">Karta zadania</span>
+          <button
+            className="btn"
+            onClick={() => {
+              onClose();
+              on.rowLayout();
+            }}
+          >
+            Ułóż elementy…
+          </button>
         </div>
 
         <div className={rowClass}>
@@ -8887,6 +9029,11 @@ export default function App() {
   /* Zapisane ustawienie moze pochodzic ze starszej wersji (byl tez wariant sam
      naglowek) — nieznana wartosc wraca do "bez koloru", zamiast zostawiac klase,
      ktorej arkusz juz nie zna. */
+  const [rowLayout, setRowLayout] = useState<RowLayout>(saved.rowLayout);
+  const [rowLayoutOpen, setRowLayoutOpen] = useState(false);
+  const [detailMode, setDetailMode] = useState<DetailMode>(() =>
+    DETAIL_MODES.some((d) => d.key === saved.detailMode) ? saved.detailMode : 'drawer',
+  );
   const [deadlineLook, setDeadlineLook] = useState<DeadlineLook>(() =>
     DEADLINE_LOOKS.some((d) => d.key === saved.deadlineLook) ? saved.deadlineLook : 'mark',
   );
@@ -10034,9 +10181,51 @@ export default function App() {
     [allEmptyKeys, shownEmpty],
   );
 
+  /*
+   * Kolejny sprint i komparator planowania stoja TU, a nie przy widoku planowania: sortowanie
+   * „Jak w planowaniu" na liscie i tablicy czyta ten sam stos kluczy, wiec komparator musi byc
+   * gotowy, zanim zbudujemy grupy. Kolejny sprint to najwczesniejszy ze statusem `planned`
+   * (sprinty przychodza posortowane po dacie startu, wiec wystarczy pierwszy).
+   */
+  const nextSprint = useMemo(
+    () => sprints.find((sp) => sp.status === 'planned') ?? null,
+    [sprints],
+  );
+
+  /* Koniec obecnego sprintu — od niego zalezy kolor terminu (pasek) i kolejnosc „Terminy" w planowaniu. */
+  const councilEnd = useMemo(
+    () => sprintDeadline((nextSprint ?? activeSprint)?.dateEnd ?? null),
+    [nextSprint, activeSprint],
+  );
+
+  const planCmp = useMemo(() => {
+    /*
+     * Pozycja zadania w procesie. Zadanie poza sprintem nie ma etapu — laduje na
+     * koncu, bo "jeszcze nigdzie nie doszlo" jest dalej niz kazda kolumna.
+     */
+    const stageRank = (t: Task): number => {
+      if (!t.stageId) return Number.MAX_SAFE_INTEGER;
+      const name = stageNames.get(t.stageId);
+      const at = name === undefined ? undefined : stageOrder.get(name);
+      return at ?? Number.MAX_SAFE_INTEGER;
+    };
+    return planComparator(planSort, {
+      axis: (by, a, b) => compareBy(by as SortBy, a, b),
+      stageRank,
+      me,
+      paybackRank,
+      /* Ten sam poziom co kolor paska: czerwony 0, zolty 1, reszta 2 (praca oddana nie ma pilnosci). */
+      deadlineRank: (t) => {
+        if (!t.deadline || oddane(t.status)) return 2;
+        const level = deadlineLevel(t, councilEnd);
+        return level === 'red' ? 0 : level === 'yellow' ? 1 : 2;
+      },
+    });
+  }, [planSort, me, stageNames, stageOrder, councilEnd]);
+
   const groups = useMemo(
-    () => bucket(filtered, groupBy, stageNames, stageOrder, labels.status, me, sort, emptyKeysFor(groupBy)),
-    [filtered, groupBy, stageNames, stageOrder, labels.status, me, sort, emptyKeysFor],
+    () => bucket(filtered, groupBy, stageNames, stageOrder, labels.status, me, sort, emptyKeysFor(groupBy), planCmp),
+    [filtered, groupBy, stageNames, stageOrder, labels.status, me, sort, emptyKeysFor, planCmp],
   );
 
   /**
@@ -10054,13 +10243,13 @@ export default function App() {
          * wyboru „bez grupowania".
          */
         subs: groupBy !== 'flat' && subGroupBy
-          ? bucket(g.tasks, subGroupBy, stageNames, stageOrder, labels.status, me, sort, emptyKeysFor(subGroupBy)).map((s) => ({
+          ? bucket(g.tasks, subGroupBy, stageNames, stageOrder, labels.status, me, sort, emptyKeysFor(subGroupBy), planCmp).map((s) => ({
               ...s,
               nodes: nest(s.tasks, collapsedTasks),
             }))
           : [{ key: '', label: '', order: 0, tasks: g.tasks, nodes: nest(g.tasks, collapsedTasks) }],
       })),
-    [groups, groupBy, subGroupBy, stageNames, stageOrder, labels.status, collapsedTasks, me, sort, emptyKeysFor],
+    [groups, groupBy, subGroupBy, stageNames, stageOrder, labels.status, collapsedTasks, me, sort, emptyKeysFor, planCmp],
   );
 
   /** Klucz zwijania podgrupy musi byc unikalny w obrebie calej listy. */
@@ -10233,6 +10422,8 @@ export default function App() {
       planZwiniete,
       listTint,
       deadlineLook,
+      rowLayout,
+      detailMode,
       szukajWOpisach: wOpisach,
       showEmpty,
       showCounters,
@@ -10246,7 +10437,7 @@ export default function App() {
     } catch {
       // brak miejsca / tryb prywatny — ustawienia po prostu nie przezyja odswiezenia
     }
-  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
+  }, [viewMode, groupBy, subGroupBy, sort, scopePref, onlyMine, withUnassigned, planDone, planReview, planSort, planMoce, planKolejka, planPominieci, planTura, planTylkoDoStartu, planPrzeniesienie, planKolejkaWl, planPodzial, planZwiniete, listTint, deadlineLook, rowLayout, detailMode, wOpisach, showEmpty, showCounters, shownEmpty, detailWidth, collapsed, collapsedTasks]);
 
   // ── Zapisane widoki (globalne) ──
   useEffect(() => {
@@ -11009,15 +11200,6 @@ export default function App() {
     });
   }, [nastepnySprint, groupId, activeSprint, me, reload]);
 
-  /*
-   * Kolejny sprint do planowania: najwczesniejszy ze statusem `planned`.
-   * Sprinty przychodza posortowane po dacie startu, wiec wystarczy pierwszy.
-   */
-  const nextSprint = useMemo(
-    () => sprints.find((sp) => sp.status === 'planned') ?? null,
-    [sprints],
-  );
-
   /**
    * SAMO przeniesienie — jedyne miejsce, w ktorym zadanie zmienia sprint w tym
    * widoku. Wchodzi sie tu dwiema drogami: wprost (nie bylo brakow) albo przez
@@ -11215,24 +11397,6 @@ export default function App() {
    * Osie wspolne z lista ida przez ten sam `compareBy`, ktorego uzywa lista —
    * inaczej "po priorytecie" znaczyloby tu co innego niz tam.
    */
-  const planCmp = useMemo(() => {
-    /*
-     * Pozycja zadania w procesie. Zadanie poza sprintem nie ma etapu — laduje na
-     * koncu, bo "jeszcze nigdzie nie doszlo" jest dalej niz kazda kolumna.
-     */
-    const stageRank = (t: Task): number => {
-      if (!t.stageId) return Number.MAX_SAFE_INTEGER;
-      const name = stageNames.get(t.stageId);
-      const at = name === undefined ? undefined : stageOrder.get(name);
-      return at ?? Number.MAX_SAFE_INTEGER;
-    };
-    return planComparator(planSort, {
-      axis: (by, a, b) => compareBy(by as SortBy, a, b),
-      stageRank,
-      me,
-      paybackRank,
-    });
-  }, [planSort, me, stageNames, stageOrder]);
 
   /*
    * Odsiew po statusie NIE jest tu robiony — robi go `Planning`, bo rozni sie
@@ -11358,14 +11522,14 @@ export default function App() {
      */
     const keys = new Set(allEmptyKeys(axis));
     if (!keys.size) return [] as { name: string; present: boolean; pinned: boolean }[];
-    return bucket(filtered, axis, stageNames, stageOrder, labels.status, me, sort, allEmptyKeys(axis))
+    return bucket(filtered, axis, stageNames, stageOrder, labels.status, me, sort, allEmptyKeys(axis), planCmp)
       .filter((g) => keys.has(g.label))
       .map((g) => ({
         name: g.label,
         present: g.tasks.length > 0,
         pinned: shownEmpty.includes(pinKey(axis, g.label)),
       }));
-  }, [colAxis, filtered, stageNames, stageOrder, labels.status, me, sort, allEmptyKeys, shownEmpty]);
+  }, [colAxis, filtered, stageNames, stageOrder, labels.status, me, sort, allEmptyKeys, shownEmpty, planCmp]);
 
   /*
    * Karty na tablicy sortujemy tym samym porzadkiem co wiersze w liscie — kolumna
@@ -11373,8 +11537,8 @@ export default function App() {
    * (z moimi zadaniami zawsze na gorze). Bez tego karty stały w kolejnosci z Bitriksa.
    */
   const boardTasks = useMemo(
-    () => [...filtered].sort(taskComparator(sort, me)),
-    [filtered, sort, me],
+    () => [...filtered].sort(taskComparator(sort, me, planCmp)),
+    [filtered, sort, me, planCmp],
   );
 
   const commands = useMemo<Command[]>(() => {
@@ -11956,6 +12120,8 @@ export default function App() {
   );
 
   return (
+    <DeadlineCouncilCtx.Provider value={councilEnd}>
+    <RowLayoutCtx.Provider value={rowLayout}>
     <div className="app">
       <main className="main">
         <header className="toolbar">
@@ -12036,22 +12202,21 @@ export default function App() {
               na kazdej szerokosci ekranu i nie znika razem z panelem bocznym. */}
           <button
             className="display-btn"
-            title={`Grupowanie: ${GROUPS.find((g) => g.key === groupBy)?.help ?? ''}`}
+            title="Ustawienia widoku: widok, grupowanie, sortowanie, wygląd, karta zadania"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               setViewMenu({ left: r.left - 150, top: r.bottom + 4, bottom: r.bottom + 4 });
             }}
           >
-            {/* Bez ikony widoku: biezacy tryb pokazuje przelacznik w pasku, a ten
-                przycisk mowi o GRUPOWANIU. Dwa wskazniki tego samego stanu w jednym
-                rzedzie tylko kaza sprawdzac, ktory z nich jest aktualny. */}
-            <span className="display-label">Grupuj:</span>
-            {GROUPS.find((g) => g.key === groupBy)?.label ?? '—'}
-            {subGroupBy && (
-              <span className="display-label">
-                › {GROUPS.find((g) => g.key === subGroupBy)?.label}
-              </span>
-            )}
+            {/* Pod tym przyciskiem jest caly panel ustawien widoku (widok, grupowanie, sortowanie,
+                wyglad, karta zadania), wiec nazywa sie „Ustawienia", a nie „Grupuj" (slowo „Widok" nosi juz chip zapisanych widokow obok). Biezace
+                grupowanie zostaje obok jako podpowiedz. */}
+            <SlidersIcon />
+            Ustawienia
+            <span className="display-label">
+              · {GROUPS.find((g) => g.key === groupBy)?.label ?? '—'}
+              {subGroupBy && <> › {GROUPS.find((g) => g.key === subGroupBy)?.label}</>}
+            </span>
             <ChevronIcon open={false} />
           </button>
 
@@ -12696,6 +12861,7 @@ export default function App() {
           groupOf={groupOfTask}
           canStoryPoints={activeSprint !== null}
           width={detailWidth}
+          mode={detailMode}
           onResize={setDetailWidth}
           onOpenTask={setOpenId}
           onRelatedChange={(id, has) =>
@@ -12977,6 +13143,7 @@ export default function App() {
             unassigned: withUnassigned,
             tint: listTint,
             deadline: deadlineLook,
+            detailMode,
             empty: showEmpty,
             counters: showCounters,
             filtersOn: anyFilter(filters),
@@ -13006,6 +13173,8 @@ export default function App() {
             unassigned: () => setWithUnassigned((v) => !v),
             tint: setListTint,
             deadline: setDeadlineLook,
+            rowLayout: () => setRowLayoutOpen(true),
+            detailMode: setDetailMode,
             empty: () => setShowEmpty((v) => !v),
             counters: () => setShowCounters((v) => !v),
             toggleColumn,
@@ -13020,6 +13189,10 @@ export default function App() {
 
       {paletteOpen && (
         <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />
+      )}
+
+      {rowLayoutOpen && (
+        <RowLayoutModal layout={rowLayout} onChange={setRowLayout} onClose={() => setRowLayoutOpen(false)} />
       )}
 
       {helpOpen && <Shortcuts onClose={() => setHelpOpen(false)} />}
@@ -13125,5 +13298,7 @@ export default function App() {
         ))}
       </div>
     </div>
+    </RowLayoutCtx.Provider>
+    </DeadlineCouncilCtx.Provider>
   );
 }

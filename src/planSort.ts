@@ -75,12 +75,23 @@ const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki'
 /**
  * Domyslna kolejnosc waznosci (macierz Eisenhowera):
  *   1. priorytet Bitriksa — plomien to awaria, firma nie moze pracowac, wiec nic go nie wyprzedza,
- *   2. macierz: tag A, B, C, D (bez tagu na koncu),
- *   3. okres zwrotu rosnaco (ZWROT-3 przed ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu na koncu),
- *   4. story pointy rosnaco — mniejsze pierwsze, bez wyceny na koncu.
+ *   2. terminy: najpierw KOLOR (czerwony — musi wejsc w obecnym sprincie, zolty — w nastepnym),
+ *      w obrebie koloru data terminu; zielone i bez terminu przechodza do kolejnego poziomu,
+ *   3. macierz: tag A, B, C, D (bez tagu na koncu),
+ *   4. okres zwrotu rosnaco (ZWROT-3 przed ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu na koncu),
+ *   5. story pointy rosnaco — mniejsze pierwsze, bez wyceny na koncu.
  * Pula i tag „Wysoki" zostaja dostepne jako poziomy, tylko nie sa juz w domyslnym stosie.
  */
 export const PLAN_SORT_DOMYSLNY: PlanSortLevel[] = [
+  { by: 'priority', dir: 'asc' },
+  { by: 'terminy', dir: 'asc' },
+  { by: 'macierz', dir: 'asc' },
+  { by: 'zwrot', dir: 'asc' },
+  { by: 'sp', dir: 'asc' },
+];
+
+/** Domyslny stos sprzed osi „terminy" — kto go nie ruszal, dostaje nowy. */
+const DOMYSLNY_BEZ_TERMINOW: PlanSortLevel[] = [
   { by: 'priority', dir: 'asc' },
   { by: 'macierz', dir: 'asc' },
   { by: 'zwrot', dir: 'asc' },
@@ -98,6 +109,7 @@ const DOMYSLNY_Z_PULA: PlanSortLevel[] = [
 
 /** Dawne domyslne stosy — kto ich nie ruszal, dostaje nowy domyslny, a nie zamrozony stary. */
 const STARE_DOMYSLNE: PlanSortLevel[][] = [
+  DOMYSLNY_BEZ_TERMINOW,
   DOMYSLNY_Z_PULA,
   [
     { by: 'priority', dir: 'asc' },
@@ -159,6 +171,11 @@ export function planComparator(
     stageRank: (t: Task) => number;
     me: number | null;
     paybackRank?: (t: Task) => number;
+    /**
+     * Ranga terminu zadania: 0 — musi wejsc w obecnym sprincie (czerwony), 1 — w nastepnym (zolty),
+     * 2 — reszta (zielony albo bez terminu). Bez niej os „terminy" niczego nie rozstrzyga.
+     */
+    deadlineRank?: (t: Task) => number;
   },
 ): Cmp {
   /*
@@ -173,6 +190,17 @@ export function planComparator(
     return deadlineTime(a) - deadlineTime(b);
   };
 
+  /*
+   * „Terminy": najpierw kolor, w obrebie koloru data. Zielone i bez terminu to jedna ranga bez daty —
+   * kolejnosc miedzy nimi rozstrzygaja dalsze poziomy stosu (macierz, zwrot, SP), a nie odlegly termin.
+   */
+  const urgency = deps.deadlineRank ?? (() => 2);
+  const byDeadlines: Cmp = (a, b) => {
+    const r = urgency(a) - urgency(b);
+    if (r !== 0 || urgency(a) >= 2) return r;
+    return deadlineTime(a) - deadlineTime(b);
+  };
+
   const levels = sort.map((lvl): Cmp => {
     /* Kazda os ROSNACO — kierunek doklada dopiero `odwroc`. */
     const f: Cmp =
@@ -184,7 +212,9 @@ export function planComparator(
           ? (a, b) => wysokiRank(a) - wysokiRank(b)
           : lvl.by === 'sp'
             ? spComparator(lvl.dir)
-            : lvl.by === 'macierz'
+            : lvl.by === 'terminy'
+              ? byDeadlines
+              : lvl.by === 'macierz'
               ? (a, b) => macierzRank(a) - macierzRank(b)
               : lvl.by === 'zwrot'
               ? byPayback

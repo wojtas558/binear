@@ -247,12 +247,62 @@ describe('stos z pulami: plomien, pula, Wysoki, zwrot, SP malejaco', () => {
   });
 });
 
+describe('os „terminy"', () => {
+  /* Ranga z mapy id → ranga: 0 czerwony, 1 zolty, reszta 2. */
+  const rangi: Record<number, number> = { 1: 0, 2: 0, 3: 1, 4: 2, 5: 2 };
+  const d = { ...deps, deadlineRank: (t: Task) => rangi[t.id] ?? 2 };
+  const dl = (id: number, deadline: string | null, p: Partial<Task> = {}) => task(id, { deadline, ...p });
+
+  it('najpierw kolor: czerwone przed zoltymi przed reszta', () => {
+    const tasks = [dl(4, null), dl(3, '2026-11-02'), dl(1, '2026-11-02')];
+    expect(ids(tasks, [{ by: 'terminy', dir: 'asc' }], d)).toEqual([1, 3, 4]);
+  });
+
+  it('w obrebie koloru decyduje data terminu, a nie kolejnosc zadan', () => {
+    const tasks = [dl(1, '2026-11-05'), dl(2, '2026-11-02')];
+    expect(ids(tasks, [{ by: 'terminy', dir: 'asc' }], d)).toEqual([2, 1]);
+  });
+
+  it('zielone i bez terminu nie sa porzadkowane data — rozstrzyga kolejny poziom stosu', () => {
+    const tasks = [
+      dl(4, '2026-12-30', { tags: ['B'] }),
+      dl(5, null, { tags: ['A'] }),
+    ];
+    const stack = [{ by: 'terminy', dir: 'asc' as const }, { by: 'macierz', dir: 'asc' as const }];
+    expect(ids(tasks, stack, d)).toEqual([5, 4]);
+  });
+
+  it('domyslny stos: plomien, potem terminy wg koloru i daty, potem macierz A–D', () => {
+    expect(PLAN_SORT_DOMYSLNY.map((l) => l.by)).toEqual(['priority', 'terminy', 'macierz', 'zwrot', 'sp']);
+    const tasks = [
+      dl(5, null, { tags: ['A'] }),
+      dl(3, '2026-11-09', { tags: ['A'] }),
+      dl(2, '2026-11-04', { tags: ['D'] }),
+      dl(1, '2026-11-02', { tags: ['D'] }),
+      dl(6, null, { priority: '2' }),
+    ];
+    // plomien (6) na gorze, potem czerwone wg daty (1, 2), zolte (3), na koncu A bez terminu (5)
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, { ...d, axis: deps.axis })).toEqual([6, 1, 2, 3, 5]);
+  });
+});
+
 describe('migratePlanSort', () => {
   const STARY = [
     { by: 'priority', dir: 'asc' as const },
     { by: 'wysoki', dir: 'asc' as const },
     { by: 'sp', dir: 'desc' as const },
   ];
+
+  it('domyslny stos sprzed osi terminy tez zamienia na nowy', () => {
+    expect(
+      migratePlanSort([
+        { by: 'priority', dir: 'asc' as const },
+        { by: 'macierz', dir: 'asc' as const },
+        { by: 'zwrot', dir: 'asc' as const },
+        { by: 'sp', dir: 'asc' as const },
+      ]),
+    ).toEqual(PLAN_SORT_DOMYSLNY);
+  });
 
   it('kazdy stary domyslny (zapisany w przegladarce) zamienia na nowy', () => {
     expect(migratePlanSort(STARY)).toEqual(PLAN_SORT_DOMYSLNY);
@@ -312,9 +362,10 @@ describe('migratePlanSort', () => {
 describe('domyslna kolejnosc planowania: plomien, macierz A-D, zwrot, mniejsze SP', () => {
   const d = { ...deps, paybackRank };
 
-  it('domyslny stos to priorytet, macierz, zwrot, SP rosnaco', () => {
+  it('domyslny stos to priorytet, terminy, macierz, zwrot, SP rosnaco', () => {
     expect(PLAN_SORT_DOMYSLNY).toEqual([
       { by: 'priority', dir: 'asc' },
+      { by: 'terminy', dir: 'asc' },
       { by: 'macierz', dir: 'asc' },
       { by: 'zwrot', dir: 'asc' },
       { by: 'sp', dir: 'asc' },

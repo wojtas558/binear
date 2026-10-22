@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 /**
@@ -32,6 +32,7 @@ export function HoverNote({
   note,
   noteColor,
   className,
+  style,
   przyKursorze,
   children,
 }: {
@@ -50,6 +51,8 @@ export function HoverNote({
   /** Kolor dopisku — dowolna wartosc CSS, zwykle wyliczona (patrz `dueFill`). */
   noteColor?: string;
   className?: string;
+  /** Styl elementu pod kursorem — np. kolor daty terminu. */
+  style?: CSSProperties;
   /**
    * Zaczep kartę o KURSOR, nie o element.
    *
@@ -96,6 +99,7 @@ export function HoverNote({
   return (
     <span
       className={className}
+      style={style}
       onMouseEnter={(e) =>
         setKotwica(
           przyKursorze
