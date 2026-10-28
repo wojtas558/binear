@@ -92,11 +92,19 @@ The tell: IT-754 had `newCommentsCount: 2` but showed "No comments" — no forum
 `task.commentitem.getlist` truthfully returned zero while the comment sat in chat.
 The correlation is binary: `forumTopicId` present → comments, absent → always zero.
 
-**System entries are filtered by `author_id === 0`** ("changed stage", "is now an
-observer", "task chat created") — a chat holds far more of these than real
-comments (IT-754: 6 messages, 1 comment). Author names ride in the response's
-`users` field, so no extra `user.get`. Threads cut off at 100 messages
-(`im.dialog.messages.get` pages back via `LAST_ID`, rarely needed).
+**System entries (`author_id === 0`) are hidden behind an "Akcje · N" toggle**
+("changed stage", "is now an observer", "task chat created") — a chat holds far
+more of these than real comments (IT-754: 6 messages, 1 comment). Off by default,
+remembered per browser (`src/chatActions.ts`). Shown as one grey line: the actor's
+avatar (from `[USER=id]`, missing photos via one `user.get`), a stage or status ring
+for stage/status changes, BBCode stripped, and Bitrix's English phrasings translated
+to its Polish wording — an English action in binear means a new phrasing to add there.
+While hidden they don't count toward the unread badge either: Bitrix's
+`newCommentsCount` includes them, so tasks with unread messages get their chat tail
+re-read in one batch and recounted (`unreadWithoutActions`); a task that can't be
+recounted keeps Bitrix's number. Author names ride in the response's `users` field.
+Threads cut off at 100 messages (`im.dialog.messages.get` pages back via `LAST_ID`,
+rarely needed).
 
 **Sending still goes to the forum** (`task.commentitem.add`). On a forum-less task
 it probably won't show in the Bitrix UI — the right route would be `im.message.add`

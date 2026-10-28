@@ -7,6 +7,7 @@ import { colDropId, dragId } from './dnd';
 import { HoverNote } from './HoverNote';
 import { TaskCode } from './TaskCode';
 import { ImportantMarks } from './ImportantMarks';
+import { useUnread } from './chatActions';
 
 /**
  * Tablica = kanban sprintu z Bitriksa, nie wlasny wymysl: kolumny to etapy
@@ -293,6 +294,8 @@ function BoardCard({
   /** Toast po skopiowaniu kodu — pusty tekst znaczy, ze schowek odmowil. */
   onCopied: (code: string) => void;
 }) {
+  /* Bez akcji Bitriksa, gdy sa ukryte — patrz chatActions.ts. */
+  const unread = useUnread(t);
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
     id: dragId(t.id),
     disabled: !draggable,
@@ -357,10 +360,10 @@ function BoardCard({
           </span>
         )}
         {isNew && <span className="row-new">nowe</span>}
-        {t.newComments > 0 && (
-          <span className="row-unread" title={`Nieprzeczytane komentarze: ${t.newComments}`}>
+        {unread > 0 && (
+          <span className="row-unread" title={`Nieprzeczytane komentarze: ${unread}`}>
             <CommentIcon />
-            {t.newComments}
+            {unread}
           </span>
         )}
         {/* Termin — ten sam format co w wierszu listy. */}
