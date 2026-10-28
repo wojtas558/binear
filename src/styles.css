@@ -2535,6 +2535,7 @@ input[type='search']::-webkit-search-decoration {
 /* Stale szerokosci kolumn — inaczej dluzsze kody (#114937 vs IT-747)
    przesuwaly tytuly i cala lista wygladala na krzywa. */
 .row > svg,
+.row-prefix > svg,
 .row-zone > svg,
 .prio-spacer {
   flex: 0 0 16px;
