@@ -2535,6 +2535,7 @@ input[type='search']::-webkit-search-decoration {
 /* Stale szerokosci kolumn — inaczej dluzsze kody (#114937 vs IT-747)
    przesuwaly tytuly i cala lista wygladala na krzywa. */
 .row > svg,
+.row-prefix > svg,
 .row-zone > svg,
 .prio-spacer {
   flex: 0 0 16px;
@@ -4593,6 +4594,69 @@ a.mention:hover {
   font-size: var(--t-micro);
   font-weight: var(--w-medium);
   color: var(--fg-dim);
+}
+
+/* Naglowek watku z przelacznikiem akcji Bitriksa po prawej (chatActions.ts). */
+.comments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+}
+
+.comments-head h2 {
+  margin: 0;
+}
+
+.comments-actions-toggle {
+  padding: 1px var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: var(--t-micro);
+  color: var(--fg-dim);
+}
+
+.comments-actions-toggle:hover {
+  color: var(--fg);
+}
+
+.comments-actions-toggle.is-on {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+
+/* Akcja Bitriksa w watku: jedna szara linia, bez awatara i dymka — nie udaje komentarza. */
+.comment-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 5px;
+  margin: 2px 0;
+  padding-left: var(--s2);
+  border-left: 2px solid var(--border);
+  font-size: var(--t-mini);
+  color: var(--fg-dim);
+}
+
+.comment-action > .avatar,
+.comment-action > svg {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  font-size: 7px;
+  align-self: center;
+}
+
+.comment-action strong {
+  font-weight: var(--w-medium);
+  color: var(--fg-muted);
+}
+
+.comment-action-date {
+  margin-left: auto;
+  padding-left: var(--s2);
+  font-size: var(--t-micro);
 }
 
 /* Pozycja checklisty jest teraz klikalna (odhaczanie wprost z panelu). */

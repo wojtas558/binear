@@ -4,6 +4,7 @@ import { QUESTION, type ChatMessage } from './counters';
 import { reactionsByMessage, type CommentReaction } from './reactions';
 import { describe, logAction, slimParams, taskIdOf, WRITE_METHODS } from './history';
 import { withoutFolders } from './sprintStats';
+import { unreadWithoutActions } from './chatActions';
 
 export class BxError extends Error {
   constructor(
@@ -1497,6 +1498,8 @@ export interface Comment {
   files: CommentFile[];
   /** Reakcje (👍, ❤️…) — tylko komentarze z czatu; forum ich nie ma. Patrz reactions.ts. */
   reactions: CommentReaction[];
+  /** Akcja zapisana przez Bitrix (author_id 0): „zmienil termin"… Panel pokazuje je na zyczenie — chatActions.ts. */
+  system?: boolean;
 }
 
 const stamp = (iso: string | null): number => {
@@ -1620,7 +1623,7 @@ async function fetchChatComments(chatId: number, beforeId?: number): Promise<Com
     });
   }
 
-  return Object.values((res?.messages ?? {}) as Record<string, any>)
+  const lista: Comment[] = Object.values((res?.messages ?? {}) as Record<string, any>)
     .filter(Boolean)
     .map((m: any) => {
       const authorId = Number(m.author_id);
@@ -1640,19 +1643,32 @@ async function fetchChatComments(chatId: number, beforeId?: number): Promise<Com
           .map((id) => byFile.get(Number(id)))
           .filter((f): f is CommentFile => Boolean(f)),
         reactions: reakcje.get(Number(m.id)) ?? [],
+        ...(authorId === 0 ? { system: true } : {}),
       };
     })
     /*
      * `author_id: 0` to wpisy systemowe — "zmienil etap na W toku", "jest teraz
      * obserwatorem", "utworzono czat zadania". W czacie zadania jest ich
-     * wielokrotnie wiecej niz prawdziwych komentarzy i bez tego filtra dyskusja
-     * ginie w dzienniku zmian.
+     * wielokrotnie wiecej niz prawdziwych komentarzy, wiec zostaja oznaczone
+     * (`system`) i panel pokazuje je tylko na zyczenie (chatActions.ts).
+     *
+     * Komentarz z SAMYM obrazkiem ma pusty tekst — zostaje, bo ma pliki.
      */
-    /*
-     * ...ale komentarz z SAMYM obrazkiem ma pusty tekst i wypadal tu razem z nimi,
-     * czyli nie bylo go widac w ogole — nie "bez zdjecia", tylko wcale.
-     */
-    .filter((c) => c.authorId !== 0 && (c.text || c.files.length > 0));
+    .filter((c) => (c.authorId === 0 ? Boolean(c.text) : Boolean(c.text || c.files.length > 0)));
+
+  /*
+   * Awatar wykonawcy akcji („[USER=28]Robert…[/USER] zmienil etap"). Autorem akcji jest system (0),
+   * wiec zdjecie bierzemy po osobie z tresci: najpierw z `users` tej odpowiedzi, reszta jednym
+   * `user.get` — w czacie zadania polowa wykonawcow nic tu nie pisala.
+   */
+  const wykonawca = (c: Comment) => (c.system ? Number(/^\s*\[USER=(\d+)\]/i.exec(c.text)?.[1]) || null : null);
+  const brak = [...new Set(lista.map(wykonawca))].filter((id): id is number => id !== null && !photos.has(id));
+  const dociagniete = await fetchPhotos(brak);
+  for (const c of lista) {
+    const id = wykonawca(c);
+    if (id !== null) c.authorPhoto = photos.get(id) ?? dociagniete.get(id) ?? null;
+  }
+  return lista;
 }
 
 /**
@@ -1699,6 +1715,43 @@ export async function fetchComments(taskId: number, chatId: number | null): Prom
 export async function fetchOlderComments(chatId: number, beforeId: number): Promise<Comment[]> {
   const starsze = await fetchChatComments(chatId, beforeId);
   return starsze.sort((a, b) => stamp(a.date) - stamp(b.date));
+}
+
+/**
+ * Nieprzeczytane bez akcji (patrz `unreadWithoutActions`) dla zadan z licznikiem Bitriksa > 0.
+ * Koncowka czatu kazdego z nich jednym batchem; zadanie, ktorego nie udalo sie przeliczyc, zostaje
+ * przy liczniku Bitriksa. Tylko odczyt.
+ */
+export async function fetchUnreadWithoutActions(
+  tasks: readonly { id: number; chatId: number | null; newComments: number }[],
+  me: number | null,
+): Promise<Map<number, number>> {
+  const todo = tasks.filter((t) => t.newComments > 0 && t.chatId !== null).slice(0, 100);
+  const out = new Map<number, number>();
+  for (let i = 0; i < todo.length; i += MAX_BATCH) {
+    const part = todo.slice(i, i + MAX_BATCH);
+    /*
+     * `runBatch`, nie `callBatch`: ten rzuca przy pierwszym bledzie i jeden niedostepny czat
+     * (usuniete zadanie, odebrany dostep) kasowal przeliczenie calej paczki. Tu blad dotyczy
+     * tylko swojego zadania.
+     */
+    const got = await runBatch(
+      part.map((t) => ({
+        method: 'im.dialog.messages.get',
+        params: { DIALOG_ID: `chat${t.chatId}`, LIMIT: Math.min(50, t.newComments * 4 + 10) },
+      })),
+    ).catch(() => [] as BatchSlot[]);
+    got.forEach((slot, j) => {
+      const res = slot.error ? null : slot.result;
+      if (!res) return;
+      const lines = Object.values((res.messages ?? {}) as Record<string, any>)
+        .filter(Boolean)
+        .map((m: any) => ({ id: Number(m.id), authorId: Number(m.author_id) || 0, text: str(m.text) }));
+      const n = unreadWithoutActions(lines, part[j].newComments, me);
+      if (n !== null) out.set(part[j].id, n);
+    });
+  }
+  return out;
 }
 
 export interface ChatTail {

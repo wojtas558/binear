@@ -17,6 +17,15 @@ import {
 import { createPortal } from 'react-dom';
 import { HoverNote } from './HoverNote';
 import {
+  ActionStagesCtx,
+  actionIcon,
+  actionText,
+  setShowActions,
+  UnreadWithoutActionsCtx,
+  useShowActions,
+  useUnread,
+} from './chatActions';
+import {
   CLOSED_STATUSES,
   REVIEW_STATUSES,
   FALLBACK_PRIORITY,
@@ -28,6 +37,7 @@ import {
   deleteComment,
   editComment,
   fetchComments,
+  fetchUnreadWithoutActions,
   fetchOlderComments,
   setReaction,
   fetchActiveSprint,
@@ -3673,6 +3683,8 @@ function TaskRow({
   }, [active]);
 
   const rowLayout = useContext(RowLayoutCtx);
+  /* Bez akcji Bitriksa, gdy sa ukryte — patrz chatActions.ts. */
+  const unread = useUnread(task);
   /* Tagi bez BUG (ten jest znakiem waznosci), podzielone na litere macierzy A–D i reszte. */
   const tagi = withoutBugTag(task.tags);
   const tagiMacierz = tagi.filter(jestMacierz);
@@ -3763,13 +3775,13 @@ function TaskRow({
       )}
     </>,
     comments: <>
-      {task.newComments > 0 && (
+      {unread > 0 && (
         <span
           className="row-unread"
-          title={`Nieprzeczytane komentarze: ${task.newComments}`}
+          title={`Nieprzeczytane komentarze: ${unread}`}
         >
           <CommentIcon />
-          {task.newComments}
+          {unread}
         </span>
       )}
     </>,
@@ -4293,6 +4305,14 @@ function Comments({
 }) {
   // Start od CACHE (detailCache.ts): stare komentarze widac od razu, bez "Wczytywanie…".
   const [comments, setComments] = useState<Comment[] | null>(() => getCachedComments(taskId));
+  /* Akcje Bitriksa („zmienil termin") sa w `comments`, ale widac je tylko po wlaczeniu — chatActions.ts. */
+  const showActions = useShowActions();
+  const etapyAkcji = useContext(ActionStagesCtx);
+  const ileAkcji = useMemo(() => (comments ?? []).filter((c) => c.system).length, [comments]);
+  const widoczne = useMemo(
+    () => (comments && !showActions ? comments.filter((c) => !c.system) : comments),
+    [comments, showActions],
+  );
   /* Indeks w galerii CALEGO watku, nie w jednym komentarzu — patrz `Lightbox`. */
   const [preview, setPreview] = useState<number | null>(null);
   const gallery = useMemo<PreviewItem[]>(
@@ -4591,13 +4611,15 @@ function Comments({
    * Pierwszy komentarz, ktorego jeszcze nie widzialem — nad nim staje kreska.
    *
    * WLASNE wypowiedzi sie nie licza: nikt nie wraca do watku, zeby przeczytac
-   * siebie. Przy pierwszej wizycie (`null`) nie ma kreski wcale — inaczej caly
+   * siebie. Tak samo wlasne akcje („[USER=me]… wlaczyl sledzenie czasu") — jak w znaczku
+   * nieprzeczytanych (chatActions.ts). Przy pierwszej wizycie (`null`) nie ma kreski wcale — inaczej caly
    * watek, lacznie z rokiem archiwum, bylby „nowy".
    */
   const pierwszyNowy = useMemo(() => {
-    if (przeczytaneDo === null || !comments) return -1;
-    return comments.findIndex((c) => c.authorId !== me && czas(c.date) > przeczytaneDo);
-  }, [comments, przeczytaneDo, me]);
+    if (przeczytaneDo === null || !widoczne) return -1;
+    const mojaAkcja = (c: Comment) => c.system && me !== null && c.text.trimStart().startsWith(`[USER=${me}]`);
+    return widoczne.findIndex((c) => c.authorId !== me && !mojaAkcja(c) && czas(c.date) > przeczytaneDo);
+  }, [widoczne, przeczytaneDo, me]);
 
   /* Znacznik przesuwamy na najswiezsza wypowiedz w watku — kreska pokazuje sie
      raz, przy tym wejsciu, a przy nastepnym juz nie. */
@@ -4816,10 +4838,16 @@ function Comments({
       onError('Nie widzę cytowanego komentarza — może jest starszy niż wczytany fragment wątku.');
       return;
     }
-    document.querySelector(`[data-comment="${cel.id}"]`)?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-    });
+    /* Cytat wskazuje ukryta akcje — wlaczamy akcje, inaczej nie ma do czego przewinac. */
+    const ukryta = cel.system && !showActions;
+    if (ukryta) setShowActions(true);
+    const przewin = () =>
+      document.querySelector(`[data-comment="${cel.id}"]`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    if (ukryta) window.requestAnimationFrame(przewin);
+    else przewin();
     setFlash(cel.id);
     window.setTimeout(() => setFlash((v) => (v === cel.id ? null : v)), 1400);
   };
@@ -5167,7 +5195,23 @@ function Comments({
           document.body,
         )}
 
-      <h2>Komentarze{comments ? ` · ${comments.length}` : ''}</h2>
+      <div className="comments-head">
+        <h2>Komentarze{comments ? ` · ${comments.length - ileAkcji}` : ''}</h2>
+        {ileAkcji > 0 && (
+          <button
+            className={`comments-actions-toggle${showActions ? ' is-on' : ''}`}
+            aria-pressed={showActions}
+            title={
+              showActions
+                ? 'Ukryj akcje Bitriksa (zmiany terminu, etapu, osób…)'
+                : 'Pokaż akcje Bitriksa w wątku: zmiany terminu, etapu, osób… Ukryte nie liczą się do nieprzeczytanych.'
+            }
+            onClick={() => setShowActions(!showActions)}
+          >
+            Akcje · {ileAkcji}
+          </button>
+        )}
+      </div>
 
       {comments === null && failed === null && <p className="desc-dim">Wczytywanie…</p>}
       {failed !== null && (
@@ -5178,7 +5222,7 @@ function Comments({
           </button>
         </p>
       )}
-      {comments?.length === 0 && <p className="desc-dim">Brak komentarzy.</p>}
+      {widoczne?.length === 0 && <p className="desc-dim">Brak komentarzy.</p>}
 
       {/*
         „Starsze" tylko wtedy, gdy jest z czego: watek ma czesc czatowa i jeszcze
@@ -5191,7 +5235,29 @@ function Comments({
         </button>
       )}
 
-      {comments?.map((c, idx) => {
+      {widoczne?.map((c, idx) => {
+        if (c.system) {
+          const a = actionText(c.text);
+          const ikona = actionIcon(a.text);
+          const etap = ikona?.kind === 'stage' ? etapyAkcji.get(ikona.name) : undefined;
+          return (
+            <Fragment key={`${c.source}:${c.id}`}>
+              {idx === pierwszyNowy && (
+                <div className="comment-new-mark" role="separator">
+                  <span>Nowe</span>
+                </div>
+              )}
+              <div className={`comment-action${flash === c.id ? ' comment-flash' : ''}`} data-comment={c.id}>
+                {a.actor && <Avatar name={a.actor} photo={c.authorPhoto} />}
+                {a.actor && <strong>{a.actor}</strong>}{' '}
+                {ikona?.kind === 'status' && <StatusIcon status={ikona.status} />}
+                {ikona?.kind === 'stage' && <StageIcon progress={etap?.progress ?? null} color={etap?.color ?? null} />}
+                {a.text}
+                <span className="comment-action-date">{dateTime(c.date)}</span>
+              </div>
+            </Fragment>
+          );
+        }
         /*
          * Odpowiedz w Bitriksie to CYTAT WKLEJONY w tresc, nie osobne pole —
          * patrz `splitQuote`. Rozdzielamy je, zeby cudze slowa byly widocznie
@@ -9250,6 +9316,41 @@ export default function App() {
 
   const me = config?.userId ? Number(config.userId) : null;
 
+  /*
+   * Nieprzeczytane bez akcji Bitriksa (chatActions.ts) — licznik Bitriksa liczy je razem z komentarzami.
+   * Tylko zadania z licznikiem > 0, jednym batchem; klucz pilnuje, zeby polling bez zmian nie pytal znowu.
+   */
+  /* Pierscienie przy akcjach „zmienil etap na …" — etapy powtarzaja sie miedzy sprintami pod ta sama nazwa. */
+  const etapyAkcji = useMemo(() => {
+    const m = new Map<string, { color: string | null; progress: number | null }>();
+    for (const s of stages) {
+      const meta = stageMeta.get(s.id);
+      if (meta && !m.has(s.name)) m.set(s.name, meta);
+    }
+    return m;
+  }, [stages, stageMeta]);
+
+  const [unreadBezAkcji, setUnreadBezAkcji] = useState<ReadonlyMap<number, number>>(new Map());
+  const doPrzeliczenia = useMemo(() => tasks.filter((t) => t.newComments > 0 && t.chatId !== null), [tasks]);
+  const unreadKey = doPrzeliczenia.map((t) => `${t.id}:${t.newComments}`).join('|');
+  const doPrzeliczeniaRef = useRef(doPrzeliczenia);
+  doPrzeliczeniaRef.current = doPrzeliczenia;
+  useEffect(() => {
+    if (!unreadKey) {
+      setUnreadBezAkcji(new Map());
+      return;
+    }
+    let alive = true;
+    fetchUnreadWithoutActions(doPrzeliczeniaRef.current, me)
+      .then((m) => alive && setUnreadBezAkcji(m))
+      .catch(() => {
+        /* zostaje licznik Bitriksa */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [unreadKey, me]);
+
   const project = useMemo(
     () => projects.find((p) => p.id === groupId) ?? null,
     [projects, groupId],
@@ -12185,6 +12286,8 @@ export default function App() {
 
   return (
     <DeadlineCouncilCtx.Provider value={councilEnd}>
+    <UnreadWithoutActionsCtx.Provider value={unreadBezAkcji}>
+    <ActionStagesCtx.Provider value={etapyAkcji}>
     <RowLayoutCtx.Provider value={rowLayout}>
     <div className="app">
       <main className="main">
@@ -13401,6 +13504,8 @@ export default function App() {
       </div>
     </div>
     </RowLayoutCtx.Provider>
+    </ActionStagesCtx.Provider>
+    </UnreadWithoutActionsCtx.Provider>
     </DeadlineCouncilCtx.Provider>
   );
 }
