@@ -20,6 +20,7 @@ import {
   ActionStagesCtx,
   actionIcon,
   actionText,
+  actorId,
   setShowActions,
   UnreadWithoutActionsCtx,
   useShowActions,
@@ -4617,7 +4618,7 @@ function Comments({
    */
   const pierwszyNowy = useMemo(() => {
     if (przeczytaneDo === null || !widoczne) return -1;
-    const mojaAkcja = (c: Comment) => c.system && me !== null && c.text.trimStart().startsWith(`[USER=${me}]`);
+    const mojaAkcja = (c: Comment) => c.system && me !== null && actorId(c.text) === me;
     return widoczne.findIndex((c) => c.authorId !== me && !mojaAkcja(c) && czas(c.date) > przeczytaneDo);
   }, [widoczne, przeczytaneDo, me]);
 
@@ -5249,10 +5250,15 @@ function Comments({
               )}
               <div className={`comment-action${flash === c.id ? ' comment-flash' : ''}`} data-comment={c.id}>
                 {a.actor && <Avatar name={a.actor} photo={c.authorPhoto} />}
-                {a.actor && <strong>{a.actor}</strong>}{' '}
-                {ikona?.kind === 'status' && <StatusIcon status={ikona.status} />}
-                {ikona?.kind === 'stage' && <StageIcon progress={etap?.progress ?? null} color={etap?.color ?? null} />}
-                {a.text}
+                {/* Zdanie w JEDNYM elemencie: zawija sie po slowie. Osobne kawalki flexa
+                    spadaly calym zdaniem do nowej linii, gdy bylo dluzsze niz miejsce. */}
+                <span className="comment-action-text">
+                  {a.actor && <strong>{a.actor}</strong>}{' '}
+                  {ikona?.kind === 'status' && <StatusIcon status={ikona.status} />}
+                  {ikona?.kind === 'stage' && <StageIcon progress={etap?.progress ?? null} color={etap?.color ?? null} />}
+                  {ikona && ' '}
+                  {a.text}
+                </span>
                 <span className="comment-action-date">{dateTime(c.date)}</span>
               </div>
             </Fragment>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { actionIcon, actionText, unreadWithoutActions } from './chatActions';
+import { actionIcon, actionText, actorId, unreadWithoutActions } from './chatActions';
 
 describe('actionText', () => {
   it('wykonawca osobno, URL jako tekst, TIMESTAMP jako data i godzina', () => {
@@ -17,6 +17,13 @@ describe('actionText', () => {
       text: 'jest teraz obserwatorem.',
     });
     expect(actionText('Utworzono czat [B]zadania[/B]')).toEqual({ actor: null, text: 'Utworzono czat zadania' });
+  });
+
+  it('„Użytkownik [USER]" na poczatku — to tez wykonawca', () => {
+    const raw = 'Użytkownik [USER=28]Robert Wielgusiak[/USER] zmienił odpowiedzialnego na [USER=303]Wojciech Szyper[/USER].';
+    expect(actionText(raw)).toEqual({ actor: 'Robert Wielgusiak', text: 'zmienił odpowiedzialnego na Wojciech Szyper.' });
+    expect(actorId(raw)).toBe(28);
+    expect(actorId('Utworzono czat')).toBeNull();
   });
 
   it('sledzenie czasu zapisane przez Bitrix po angielsku idzie po polsku', () => {
@@ -80,7 +87,10 @@ describe('angielskie wpisy Bitriksa', () => {
       ', termin zadania minął X. Zakończ zadanie jak najszybciej lub zmień termin.',
     );
     expect(pl('[USER=28]R[/USER] deactivated time tracking. Duration: 2 hours 1 minute.')).toBe(
-      'wyłączył śledzenie czasu. Czas trwania: 2 godzin 1 minuta.',
+      'wyłączył śledzenie czasu. Czas trwania: 2 godziny 1 minuta.',
+    );
+    expect(pl('[USER=28]R[/USER] deactivated time tracking. Duration: 12 hours 22 minutes 5 seconds.')).toBe(
+      'wyłączył śledzenie czasu. Czas trwania: 12 godzin 22 minuty 5 sekund.',
     );
   });
 

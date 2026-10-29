@@ -4629,7 +4629,6 @@ a.mention:hover {
 /* Akcja Bitriksa w watku: jedna szara linia, bez awatara i dymka — nie udaje komentarza. */
 .comment-action {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
   gap: 0 5px;
   margin: 2px 0;
@@ -4639,13 +4638,25 @@ a.mention:hover {
   color: var(--fg-dim);
 }
 
-.comment-action > .avatar,
-.comment-action > svg {
+.comment-action > .avatar {
   flex: 0 0 14px;
   width: 14px;
   height: 14px;
   font-size: 7px;
-  align-self: center;
+  align-self: flex-start;
+  /* Na srodku PIERWSZEJ linii, takze gdy zdanie sie zawinie. */
+  margin-top: 1px;
+}
+
+.comment-action-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.comment-action-text > svg {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
 }
 
 .comment-action strong {
@@ -4654,8 +4665,10 @@ a.mention:hover {
 }
 
 .comment-action-date {
+  flex: 0 0 auto;
   margin-left: auto;
   padding-left: var(--s2);
+  white-space: nowrap;
   font-size: var(--t-micro);
 }
 
