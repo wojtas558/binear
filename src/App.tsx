@@ -20,6 +20,7 @@ import {
   ActionStagesCtx,
   actionIcon,
   actionText,
+  actorId,
   setShowActions,
   UnreadWithoutActionsCtx,
   useShowActions,
@@ -4284,6 +4285,8 @@ function Comments({
   refreshKey,
   me,
   people,
+  members,
+  onAddObservers,
   onConfirm,
   onError,
 }: {
@@ -4299,6 +4302,13 @@ function Comments({
   me: number | null;
   /** Osoby do wzmianek `@` — te same, co w filtrze i pickerze osoby. */
   people: Person[];
+  /**
+   * Osoby w zadaniu z ich rolami („odpowiedzialny", „obserwator"…); `null`, dopoki
+   * szczegoly nie doszly. Wzmianka kogos spoza nich nie dociera — patrz `pozaZadaniem`.
+   */
+  members: ReadonlyMap<number, string> | null;
+  /** Dopisanie osob do obserwatorow zadania — po nim wzmianka do nich dociera. Rzuca przy bledzie. */
+  onAddObservers: (people: Person[]) => Promise<void>;
   /** Pytanie przed nieodwracalnym — okno rysuje App (patrz `Confirm`). */
   onConfirm: (state: ConfirmState) => void;
   onError: (m: string) => void;
@@ -4617,7 +4627,7 @@ function Comments({
    */
   const pierwszyNowy = useMemo(() => {
     if (przeczytaneDo === null || !widoczne) return -1;
-    const mojaAkcja = (c: Comment) => c.system && me !== null && c.text.trimStart().startsWith(`[USER=${me}]`);
+    const mojaAkcja = (c: Comment) => c.system && me !== null && actorId(c.text) === me;
     return widoczne.findIndex((c) => c.authorId !== me && !mojaAkcja(c) && czas(c.date) > przeczytaneDo);
   }, [widoczne, przeczytaneDo, me]);
 
@@ -5116,11 +5126,66 @@ function Comments({
       czytnik.readAsDataURL(blob);
     });
 
-  const send = async () => {
+  /*
+   * Lista wzmianek: najpierw osoby w zadaniu (z rola po prawej), pod nimi reszta
+   * jako „Spoza zadania" — widac, kto nie dostanie wiadomosci, zanim sie go wybierze.
+   * Dopoki szczegoly zadania nie doszly, lista jest jedna, bez podzialu.
+   */
+  const opcjeWzmianki = useMemo(() => {
+    const opcje = people
+      .filter((p) => p.id !== UNASSIGNED_ID)
+      .map((p) => ({ value: String(p.id), label: p.name, photo: p.photo, hint: members?.get(p.id) }));
+    if (!members) return opcje;
+    const w = opcje.filter((o) => o.hint !== undefined).map((o) => ({ ...o, section: 'W zadaniu' }));
+    const poza = opcje.filter((o) => o.hint === undefined).map((o) => ({ ...o, section: 'Spoza zadania' }));
+    return [...w, ...poza];
+  }, [people, members]);
+
+  /*
+   * Wzmiankowani spoza zadania. Bitrix pokazuje wtedy okienko, ze ta osoba nie zobaczy wiadomosci,
+   * bo nie jest uczestnikiem zadania — tu ta sama informacja stoi nad przyciskami, zanim sie wysle,
+   * z mozliwoscia dopisania jej do obserwatorow. Tylko osoby, ktorych „@Imie" wciaz jest w polu.
+   */
+  const pozaZadaniem = members
+    ? mentioned.filter((p) => p.id !== me && !members.has(p.id) && draft.includes(`@${p.name}`))
+    : [];
+
+  /*
+   * Wysylka z kims spoza zadania najpierw pyta — jak okienko Bitriksa. Sama notka
+   * nad przyciskami dawala sie przeoczyc, a Ctrl+Enter wysylal bez slowa.
+   */
+  const [pytanie, setPytanie] = useState(false);
+  useEffect(() => {
+    if (!pozaZadaniem.length) setPytanie(false);
+  }, [pozaZadaniem.length]);
+
+  const dodajObserwatorow = async (ludzie: Person[]) => {
+    try {
+      await onAddObservers(ludzie);
+      return true;
+    } catch (e) {
+      onError(`Nie udało się dodać obserwatora: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  };
+
+  /** `dodaj` — najpierw dopisz osoby spoza zadania do obserwatorow; `mimo` — wyslij bez tego. */
+  const send = async (tryb?: 'dodaj' | 'mimo') => {
     const text = draft.trim();
     /* Sam zrzut bez slowa komentarza tez jest wypowiedzia — wtedy tekst moze byc pusty. */
-    if ((!text && !zalaczniki.length) || !me || sending) return;
+    /* Przed `ready` nie wiadomo, kto jest w zadaniu — wzmianka poszlaby bez pytania o osoby spoza. */
+    if ((!text && !zalaczniki.length) || !me || sending || !ready) return;
+    if (!tryb && pozaZadaniem.length) {
+      setPytanie(true);
+      return;
+    }
+    setPytanie(false);
     setSending(true);
+    /* Obserwatorzy PRZED komentarzem — wzmianka ma trafic do kogos, kto juz jest w zadaniu. */
+    if (tryb === 'dodaj' && !(await dodajObserwatorow(pozaZadaniem))) {
+      setSending(false);
+      return;
+    }
     try {
       /* Wzmianki na znaczniki Bitriksa — patrz `withMentions`. Tu bierzemy osoby
          WYBRANE z listy, bo tylko one sa zamierzona wzmianka. */
@@ -5249,10 +5314,15 @@ function Comments({
               )}
               <div className={`comment-action${flash === c.id ? ' comment-flash' : ''}`} data-comment={c.id}>
                 {a.actor && <Avatar name={a.actor} photo={c.authorPhoto} />}
-                {a.actor && <strong>{a.actor}</strong>}{' '}
-                {ikona?.kind === 'status' && <StatusIcon status={ikona.status} />}
-                {ikona?.kind === 'stage' && <StageIcon progress={etap?.progress ?? null} color={etap?.color ?? null} />}
-                {a.text}
+                {/* Zdanie w JEDNYM elemencie: zawija sie po slowie. Osobne kawalki flexa
+                    spadaly calym zdaniem do nowej linii, gdy bylo dluzsze niz miejsce. */}
+                <span className="comment-action-text">
+                  {a.actor && <strong>{a.actor}</strong>}{' '}
+                  {ikona?.kind === 'status' && <StatusIcon status={ikona.status} />}
+                  {ikona?.kind === 'stage' && <StageIcon progress={etap?.progress ?? null} color={etap?.color ?? null} />}
+                  {ikona && ' '}
+                  {a.text}
+                </span>
                 <span className="comment-action-date">{dateTime(c.date)}</span>
               </div>
             </Fragment>
@@ -5673,9 +5743,7 @@ function Comments({
           /* Zawsze NAD polem — dolna krawedz stoi w miejscu, lista rosnie w gore
              i nigdy nie zaslania pisanego tekstu. */
           above
-          options={people
-            .filter((p) => p.id !== UNASSIGNED_ID)
-            .map((p) => ({ value: String(p.id), label: p.name, photo: p.photo }))}
+          options={opcjeWzmianki}
           emptyLabel="Brak osób"
           onPick={(value) => {
             const p = people.find((x) => x.id === Number(value));
@@ -5821,6 +5889,35 @@ function Comments({
           ))}
         </div>
       )}
+      {pozaZadaniem.map((p) => (
+        <div className="mention-outside" key={p.id}>
+          <span>
+            <strong>{p.name}</strong> nie jest w zadaniu i nie zobaczy tej wiadomości.
+          </span>
+          <button className="btn" disabled={sending} onClick={() => void dodajObserwatorow([p])}>
+            Dodaj jako obserwatora
+          </button>
+        </div>
+      ))}
+      {pytanie && pozaZadaniem.length > 0 && (
+        <div className="mention-outside mention-ask">
+          <span>
+            <strong>Wysłać?</strong>{' '}
+            {pozaZadaniem.length === 1 ? 'Ta osoba nie zobaczy wiadomości.' : 'Te osoby nie zobaczą wiadomości.'}
+          </span>
+          <span className="mention-ask-btns">
+            <button className="btn btn-primary" disabled={sending} onClick={() => void send('dodaj')}>
+              Dodaj jako {pozaZadaniem.length === 1 ? 'obserwatora' : 'obserwatorów'} i wyślij
+            </button>
+            <button className="btn" disabled={sending} onClick={() => void send('mimo')}>
+              Wyślij mimo to
+            </button>
+            <button className="btn" onClick={() => setPytanie(false)}>
+              Anuluj
+            </button>
+          </span>
+        </div>
+      )}
       <div className="comment-foot">
         <span className="comment-hint">
           @ wspomina osobę · Ctrl+V wkleja zrzut · Ctrl+Enter wysyła
@@ -5836,10 +5933,11 @@ function Comments({
         </button>
         <button
           className="btn"
-          disabled={(!draft.trim() && !zalaczniki.length) || !me || sending}
+          disabled={(!draft.trim() && !zalaczniki.length) || !me || sending || !ready}
+          title={ready ? undefined : 'Czekam na szczegóły zadania'}
           onClick={() => void send()}
         >
-          {sending ? 'Wysyłanie…' : 'Dodaj komentarz'}
+          {sending ? 'Wysyłanie…' : ready ? 'Dodaj komentarz' : 'Wczytywanie…'}
         </button>
         </div>
       </div>
@@ -6443,6 +6541,40 @@ function DetailPanel({
       onError(`Nie udało się zmienić osób: ${e instanceof Error ? e.message : String(e)}`);
     });
   };
+
+  /*
+   * Kilka osob naraz do obserwatorow — jednym wywolaniem, a nie po jednej przez
+   * `toggleParticipant`: dwa szybkie wywolania liczylyby liste z tego samego `detail`
+   * i drugie nadpisaloby pierwsze. Rzuca dalej, zeby komentarz nie poszedl bez nich.
+   */
+  const addObservers = async (people: Person[]) => {
+    const before = detail?.auditors ?? [];
+    const nowi = people.filter((p) => !before.some((a) => a.id === p.id));
+    if (!nowi.length) return;
+    const next = [...before, ...nowi];
+    setDetail((d) => (d ? { ...d, auditors: next } : d));
+    try {
+      await updateParticipants(task.id, 'AUDITORS', next.map((p) => p.id));
+    } catch (e) {
+      setDetail((d) => (d ? { ...d, auditors: before } : d));
+      throw e;
+    }
+  };
+
+  /* Osoby w zadaniu z rolami — dla wzmianek: role w liscie i ostrzezenie o kims spoza (Comments). */
+  const czlonkowie = useMemo(() => {
+    if (!detail) return null;
+    const role = new Map<number, string[]>();
+    const dodaj = (id: number | null, nazwa: string) => {
+      if (id === null) return;
+      role.set(id, [...(role.get(id) ?? []), nazwa]);
+    };
+    dodaj(task.responsibleId, 'odpowiedzialny');
+    dodaj(detail.creatorId, 'autor');
+    detail.accomplices.forEach((p) => dodaj(p.id, 'uczestnik'));
+    detail.auditors.forEach((p) => dodaj(p.id, 'obserwator'));
+    return new Map([...role].map(([id, r]) => [id, r.join(' · ')]));
+  }, [detail, task.responsibleId]);
 
   const toggleCheck = (groupId: number, itemId: number, wasDone: boolean) => {
     const set = (done: boolean) =>
@@ -7142,6 +7274,8 @@ function DetailPanel({
           refreshKey={commentsTick}
           me={me}
           people={people}
+          members={czlonkowie}
+          onAddObservers={addObservers}
           onConfirm={onConfirm}
           onError={onError}
         />

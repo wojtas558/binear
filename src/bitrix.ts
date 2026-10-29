@@ -4,7 +4,7 @@ import { QUESTION, type ChatMessage } from './counters';
 import { reactionsByMessage, type CommentReaction } from './reactions';
 import { describe, logAction, slimParams, taskIdOf, WRITE_METHODS } from './history';
 import { withoutFolders } from './sprintStats';
-import { unreadWithoutActions } from './chatActions';
+import { actorId, unreadWithoutActions } from './chatActions';
 
 export class BxError extends Error {
   constructor(
@@ -1661,7 +1661,7 @@ async function fetchChatComments(chatId: number, beforeId?: number): Promise<Com
    * wiec zdjecie bierzemy po osobie z tresci: najpierw z `users` tej odpowiedzi, reszta jednym
    * `user.get` — w czacie zadania polowa wykonawcow nic tu nie pisala.
    */
-  const wykonawca = (c: Comment) => (c.system ? Number(/^\s*\[USER=(\d+)\]/i.exec(c.text)?.[1]) || null : null);
+  const wykonawca = (c: Comment) => (c.system ? actorId(c.text) : null);
   const brak = [...new Set(lista.map(wykonawca))].filter((id): id is number => id !== null && !photos.has(id));
   const dociagniete = await fetchPhotos(brak);
   for (const c of lista) {

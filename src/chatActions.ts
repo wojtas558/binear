@@ -75,17 +75,36 @@ const PO_POLSKU: [RegExp, string | ((...m: string[]) => string)][] = [
   [/\bDuration:([\s\S]*)$/, (_, reszta: string) => `Czas trwania:${jednostki(reszta)}`],
 ];
 
+/* Odmiana po liczbie: 1 godzina, 2–4 godziny (bez 12–14), reszta godzin. */
+const FORMY: Record<string, [string, string, string]> = {
+  hour: ['godzina', 'godziny', 'godzin'],
+  minute: ['minuta', 'minuty', 'minut'],
+  second: ['sekunda', 'sekundy', 'sekund'],
+};
+
+const odmiana = (n: number, [jedna, kilka, wiele]: [string, string, string]) => {
+  if (n === 1) return jedna;
+  const r10 = n % 10;
+  const r100 = n % 100;
+  return r10 >= 2 && r10 <= 4 && (r100 < 12 || r100 > 14) ? kilka : wiele;
+};
+
 const jednostki = (s: string) =>
-  s
-    .replace(/\b1 hour\b/gi, '1 godzina')
-    .replace(/\b1 minute\b/gi, '1 minuta')
-    .replace(/\b1 second\b/gi, '1 sekunda')
-    .replace(/\bhours?\b/gi, 'godzin')
-    .replace(/\bminutes?\b/gi, 'minut')
-    .replace(/\bseconds?\b/gi, 'sekund');
+  s.replace(/\b(\d+) (hour|minute|second)s?\b/gi, (_, n: string, j: string) => `${n} ${odmiana(Number(n), FORMY[j.toLowerCase()])}`);
 
 function poPolsku(s: string): string {
   return PO_POLSKU.reduce((acc, [re, pl]) => acc.replace(re, pl as string), s);
+}
+
+/*
+ * Wykonawca na poczatku wpisu. Czesc wpisow Bitrix zaczyna od „Użytkownik [USER=…]" (np. zmiana
+ * odpowiedzialnego) — bez tego slowa w wzorcu taka linia nie miala awatara ani pogrubionej osoby.
+ */
+const WYKONAWCA = /^\s*(?:Użytkownik\s+)?\[USER=(\d+)\]([\s\S]*?)\[\/USER\]\s*/i;
+
+/** Id osoby, ktora wykonala akcje — `null`, gdy wpis nie zaczyna sie od osoby. */
+export function actorId(raw: string): number | null {
+  return Number(WYKONAWCA.exec(raw)?.[1]) || null;
 }
 
 export function actionText(raw: string): { actor: string | null; text: string } {
@@ -104,9 +123,9 @@ export function actionText(raw: string): { actor: string | null; text: string } 
         .replace(/\s+/g, ' ')
         .trim(),
     );
-  const m = /^\s*\[USER=\d+\]([\s\S]*?)\[\/USER\]\s*/i.exec(raw);
+  const m = WYKONAWCA.exec(raw);
   if (!m) return { actor: null, text: plain(raw) };
-  return { actor: m[1].trim(), text: plain(raw.slice(m[0].length)) };
+  return { actor: m[2].trim(), text: plain(raw.slice(m[0].length)) };
 }
 
 export interface ChatLine {
@@ -126,12 +145,11 @@ export interface ChatLine {
  */
 export function unreadWithoutActions(lines: readonly ChatLine[], total: number, me: number | null): number | null {
   if (total <= 0) return 0;
-  const mine = me === null ? null : new RegExp(`^\\s*\\[USER=${me}\\]`, 'i');
   let counted = 0;
   let comments = 0;
   for (const l of [...lines].sort((a, b) => b.id - a.id)) {
     if (me !== null && l.authorId === me) continue;
-    if (l.authorId === 0 && mine?.test(l.text)) continue;
+    if (l.authorId === 0 && me !== null && actorId(l.text) === me) continue;
     counted++;
     if (l.authorId !== 0) comments++;
     if (counted === total) return comments;
