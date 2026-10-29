@@ -4672,6 +4672,44 @@ a.mention:hover {
   font-size: var(--t-micro);
 }
 
+/* Wzmianka kogos spoza zadania — Bitrix by jej nie doreczyl (Comments, `pozaZadaniem`). */
+.mention-outside {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-top: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-left: 2px solid var(--accent-amber);
+  background: var(--bg-active);
+  border-radius: var(--radius);
+  font-size: var(--t-mini);
+  color: var(--fg-muted);
+}
+
+.mention-outside .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.mention-outside strong {
+  font-weight: var(--w-medium);
+  color: var(--fg);
+}
+
+/* Pytanie przy wysylce — mocniejsza kreska niz sama notka, przyciski zawijaja sie pod tekst. */
+.mention-ask {
+  flex-wrap: wrap;
+  border-left-color: var(--accent-orange);
+}
+
+.mention-ask-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  margin-left: auto;
+}
+
 /* Pozycja checklisty jest teraz klikalna (odhaczanie wprost z panelu). */
 .check {
   display: flex;
