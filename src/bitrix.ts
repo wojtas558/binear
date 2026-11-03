@@ -2625,11 +2625,29 @@ export interface AppConfig {
    */
   capacityExcludeIds?: number[];
   configured: boolean;
+  /** Wspolna instancja: kazda osoba wchodzi wlasnym webhookiem (`BX_PORTAL` w .env). */
+  multiUser?: boolean;
 }
 
 export async function fetchConfig(): Promise<AppConfig> {
   const res = await fetch('/api/config');
   return res.json();
+}
+
+/** Wejscie wlasnym webhookiem na wspolnej instancji. Serwer sprawdza go w Bitriksie i trzyma w ciasteczku HttpOnly. */
+export async function login(webhook: string): Promise<void> {
+  const r = await fetch('/api/session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ webhook }),
+  });
+  if (r.ok) return;
+  const body = (await r.json().catch(() => ({}))) as { error?: string };
+  throw new Error(body.error ?? `logowanie: HTTP ${r.status}`);
+}
+
+export async function logout(): Promise<void> {
+  await fetch('/api/session', { method: 'DELETE' });
 }
 
 /** Dzial firmy (do wyboru dzialow IT w ustawieniach srodowiska). */

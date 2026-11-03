@@ -736,6 +736,20 @@ onto a sprint column **still doesn't pull it in** — a toast says so.
 | `w` | sprint ↔ backlog (`s` is status, so sprint gets **w** for *wrzuć*, "throw it in") |
 | `Ctrl+↵` | send comment (in the comment field) |
 
+## Shared instance
+
+For a few people on one server inside a company network. Set `BX_PORTAL` (the portal host) and
+`BX_PUBLIC_HOST` (the name behind your reverse proxy) in `.env`, keep Vite on localhost and put a
+reverse proxy with HTTPS in front of it.
+
+- Everyone pastes **their own webhook** on the first screen, so comments and changes go out under their name.
+- The server checks it with `user.current` and keeps it only in that browser, in an `HttpOnly`, `SameSite=Strict`
+  cookie. Nothing is stored on the server. *Settings → Webhook permissions → Wyloguj* removes it.
+- A webhook from any other host is rejected: the server calls that address itself.
+- `BITRIX_WEBHOOK` is ignored, so nobody works as the server owner without a session.
+- `/api/env` (saving) and `/api/update` are off. Change `.env` and restart; update with `git pull`.
+- `/api/team` and `/api/pdf` need a session. There are no roles: anyone with a session can edit the team.
+
 ## How it works
 
 - `server/bxProxy.ts` — a Vite plugin: `/api/bx/<method>` → `POST` to the webhook,

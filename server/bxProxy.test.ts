@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { batchViolation, parseTeams, rewriteEnv, sameOrigin, validateEnvUpdate, withCsp } from './bxProxy';
+import {
+  batchViolation,
+  parseTeams,
+  parseWebhook,
+  readCookie,
+  rewriteEnv,
+  sameOrigin,
+  sessionCookie,
+  validateEnvUpdate,
+  withCsp,
+} from './bxProxy';
 
 const req = (headers: Record<string, string>) => ({ headers });
 
@@ -105,5 +115,47 @@ describe('rewriteEnv', () => {
   });
   it('linia z export i spacjami tez jest rozpoznana', () => {
     expect(rewriteEnv('export BX_IT_USERS = 1\n', { BX_IT_USERS: '2' })).toBe('BX_IT_USERS=2\n');
+  });
+});
+
+describe('parseWebhook', () => {
+  const portal = 'firma.bitrix24.pl';
+
+  it('ujednolica poprawny webhook', () => {
+    expect(parseWebhook(' https://firma.bitrix24.pl/rest/12/abc123/ ', portal)).toBe('https://firma.bitrix24.pl/rest/12/abc123');
+    expect(parseWebhook('https://FIRMA.bitrix24.pl/rest/12/abc123', portal)).toBe('https://firma.bitrix24.pl/rest/12/abc123');
+  });
+
+  it('odrzuca inny host — serwer sam wola ten adres', () => {
+    expect(parseWebhook('https://192.168.1.1/rest/12/abc', portal)).toBeNull();
+    expect(parseWebhook('https://firma.bitrix24.pl.evil.example/rest/12/abc', portal)).toBeNull();
+    expect(parseWebhook('https://firma.bitrix24.pl@evil.example/rest/12/abc', portal)).toBeNull();
+    expect(parseWebhook('https://x:y@firma.bitrix24.pl/rest/12/abc', portal)).toBeNull();
+  });
+
+  it('odrzuca http, port, zapytanie i inna sciezke', () => {
+    expect(parseWebhook('http://firma.bitrix24.pl/rest/12/abc', portal)).toBeNull();
+    expect(parseWebhook('https://firma.bitrix24.pl:8443/rest/12/abc', portal)).toBeNull();
+    expect(parseWebhook('https://firma.bitrix24.pl/rest/12/abc?x=1', portal)).toBeNull();
+    expect(parseWebhook('https://firma.bitrix24.pl/rest/12/abc/user.get', portal)).toBeNull();
+    expect(parseWebhook('https://firma.bitrix24.pl/rest/x/abc', portal)).toBeNull();
+    expect(parseWebhook(null, portal)).toBeNull();
+    expect(parseWebhook('nie adres', portal)).toBeNull();
+  });
+});
+
+describe('ciasteczko sesji', () => {
+  it('czyta wartosc spod wlasciwej nazwy', () => {
+    const header = `inne=1; ${sessionCookie('https://a/rest/1/b', false).split(';')[0]}; jeszcze=2`;
+    expect(readCookie(header, 'binear_webhook')).toBe('https://a/rest/1/b');
+    expect(readCookie('inne=1', 'binear_webhook')).toBeNull();
+    expect(readCookie(undefined, 'binear_webhook')).toBeNull();
+  });
+
+  it('jest HttpOnly i SameSite=Strict, Secure za HTTPS, a pusta wartosc kasuje', () => {
+    expect(sessionCookie('x', false)).toMatch(/HttpOnly; SameSite=Strict/);
+    expect(sessionCookie('x', false)).not.toMatch(/Secure/);
+    expect(sessionCookie('x', true)).toMatch(/Secure$/);
+    expect(sessionCookie('', true)).toMatch(/Max-Age=0/);
   });
 });

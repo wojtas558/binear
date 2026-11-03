@@ -146,6 +146,52 @@ export function sameOrigin(req: Pick<Connect.IncomingMessage, 'headers'>): boole
   return !origin || origin.replace(/^https?:\/\//, '') === req.headers.host;
 }
 
+/** Ciasteczko z webhookiem osoby (tryb wspolny, patrz `BX_PORTAL` w .env.example). */
+export const SESSION_COOKIE = 'binear_webhook';
+
+/**
+ * Webhook wpisany przez uzytkownika, ujednolicony — albo `null`, gdy nie wskazuje naszego portalu.
+ * Host MUSI byc rowny portalowi: serwer sam wola ten adres, wiec bez tego dalo sie nim sondowac siec firmowa.
+ */
+export function parseWebhook(raw: unknown, portalHost: string): string | null {
+  if (typeof raw !== 'string') return null;
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash) return null;
+  if (url.hostname.toLowerCase() !== portalHost.toLowerCase()) return null;
+  const path = url.pathname.match(/^\/rest\/(\d+)\/([A-Za-z0-9]+)\/?$/);
+  return path ? `https://${url.hostname.toLowerCase()}/rest/${path[1]}/${path[2]}` : null;
+}
+
+/** Wartosc ciasteczka z naglowka `Cookie`. */
+export function readCookie(header: string | undefined, name: string): string | null {
+  for (const part of (header ?? '').split(';')) {
+    const eq = part.indexOf('=');
+    if (eq > 0 && part.slice(0, eq).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(eq + 1).trim());
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Naglowek ustawiajacy ciasteczko. HttpOnly: skrypty strony (renderujemy tresci z Bitriksa) nie odczytaja webhooka.
+ * Ciasteczko, a nie naglowek z localStorage, bo `<img src="/api/file/...">` nie doklei wlasnego naglowka.
+ * Pusta wartosc kasuje. `Secure`, gdy przed aplikacja stoi HTTPS.
+ */
+export function sessionCookie(value: string, secure: boolean): string {
+  const age = value ? 31536000 : 0;
+  return `${SESSION_COOKIE}=${encodeURIComponent(value)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}${secure ? '; Secure' : ''}`;
+}
+
 /**
  * Co jest nie tak z wywolaniem `batch` — albo `null`, gdy mozna je puscic.
  *
@@ -297,7 +343,20 @@ export function rewriteEnv(text: string, values: Partial<Record<EnvKey, string>>
 
 export function bxProxy(mode: string): Plugin {
   let env = loadEnv(mode, process.cwd(), '');
-  const webhook = (env.BITRIX_WEBHOOK || '').replace(/\/+$/, '');
+  const sharedWebhook = (env.BITRIX_WEBHOOK || '').replace(/\/+$/, '');
+  /*
+   * Tryb wspolny: jedna instancja dla kilku osob, kazda ze swoim webhookiem w ciasteczku. Webhook z .env jest
+   * wtedy IGNOROWANY — inaczej ktos bez sesji dzialalby w Bitriksie jako wlasciciel serwera.
+   */
+  const portalHost = (env.BX_PORTAL || '').trim().toLowerCase();
+  const multiUser = Boolean(portalHost);
+  const webhookFor = (req: Connect.IncomingMessage): string => {
+    if (!multiUser) return sharedWebhook;
+    return parseWebhook(readCookie(req.headers.cookie, SESSION_COOKIE), portalHost) ?? '';
+  };
+  /** Kod odpowiedzi, gdy nie ma webhooka: brak sesji to 401, brak konfiguracji serwera to 500. */
+  const noWebhookStatus = multiUser ? 401 : 500;
+  const noWebhookText = multiUser ? 'Brak sesji - wklej swoj webhook' : 'BITRIX_WEBHOOK nie jest ustawiony';
   let groupId = env.BX_GROUP_ID || '451';
   // Konto-zaslepka "Nieprzypisane" — patrz .env.example. Domyslnie 251 (Klaudiusz Koder).
   let unassignedId = Number(env.BX_UNASSIGNED_ID) || 251;
@@ -341,7 +400,7 @@ export function bxProxy(mode: string): Plugin {
   return {
     name: 'bitrix-proxy',
     configureServer(server) {
-      if (!webhook) {
+      if (!sharedWebhook && !multiUser) {
         server.config.logger.warn(
           '\n[bitrix] Brak BITRIX_WEBHOOK w .env — aplikacja wystartuje, ale kazde zapytanie zwroci 500.\n' +
             '         Skopiuj .env.example do .env i wklej URL webhooka.\n',
@@ -352,17 +411,18 @@ export function bxProxy(mode: string): Plugin {
       // ale nie token. userId czytamy z samego URL-a webhooka (/rest/<uid>/<token>/).
       // groupId to juz tylko wartosc DOMYSLNA: projekt wybrany w aplikacji
       // (localStorage) ma pierwszenstwo, wiec .env decyduje o pierwszym starcie.
-      const userId = webhook.match(/\/rest\/(\d+)\//)?.[1] ?? null;
-      // Adres portalu bierzemy z webhooka — zeby nie wpisywac domeny na sztywno w UI.
-      const portal = webhook.match(/^(https?:\/\/[^/]+)/)?.[1] ?? null;
-
-      server.middlewares.use('/api/config', (_req, res) => {
+      server.middlewares.use('/api/config', (req, res) => {
+        const webhook = webhookFor(req);
+        const userId = webhook.match(/\/rest\/(\d+)\//)?.[1] ?? null;
+        // Adres portalu bierzemy z webhooka — zeby nie wpisywac domeny na sztywno w UI.
+        const portal = webhook.match(/^(https?:\/\/[^/]+)/)?.[1] ?? (multiUser ? `https://${portalHost}` : null);
         res.setHeader('content-type', 'application/json');
         res.end(
           JSON.stringify({
             groupId,
             userId,
             portal,
+            multiUser,
             unassignedId,
             itDepartments,
             itUsers,
@@ -371,6 +431,46 @@ export function bxProxy(mode: string): Plugin {
             configured: Boolean(webhook),
           }),
         );
+      });
+
+      /**
+       * Sesja trybu wspolnego. POST sprawdza webhook w Bitriksie (`user.current` musi oddac wlasciciela z adresu)
+       * i dopiero wtedy ustawia ciasteczko; DELETE je kasuje. Na serwerze niczego nie zapisujemy.
+       */
+      server.middlewares.use('/api/session', async (req, res) => {
+        const send = (status: number, payload: unknown) => {
+          res.statusCode = status;
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify(payload));
+        };
+        if (!multiUser) return send(404, { error: 'Tryb wspolny jest wylaczony' });
+        if (!sameOrigin(req)) return send(403, { error: 'Zapytanie spoza aplikacji' });
+        const secure = req.headers['x-forwarded-proto'] === 'https';
+        if (req.method === 'DELETE') {
+          res.setHeader('set-cookie', sessionCookie('', secure));
+          return send(200, { ok: true });
+        }
+        if (req.method !== 'POST') return send(405, { error: 'Tylko POST i DELETE' });
+
+        let hook: string | null = null;
+        try {
+          hook = parseWebhook((JSON.parse(await readBody(req, 4096)) as { webhook?: unknown })?.webhook, portalHost);
+        } catch {
+          /* zly JSON = zly webhook */
+        }
+        if (!hook) return send(400, { error: `To nie jest webhook portalu ${portalHost}` });
+        try {
+          const me = (await fetch(`${hook}/user.current.json`, { method: 'POST' }).then((r) => r.json())) as {
+            result?: { ID?: string };
+          };
+          if (String(me?.result?.ID ?? '') !== hook.match(/\/rest\/(\d+)\//)?.[1]) {
+            return send(400, { error: 'Bitrix nie przyjal tego webhooka (potrzebny zakres user)' });
+          }
+        } catch {
+          return send(502, { error: 'Bitrix nie odpowiada' });
+        }
+        res.setHeader('set-cookie', sessionCookie(hook, secure));
+        send(200, { ok: true });
       });
 
       /**
@@ -401,6 +501,11 @@ export function bxProxy(mode: string): Plugin {
         if (!sameOrigin(req)) {
           res.statusCode = 403;
           res.end('PDF tylko z aplikacji.');
+          return;
+        }
+        if (!webhookFor(req)) {
+          res.statusCode = noWebhookStatus;
+          res.end(noWebhookText);
           return;
         }
         const browser = findPdfBrowser(env.BX_PDF_BROWSER);
@@ -500,6 +605,11 @@ export function bxProxy(mode: string): Plugin {
           res.end('{"error":"zapis tylko z aplikacji"}');
           return;
         }
+        if (multiUser) {
+          res.statusCode = 403;
+          res.end('{"error":"Na wspolnej instancji ustawienia zmienia sie w .env na serwerze"}');
+          return;
+        }
         let parsed: ReturnType<typeof validateEnvUpdate>;
         try {
           parsed = validateEnvUpdate(JSON.parse(await readBody(req, 16 * 1024)));
@@ -562,6 +672,11 @@ export function bxProxy(mode: string): Plugin {
       server.middlewares.use('/api/team', async (req, res) => {
         const group = (req.url || '').replace(/^\//, '').split('?')[0];
         res.setHeader('content-type', 'application/json');
+        if (!webhookFor(req) && multiUser) {
+          res.statusCode = 401;
+          res.end('{"error":"brak sesji"}');
+          return;
+        }
         if (!/^\d+$/.test(group)) {
           res.statusCode = 400;
           res.end('{"error":"zly projekt"}');
@@ -610,6 +725,12 @@ export function bxProxy(mode: string): Plugin {
       });
 
       server.middlewares.use('/api/version', async (_req, res) => {
+        /* Puste pola = front nie sprawdza nowej wersji: wspolna instancje aktualizuje sie na serwerze. */
+        if (multiUser) {
+          res.setHeader('content-type', 'application/json');
+          res.end('{"sha":"","repo":"","branch":""}');
+          return;
+        }
         const git = async (args: string[]): Promise<string> => {
           try {
             const { stdout } = await run('git', args, { cwd: process.cwd() });
@@ -652,6 +773,7 @@ export function bxProxy(mode: string): Plugin {
 
         if (req.method !== 'POST') return send(405, { ok: false, message: 'Tylko POST' });
         if (!sameOrigin(req)) return send(403, { ok: false, message: 'Aktualizacja tylko z samej aplikacji' });
+        if (multiUser) return send(403, { ok: false, message: 'Wspolna instancje aktualizuje sie na serwerze' });
 
         try {
           const { stdout, stderr } = await run('git', ['pull', '--ff-only'], { cwd: process.cwd() });
@@ -687,9 +809,10 @@ export function bxProxy(mode: string): Plugin {
           res.statusCode = 400;
           return res.end('zly identyfikator pliku');
         }
+        const webhook = webhookFor(req);
         if (!webhook) {
-          res.statusCode = 500;
-          return res.end('BITRIX_WEBHOOK nie jest ustawiony');
+          res.statusCode = noWebhookStatus;
+          return res.end(noWebhookText);
         }
 
         try {
@@ -750,9 +873,10 @@ export function bxProxy(mode: string): Plugin {
           res.statusCode = 400;
           return res.end('zly identyfikator zalacznika');
         }
+        const webhook = webhookFor(req);
         if (!webhook) {
-          res.statusCode = 500;
-          return res.end('BITRIX_WEBHOOK nie jest ustawiony');
+          res.statusCode = noWebhookStatus;
+          return res.end(noWebhookText);
         }
 
         try {
@@ -798,7 +922,8 @@ export function bxProxy(mode: string): Plugin {
 
         const method = (req.url || '').replace(/^\//, '').split('?')[0];
 
-        if (!webhook) return send(500, { error: 'BITRIX_WEBHOOK nie jest ustawiony w .env' });
+        const webhook = webhookFor(req);
+        if (!webhook) return send(noWebhookStatus, { error: multiUser ? noWebhookText : 'BITRIX_WEBHOOK nie jest ustawiony w .env' });
         if (!ALLOWED.has(method)) return send(403, { error: `Metoda spoza allowlisty: ${method}` });
         // Inna otwarta strona nie moze wolac Bitriksa naszym webhookiem (prosty POST text/plain przechodzi bez CORS).
         if (!sameOrigin(req)) return send(403, { error: 'Zapytanie spoza aplikacji' });

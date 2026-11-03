@@ -46,6 +46,7 @@ import {
   fetchBacklogId,
   fetchChangedSince,
   fetchConfig,
+  logout,
   fetchFieldEnums,
   fetchProjects,
   fetchStages,
@@ -7973,6 +7974,27 @@ function LookPane({
  * Sondy ida BEZ PARAMETROW, wiec niczego nie zapisuja — nawet te przy metodach
  * kasujacych. Patrz `probeMethod`.
  */
+/** Tylko na wspolnej instancji: zmiana webhooka. Ciasteczko jest HttpOnly, wiec skasowac je moze wylacznie serwer. */
+function LogoutButton() {
+  const [multiUser, setMultiUser] = useState(false);
+  useEffect(() => {
+    fetchConfig()
+      .then((c) => setMultiUser(Boolean(c.multiUser)))
+      .catch(() => {});
+  }, []);
+  if (!multiUser) return null;
+  return (
+    <button
+      className="btn"
+      onClick={() => {
+        void logout().finally(() => location.reload());
+      }}
+    >
+      Wyloguj
+    </button>
+  );
+}
+
 function PermsPane() {
   /* Klucz to POZYCJA na liscie, nie nazwa metody: `timeman.status` wystepuje
      trzy razy, za kazdym razem z innym pytaniem. */
@@ -8052,6 +8074,7 @@ function PermsPane() {
         <button className="btn perms-run" disabled={trwa} onClick={() => void sprawdz()}>
           {trwa ? `Sprawdzanie… ${zrobione}/${POZYCJE.length}` : 'Sprawdź'}
         </button>
+        <LogoutButton />
         {/* Panel czesto uruchamia sie na CUDZYM webhooku (np. administratora),
             wiec wynik musi dac sie stamtad wyniesc jednym kliknieciem. */}
         <button
