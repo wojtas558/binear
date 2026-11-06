@@ -32,7 +32,17 @@ export interface TeamMember {
   budget?: boolean;
   /** Kierownik zespolu — jak wpis w BX_CAPACITY_EXCLUDE_IDS. Brak wartosci = nie. */
   manager?: boolean;
+  /**
+   * Osoba z puli opiekunow: w backlogu odpowiedzialny to opiekun, ktory precyzuje zadanie do DO-STARTU.
+   * Zadanie w backlogu z odpowiedzialnym spoza puli (konto techniczne, wspolne, osoba spoza IT) jest „bez opiekuna".
+   * Brak wartosci = nie.
+   */
+  guardian?: boolean;
 }
+
+export const isGuardian = (m: Pick<TeamMember, 'guardian'>): boolean => m.guardian === true;
+/** Pula opiekunow (z konfiguracji instancji, nie z kodu). */
+export const guardianIds = (team: TeamConfig): number[] => team.members.filter(isGuardian).map((m) => m.id);
 
 /** Role do podpowiedzi w formularzu — pole jest dowolne, to tylko skrot. */
 export const ROLE_SUGGESTIONS = ['Programista', 'Kierownik IT', 'Tester', 'Analityk', 'Projektant'] as const;
@@ -212,6 +222,7 @@ export function parseTeam(raw: unknown): TeamConfig {
       ...(m.capacity === false ? { capacity: false } : {}),
       ...(m.budget === false ? { budget: false } : {}),
       ...(m.manager === true ? { manager: true } : {}),
+      ...(m.guardian === true ? { guardian: true } : {}),
     }));
   const off: Record<string, string[]> = {};
   for (const [k, v] of Object.entries(p.off ?? {})) {

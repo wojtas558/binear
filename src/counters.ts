@@ -21,64 +21,38 @@ export const TAG_BUG = 'BUG';
  */
 export const TAG_KONCEPCJA = 'KONCEPCJA';
 
-/*
- * Kategoria korzyści zadania — jeden tag na zadanie. `BUG` jest kategorią „naprawa błędu"
- * i już istnieje jako tag; pozostałe to nowe tagi z zasad wartości zadań.
- */
-export const TAG_WYMOG = 'WYMOG';
-export const TAGS_KATEGORIA = [
-  TAG_BUG,
-  'OSZCZEDNOSC',
-  'PRZYCHOD',
-  'RYZYKO',
-  'ANALITYKA',
-  'UTRZYMANIE',
-  TAG_WYMOG,
-];
-
 /**
- * PULA zadania — z czyjego budżetu godzin ono jest: ciągłość (utrzymanie), rdzeń (rozwój produktu)
- * albo dział (zamówione przez dział). Obowiązkowa: bez puli zadanie nigdy nie jest kompletne.
- * Kolejność listy rozstrzyga, gdy zadanie ma dwie — liczy się pierwsza.
+ * Zadanie przeszlo niedokonczone z poprzedniego sprintu. Tag nadaje audyt na podstawie historii zadania,
+ * a binear wyroznia go na liscie (`carryOverCount` liczy, ile razy).
  */
-export const TAGS_PULA = ['CIAGLOSC', 'RDZEN', 'DZIAL'] as const;
-export type Pula = (typeof TAGS_PULA)[number];
-
-/**
- * Dawny tag STRATEGIA: wartosc strategiczna z wiadomosci WARTOŚĆ — to samo, co dzis znaczy pula RDZEN. Zadanie
- * z samym STRATEGIA (bez zadnej puli) liczymy wiec jako RDZEN, zamiast zrzucac je na koniec planowania
- * i do „Do wyceny" tylko dlatego, ze nikt jeszcze nie przepial tagu.
- */
-export const TAG_STRATEGIA = 'STRATEGIA';
-
-/** Pula zadania albo `null`. Zadanie ma najwyżej jedną; przy dwóch wygrywa pierwsza z `TAGS_PULA` (patrz `pule`). */
-export const pula = (t: Pick<Task, 'tags'>): Pula | null =>
-  TAGS_PULA.find((g) => hasTag(t, g)) ?? (hasTag(t, TAG_STRATEGIA) ? 'RDZEN' : null);
-
-/** Ile tagow puli ma zadanie — wiecej niz jedna to blad oznaczenia (patrz brak `pule` w `readiness`). */
-export const pule = (t: Pick<Task, 'tags'>): number => TAGS_PULA.filter((g) => hasTag(t, g)).length;
+export const TAG_PRZENIESIONE = 'PRZENIESIONE';
 
 /** Bitrix nie rozroznia wielkosci liter w tagach — „do-startu" to ten sam tag. */
 export const hasTag = (t: Pick<Task, 'tags'>, tag: string): boolean =>
   t.tags.some((g) => g.toUpperCase() === tag);
 
+/**
+ * Wartosc zadania z NAJNOWSZEJ wiadomosci WARTOŚĆ w czacie (patrz `latestValue`):
+ *  - `kwota` — „WARTOŚĆ: oszczędność 1 000 zł / mies."; `wyliczenie` to linia „Wyliczenie: …", jesli jest,
+ *  - `bez-kwoty` — samo uzasadnienie, kwoty nie da sie podac,
+ *  - `wymog` — prawo, umowa albo kontrahent; wchodzi wedlug terminu,
+ *  - `zwrot` — starsza wiadomosc z okresem zwrotu; nadal liczy sie jako wartosc, tylko bez kwoty,
+ *  - `inna` — kazda inna wiadomosc zaczynajaca sie od „WARTOŚĆ" (dawne warianty) — tez wartosc, bez kwoty.
+ */
+export type TaskValue =
+  | { kind: 'kwota'; zl: number; wyliczenie: string | null }
+  | { kind: 'bez-kwoty' | 'wymog' | 'zwrot' | 'inna'; wyliczenie?: undefined };
 
 /**
- * Co wiemy z czatów zadań DO-STARTU:
- *  - `recon` — oznaczone jako rozpoznanie albo analiza błędu (dopisek w wiadomości WYCENA); takie
- *    zadanie jest gotowe bez kategorii i bez okresu zwrotu, bo wartość liczymy dopiero przy właściwym
- *    zadaniu, które z niego powstanie,
- *  - `value` — zadania z wiadomością WARTOŚĆ (pierwsza linia np. „WARTOŚĆ: rdzeń", „WARTOŚĆ: zwrot …",
- *    „WARTOŚĆ: wymóg"). Dla puli RDZEN to jedyny ślad wartości, bo takie zadanie nie ma ani
- *    kategorii, ani tagu ZWROT.
+ * Co wiemy z czatow zadan:
+ *  - `recon` — dopisek rozpoznania w wiadomosci WYCENA (rozpoznanie albo analiza bledu do 4 h),
+ *  - `value` — najnowsza wiadomosc WARTOŚĆ zadania (brak wpisu = brak takiej wiadomosci),
+ *  - `read` — zadania, ktorych czat udalo sie przeczytac. Reszta jest NIEZNANA — readiness() oddaje dla
+ *    nich `null` zamiast zgadywac „brak wartosci".
  */
 export interface ChatFacts {
   recon: ReadonlySet<number>;
-  value: ReadonlySet<number>;
-  /**
-   * Zadania, ktorych czat udalo sie przeczytac. Reszta (czat nieczytelny albo spoza zakresu odczytu, np. zadanie
-   * bez DO-STARTU) jest NIEZNANA — readiness() oddaje dla nich `null` zamiast zgadywac „brak WARTOSC".
-   */
+  value: ReadonlyMap<number, TaskValue>;
   read: ReadonlySet<number>;
 }
 
@@ -101,109 +75,59 @@ export function foldersOf(
   return folders;
 }
 
-
-
 /**
  * Status „Odlozone" (6). Audyt odlozonych nie rusza — leza poza kolejka, dopoki ktos
  * ich swiadomie nie wznowi — wiec nie wchodza do „Poza sprintem" ani do zadnego stanu.
  */
 export const DEFERRED_STATUS = '6';
 
-/** Ma tag kategorii korzyści (jeden z `TAGS_KATEGORIA`) — widać to z samej listy zadań. */
-export const hasCategory = (t: Pick<CounterTask, 'tags'>): boolean =>
-  TAGS_KATEGORIA.some((g) => hasTag(t, g));
-
-/** Wymóg nie ma okresu zwrotu — ma termin. */
-export const needsPayback = (t: Pick<CounterTask, 'tags'>): boolean => !hasTag(t, TAG_WYMOG);
-
 /**
- * Komplet z SAMEJ listy zadań (bez czatu): pula, wycena i — dla CIAGLOSC i DZIAL — kategoria oraz
- * tag okresu zwrotu albo termin.
- *
- *  - bez puli: nigdy,
- *  - CIAGLOSC / DZIAL: kategoria + tag okresu zwrotu (ZWROT-3 / ZWROT-6 / ZWROT-12 / ZWROT-12+),
- *    który `wartosc.mjs` kopiuje z przedziału w wiadomości WARTOŚĆ; WYMOG ma zamiast zwrotu termin
- *    (pole „Termin" zadania) — wymóg nie ma rankingu, ma datę,
- *  - RDZEN: z tagów sam się nie kompletuje — wartość siedzi w wiadomości WARTOŚĆ w czacie
- *    (`ChatFacts.value`), kategoria i ZWROT nie są wymagane.
- */
-export const isCompleteByTags = (t: CounterTask): boolean => {
-  const p = pula(t);
-  return (
-    p !== null &&
-    p !== 'RDZEN' &&
-    t.storyPoints != null &&
-    hasCategory(t) &&
-    (needsPayback(t) ? paybackBand(t) !== null : t.deadline != null)
-  );
-};
-
-/**
- * Rozpoznanie mieści się w 4 godzinach (`gotowe.mjs --rozpoznanie`). Poznajemy je po dopisku w
- * wiadomości WYCENA albo — jak w audycie — po tytule („rozpoznanie…", „weryfikacja…") przy wycenie do 4 h.
+ * Rozpoznanie miesci sie w 4 godzinach (`gotowe.mjs --rozpoznanie`). Poznajemy je po dopisku w
+ * wiadomosci WYCENA albo — jak w kolejce audytu — po tytule („rozpoznanie…", „weryfikacja…") przy wycenie do 4 h.
  */
 export const RECON_MAX_HOURS = 4;
-export const isReconByTitle = (t: Pick<CounterTask, 'title' | 'storyPoints' | 'tags'>): boolean =>
-  pula(t) !== null &&
-  t.storyPoints != null &&
-  t.storyPoints <= RECON_MAX_HOURS &&
-  /rozpoznani|weryfikacj/i.test(t.title);
+export const isReconByTitle = (t: Pick<CounterTask, 'title' | 'storyPoints'>): boolean =>
+  t.storyPoints != null && t.storyPoints <= RECON_MAX_HOURS && /rozpoznani|weryfikacj/i.test(t.title);
 
 /**
- * Zadanie, którego kompletność rozstrzyga czat: może być rozpoznaniem albo — z pulą RDZEN —
- * mieć wiadomość WARTOŚĆ. Bez puli czat niczego nie zmienia (zadanie i tak nie jest kompletne).
+ * Komplet z SAMEJ listy zadan (bez czatu): wycena i termin w polu „Termin" albo rozpoznanie po tytule.
+ * Pozostale zadania kompletuje dopiero czat (wiadomosc WARTOŚĆ albo dopisek rozpoznania w WYCENA).
  */
-export const needsChat = (t: CounterTask): boolean =>
-  t.storyPoints != null &&
-  pula(t) !== null &&
-  !isReconByTitle(t) &&
-  !isCompleteByTags(t) &&
-  (t.storyPoints <= RECON_MAX_HOURS || pula(t) === 'RDZEN');
+export const isCompleteByTask = (t: Pick<CounterTask, 'title' | 'storyPoints' | 'deadline'>): boolean =>
+  t.storyPoints != null && (t.deadline != null || isReconByTitle(t));
+
+/** Zadanie, ktorego kompletnosc rozstrzyga czat: ma wycene, ale nie jest kompletne z samej listy. */
+export const needsChat = (t: Pick<CounterTask, 'title' | 'storyPoints' | 'deadline'>): boolean =>
+  t.storyPoints != null && !isCompleteByTask(t);
 
 /** Czego brakuje zadaniu do kompletu — do filtra „Brakuje" (patrz `readiness`). */
-export type Missing = 'pula' | 'pule' | 'sp' | 'kategoria' | 'zwrot' | 'termin' | 'wartosc';
+export type Missing = 'sp' | 'wartosc';
 
 export const MISSING_LABEL: Record<Missing, string> = {
-  pula: 'Pula (CIAGLOSC / RDZEN / DZIAL)',
-  pule: 'Jedna pula (zadanie ma dwie)',
   sp: 'Story points',
-  kategoria: 'Kategoria',
-  zwrot: 'Okres zwrotu (ZWROT-…)',
-  termin: 'Termin (WYMOG)',
-  wartosc: 'Wiadomość WARTOŚĆ (RDZEN)',
+  wartosc: 'Wartość (WARTOŚĆ, termin albo rozpoznanie)',
 };
 
 /**
- * Gotowosc zadania do startu wg tych samych zasad co dawny kafelek „Gotowe do startu" (`isComplete`), plus
- * lista brakow. `ready: null` = rozstrzyga czat, a czaty jeszcze sie czytaja (`chat === null`) — wtedy
- * zadanie nie jest ani gotowe, ani niegotowe, a `missing` podaje to, czego brakuje na pewno.
+ * Gotowosc zadania do startu — ta sama definicja kompletu co kolejka audytu (krok 2):
+ * wycena (story points) + wartosc, czyli dowolna wiadomosc WARTOŚĆ, termin w polu „Termin" albo
+ * rozpoznanie do 4 h (tytul albo dopisek w wiadomosci WYCENA). Litera A–D do kompletu nie nalezy.
  *
- * Rozpoznanie (po tytule albo dopisku w czacie) jest gotowe z sama pula i wycena — reszta go nie dotyczy.
+ * `ready: null` = rozstrzyga czat, a ten nie zostal jeszcze przeczytany — zadanie nie jest ani gotowe, ani
+ * niegotowe, a `missing` podaje to, czego brakuje na pewno.
  */
 export function readiness(t: CounterTask, chat: ChatFacts | null): { ready: boolean | null; missing: Missing[] } {
-  const p = pula(t);
   const missing: Missing[] = [];
-  if (p === null) missing.push('pula');
-  // Dwie pule naraz to blad oznaczenia — nie zgadujemy, ktora miala byc; zadanie czeka na poprawke.
-  if (pule(t) > 1) missing.push('pule');
   if (t.storyPoints == null) missing.push('sp');
-  if (missing.length) return { ready: false, missing };
+  if (t.deadline != null || isReconByTitle(t)) return { ready: missing.length === 0, missing };
 
-  if (isReconByTitle(t) || (chat?.recon.has(t.id) ?? false)) return { ready: true, missing: [] };
-  // Czat, ktory moze rozstrzygnac (WARTOSC, dopisek rozpoznania), a nie zostal przeczytany: wynik nieznany.
-  const unknown = needsChat(t) && !(chat?.read.has(t.id) ?? false);
-
-  if (p === 'RDZEN') {
-    if (unknown) return { ready: null, missing: [] };
-    if (!(chat?.value.has(t.id) ?? false)) missing.push('wartosc');
-  } else {
-    if (!hasCategory(t)) missing.push('kategoria');
-    if (needsPayback(t) ? paybackBand(t) === null : t.deadline == null) missing.push(needsPayback(t) ? 'zwrot' : 'termin');
-  }
-  // Male zadanie bez kompletu moze byc jeszcze rozpoznaniem z dopiskiem w czacie.
-  if (missing.length && unknown) return { ready: null, missing };
+  const known = chat?.read.has(t.id) ?? false;
+  if (!known) return { ready: missing.length ? false : null, missing };
+  const recon = (chat?.recon.has(t.id) ?? false) && t.storyPoints != null && t.storyPoints <= RECON_MAX_HOURS;
+  if (!recon && !(chat?.value.has(t.id) ?? false)) missing.push('wartosc');
   return { ready: missing.length === 0, missing };
 }
+
 
 export interface ChatMessage {
   id: number;
@@ -233,52 +157,11 @@ export function plainBody(text: string): string {
     .trim();
 }
 
-/** Przedział okresu zwrotu, od najlepszego do najgorszego. */
-export type PaybackBand = 'do3' | '3-6' | '6-12' | 'ponad12';
-
-/**
- * Przedziały i ich tagi na zadaniu. Liczba w tagu to GÓRNA granica przedziału; `ZWROT-12+` to
- * ponad 12 miesięcy albo „nie da się policzyć". Tag jest kopią przedziału z wiadomości WARTOŚĆ
- * i to z niego czytamy — bez wchodzenia w czat.
- */
-export const PAYBACK_BANDS: { key: PaybackBand; label: string; tag: string }[] = [
-  { key: 'do3', label: 'do 3 mies.', tag: 'ZWROT-3' },
-  { key: '3-6', label: '3–6 mies.', tag: 'ZWROT-6' },
-  { key: '6-12', label: '6–12 mies.', tag: 'ZWROT-12' },
-  { key: 'ponad12', label: 'ponad 12 mies.', tag: 'ZWROT-12+' },
-];
-
-/**
- * Przedział okresu zwrotu z tagów zadania. Gdyby zadanie miało dwa tagi zwrotu (skrypt podmienia
- * stary, ale ręczna zmiana potrafi zostawić oba), liczy się NAJGORSZY — lepiej nie obiecać za dużo.
- */
-export function paybackBand(t: Pick<Task, 'tags'>): PaybackBand | null {
-  let worst = -1;
-  for (const g of t.tags) {
-    const i = PAYBACK_BANDS.findIndex((b) => b.tag === g.toUpperCase());
-    if (i > worst) worst = i;
-  }
-  return worst < 0 ? null : PAYBACK_BANDS[worst].key;
-}
-
-/**
- * Miejsce zadania w sortowaniu „po zwrocie" — mniejsza liczba idzie wyżej.
- *
- *   0    WYMOG (ma termin, wchodzi poza rankingiem, więc na początku)
- *   1–4  przedział: do 3, 3–6, 6–12, ponad 12 miesięcy
- *   5    brak okresu zwrotu (jeszcze niepoliczony, albo RDZEN) — na końcu
- */
-export function paybackRank(t: Pick<Task, 'tags'>): number {
-  if (hasTag(t, TAG_WYMOG)) return 0;
-  const band = paybackBand(t);
-  return band ? 1 + PAYBACK_BANDS.findIndex((b) => b.key === band) : PAYBACK_BANDS.length + 1;
-}
-
 /**
  * Dopisek w wiadomości WYCENA przy rozpoznaniu i analizie błędu (`gotowe.mjs --rozpoznanie`):
  * „Rozpoznanie — bez okresu zwrotu". Starsze wyceny nie mają dopisku, tylko uzasadnienie zaczynające
  * się od „Rozpoznanie / Weryfikacja / Przegląd kodu / Sprawdzenie" — audyt czyta obie postaci, więc
- * my też. Po nich krok 9 audytu pomija zadanie, a binear uznaje je za komplet bez kategorii i zwrotu.
+ * my też. Po nich krok 9 audytu pomija zadanie, a binear uznaje je za komplet (do 4 h) bez wiadomosci WARTOŚĆ.
  */
 export const RECON_MARKER =
   /rozpoznanie\s*[-–—]\s*bez okresu zwrotu|co obejmuje ta wycena\s*(?:rozpoznanie|weryfikacja|przegl[ąa]d kodu|sprawdzenie)/i;
@@ -289,16 +172,63 @@ export function hasReconMarker(messages: ChatMessage[]): boolean {
 }
 
 /**
- * Wiadomość „WARTOŚĆ" w czacie zadania — początek wiadomości po zdjęciu znaczników, bez względu na
- * wielkość liter i polskie znaki: „WARTOŚĆ: rdzeń", „[B]Wartość[/B] …". Dla puli RDZEN to jedyny
- * ślad wartości, bo takie zadanie nie ma ani kategorii, ani tagu ZWROT.
+ * Wiadomosc „WARTOŚĆ" w czacie zadania — poczatek wiadomosci po zdjeciu znacznikow, bez wzgledu na
+ * wielkosc liter i polskie znaki. Ta sama regula co w kolejce audytu.
  */
 export const VALUE_MESSAGE = /^warto[śs][ćc](?=$|[\s:.,;\-–—])/i;
 
-/** Czy któraś z wiadomości (system pomijamy) to wiadomość WARTOŚĆ. */
-export function hasValueMessage(messages: ChatMessage[]): boolean {
-  return messages.some((m) => m.authorId > 0 && VALUE_MESSAGE.test(plainBody(m.text)));
+/** Pierwsza linia z kwota: „WARTOŚĆ: oszczędność 1 000 zł / mies." (spacja albo twarda spacja dzieli tysiace). */
+const SAVINGS_LINE = /^warto[śs][ćc]\s*:?\s*oszcz[ęe]dno[śs][ćc]\s+(\d[\d   ]*(?:[.,]\d+)?)\s*z[łl]/i;
+
+/** Kwota zapisana po polsku: „1 000", „1 000,50", „840" → liczba. */
+export function parseAmount(s: string): number {
+  return Number(s.replace(/[\s  ]/g, '').replace(',', '.'));
 }
+
+/** Tresc bez wzmianek i znacznikow BBCode, ale z podzialem na linie. */
+function plainLines(text: string): string[] {
+  return text
+    .replace(/\[USER=\d+\][\s\S]*?\[\/USER\]/gi, ' ')
+    .replace(/\[\/?[A-Za-z]+(?:=[^\]]*)?\]/g, '')
+    .split(/\r?\n/)
+    .map((l) => l.replace(/[ \t ]+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+/** Jedna wiadomosc → wartosc zadania; `null`, gdy to nie jest wiadomosc WARTOŚĆ. */
+export function parseValueMessage(text: string): TaskValue | null {
+  if (!VALUE_MESSAGE.test(plainBody(text))) return null;
+  const lines = plainLines(text);
+  const first = lines[0] ?? '';
+  const amount = first.match(SAVINGS_LINE);
+  if (amount) {
+    const zl = parseAmount(amount[1]);
+    if (Number.isFinite(zl)) {
+      const calc = lines.find((l) => /^wyliczenie\s*:/i.test(l));
+      return { kind: 'kwota', zl, wyliczenie: calc ? calc.replace(/^wyliczenie\s*:\s*/i, '') : null };
+    }
+  }
+  const rest = first.replace(/^warto[śs][ćc]\s*[:\-–—]?\s*/i, '');
+  if (/^bez kwoty/i.test(rest)) return { kind: 'bez-kwoty' };
+  if (/^wym[óo]g/i.test(rest)) return { kind: 'wymog' };
+  if (/^zwrot/i.test(rest)) return { kind: 'zwrot' };
+  return { kind: 'inna' };
+}
+
+/** Najnowsza wiadomosc WARTOŚĆ (wpisy systemowe pomijamy) — liczy sie tylko ona. `null`, gdy zadnej nie ma. */
+export function latestValue(messages: ChatMessage[]): TaskValue | null {
+  let best: { id: number; v: TaskValue } | null = null;
+  for (const m of messages) {
+    if (m.authorId <= 0) continue;
+    const v = parseValueMessage(m.text);
+    if (v && (!best || m.id > best.id)) best = { id: m.id, v };
+  }
+  return best?.v ?? null;
+}
+
+/** Oszczednosc w zl / mies. z wartosci zadania albo `null` (bez kwoty, brak wiadomosci). */
+export const savingsOf = (v: TaskValue | null | undefined): number | null => (v?.kind === 'kwota' ? v.zl : null);
+
 
 /**
  * Czy wiadomosc ma tresc odpowiedzi, a nie jest samym ping-iem.
@@ -405,5 +335,24 @@ export function saveHistory(groupId: number, history: CounterHistory): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
   } catch {
     /* Brak miejsca albo zablokowany storage — licznik dziala dalej, bez strzalek. */
+  }
+}
+
+/** Kwota po polsku: „1 200 zł", „1 050,5 zł". */
+export const formatZl = (zl: number): string => `${zl.toLocaleString('pl-PL', { maximumFractionDigits: 2 })} zł`;
+
+/** Krotki opis wartosci zadania do panelu szczegolow. */
+export function valueLabel(v: TaskValue): string {
+  switch (v.kind) {
+    case 'kwota':
+      return `oszczędność ${formatZl(v.zl)} / mies.`;
+    case 'bez-kwoty':
+      return 'bez kwoty (uzasadnienie w czacie)';
+    case 'wymog':
+      return 'wymóg (według terminu)';
+    case 'zwrot':
+      return 'dawny okres zwrotu, bez kwoty';
+    default:
+      return 'jest, bez kwoty';
   }
 }

@@ -295,7 +295,6 @@ function Pasek({
   );
 }
 
-/** Kolejnosc waznosci: priorytet Bitriksa, pula, tag „Wysoki", okres zwrotu, story pointy malejaco. */
 /** Kursor blizej gory kolumny niz tyle = na naglowku sprintu aktywnego, czyli zwin go. */
 const FOLD_PX = 56;
 /** Tyle trzeba przesunac mysz, zeby wcisniecie uchwytu stalo sie przeciaganiem. */

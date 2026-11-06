@@ -3,45 +3,45 @@
  * dzienna historia (strzalki „od wczoraj") i sama strzalka roznicy. Logika w `counters.ts`.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { fetchChatTail, type ChatTail, type Task } from './bitrix';
+import { fetchChatTail, fetchTaskHistory, type ChatTail, type Sprint, type Task } from './bitrix';
+import { carryOverCount } from './carryOver';
 import {
   answerState,
   dayKey,
   DEFERRED_STATUS,
   hasReconMarker,
   hasTag,
-  hasValueMessage,
+  latestValue,
   loadHistory,
-  needsChat,
   previousDay,
-  pula,
   recordDay,
   saveHistory,
   TAG_CZEKA,
   TAG_DO_STARTU,
+  TAG_PRZENIESIONE,
   type ChatFacts,
   type DaySnapshot,
+  type TaskValue,
 } from './counters';
 
 /** Czaty dociagamy ponownie co tyle, nawet gdy lista sie nie zmienila. */
 const ANSWERS_REFRESH_MS = 5 * 60_000;
 
 /**
- * Fakty z czatow do filtrow „Gotowość" i „Brakuje" (patrz `readiness` w counters.ts): rozpoznania (dopisek
- * w wiadomosci WYCENA) i wiadomosci WARTOŚĆ zadan z pula RDZEN.
+ * Fakty z czatow (patrz `readiness` i `latestValue` w counters.ts): dopisek rozpoznania w wiadomosci WYCENA
+ * i najnowsza wiadomosc WARTOŚĆ — z niej komplet do startu, kwota oszczednosci (sortowanie, wiersz) i wyliczenie.
  *
- * Czytamy tylko otwarte, nieodlozone zadania DO-STARTU, ktorych kompletnosc naprawde rozstrzyga czat
- * (`needsChat`), i tylko gdy jakis filtr albo kafelek tych pol uzywa (`enabled`) — inaczej to kilkadziesiat
- * zapytan co odswiezenie po nic. `null`, dopoki pierwszy przebieg sie nie skonczy.
+ * Czytamy otwarte, nieodlozone zadania DO-STARTU i zadania trwajacego sprintu (`sprintId`), i tylko gdy cos
+ * z tych faktow korzysta (`enabled`). `null`, dopoki pierwszy przebieg sie nie skonczy.
  *
  * Nieudany odczyt to „nie wiem", a nie „pusty czat": zadanie czytane juz wczesniej zachowuje stary wynik,
  * a nigdy nieprzeczytane zostaje nieznane (`complete: false`) — kafelki czekaja wtedy na „…", a zla liczba nie trafia do historii.
  */
 export function useChatFacts(
   tasks: Task[],
-  opts: { closed: ReadonlySet<string>; groupId: number | null; enabled: boolean },
+  opts: { closed: ReadonlySet<string>; groupId: number | null; sprintId: number | null; enabled: boolean },
 ): { facts: ChatFacts | null; complete: boolean } {
-  const { closed, groupId, enabled } = opts;
+  const { closed, groupId, sprintId, enabled } = opts;
   const [state, setState] = useState<{ group: number | null; facts: ChatFacts; read: ReadonlySet<number> } | null>(null);
   const [tick, setTick] = useState(0);
 
@@ -56,10 +56,9 @@ export function useChatFacts(
         (t) =>
           !closed.has(t.status) &&
           t.status !== DEFERRED_STATUS &&
-          hasTag(t, TAG_DO_STARTU) &&
-          needsChat(t),
+          (hasTag(t, TAG_DO_STARTU) || (sprintId !== null && t.sprintId === sprintId)),
       ),
-    [tasks, closed],
+    [tasks, closed, sprintId],
   );
   // Zadanie bez czatu nie ma czego przeczytac — to pusty czat (znany wynik), a nie „nie wiem".
   const toRead = useMemo(() => candidates.filter((t) => t.chatId !== null), [candidates]);
@@ -80,14 +79,15 @@ export function useChatFacts(
       setState((prev) => {
         const known = prev && prev.group === groupId ? prev : null;
         const recon = new Set<number>();
-        const value = new Set<number>();
+        const value = new Map<number, TaskValue>();
         const read = new Set<number>(noChat);
         for (const [i, r] of got.entries()) {
           const t = toRead[i];
           if (r.status === 'fulfilled') {
             read.add(t.id);
             if (hasReconMarker(r.value.messages)) recon.add(t.id);
-            if (pula(t) === 'RDZEN' && hasValueMessage(r.value.messages)) value.add(t.id);
+            const v = latestValue(r.value.messages);
+            if (v) value.set(t.id, v);
             continue;
           }
           // Nieudany odczyt: ostatni znany wynik tego zadania, a bez niego zadanie zostaje nieznane („…") —
@@ -95,7 +95,8 @@ export function useChatFacts(
           if (!known?.read.has(t.id)) continue;
           read.add(t.id);
           if (known.facts.recon.has(t.id)) recon.add(t.id);
-          if (known.facts.value.has(t.id)) value.add(t.id);
+          const v = known.facts.value.get(t.id);
+          if (v) value.set(t.id, v);
         }
         return { group: groupId, facts: { recon, value, read }, read };
       });
@@ -325,4 +326,46 @@ export function Delta({
       <span className="counter-delta-when">{when}</span>
     </span>
   );
+}
+
+/**
+ * Ile razy zadania z tagiem PRZENIESIONE przeszly z poprzedniego sprintu (`carryOverCount`). Dziennik zmian
+ * to jedno zapytanie na zadanie, wiec czytamy go tylko dla otwartych zadan z tym tagiem, a wynik trzymamy,
+ * dopoki nie zamknie sie kolejny sprint. Brak wpisu = jeszcze nie wiadomo (pigulka bez „N×").
+ */
+export function useCarryOver(
+  tasks: Task[],
+  sprints: readonly Sprint[],
+  closed: ReadonlySet<string>,
+): ReadonlyMap<number, number> {
+  const [counts, setCounts] = useState<{ key: string; map: Map<number, number> }>({ key: '', map: new Map() });
+  const candidates = useMemo(
+    () => tasks.filter((t) => !closed.has(t.status) && hasTag(t, TAG_PRZENIESIONE)).map((t) => t.id),
+    [tasks, closed],
+  );
+  const closedSprints = sprints.filter((s) => s.status === 'completed').length;
+  const sprintKey = `${closedSprints}`;
+
+  useEffect(() => {
+    const known = counts.key === sprintKey ? counts.map : new Map<number, number>();
+    const missing = candidates.filter((id) => !known.has(id));
+    if (!missing.length) return;
+    let cancelled = false;
+    void Promise.allSettled(missing.map((id) => fetchTaskHistory(id))).then((got) => {
+      if (cancelled) return;
+      setCounts((prev) => {
+        const map = new Map(prev.key === sprintKey ? prev.map : []);
+        got.forEach((r, i) => {
+          if (r.status === 'fulfilled') map.set(missing[i], carryOverCount(r.value, sprints));
+        });
+        return { key: sprintKey, map };
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `sprints` zmienia sie razem z `sprintKey` (liczba zamknietych) — to on wyznacza ponowne liczenie.
+  }, [candidates, sprintKey]);
+
+  return counts.key === sprintKey ? counts.map : new Map();
 }

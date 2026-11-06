@@ -22,6 +22,7 @@ export type RowElement =
   | 'related'
   | 'new'
   | 'comments'
+  | 'savings'
   | 'points'
   | 'deadline'
   | 'more'
@@ -37,6 +38,7 @@ export const ROW_ELEMENTS: { id: RowElement; label: string }[] = [
   { id: 'related', label: 'Powiązane' },
   { id: 'new', label: 'Nowe' },
   { id: 'comments', label: 'Komentarze' },
+  { id: 'savings', label: 'Oszczędność (zł / mies.)' },
   { id: 'points', label: 'Story points' },
   { id: 'deadline', label: 'Termin / data zmiany' },
   { id: 'more', label: 'Menu akcji' },
@@ -64,7 +66,7 @@ export const DEFAULT_ROW_LAYOUT: RowLayout = {
   lines: [
     {
       left: ['parent', 'title', 'epic', 'matrix', 'tags', 'subs', 'related', 'new', 'comments'],
-      right: ['points', 'deadline', 'more', 'avatar'],
+      right: ['savings', 'points', 'deadline', 'more', 'avatar'],
     },
   ],
 };

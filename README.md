@@ -139,7 +139,13 @@ days — capacity comes from it instead of `BX_CAPACITY_DEVS`. Per person:
   with them when they enter a sprint (the same as `BX_CAPACITY_EXCLUDE_IDS`). While nobody in the team is
   ticked, the manager from `BX_CAPACITY_EXCLUDE_IDS` still counts;
 - **Moc** — their hours count into team capacity;
-- **Budżet** — their tasks take SP budget in planning.
+- **Budżet** — their tasks take SP budget in planning;
+- **Opiekun** — the person is in the **guardian pool**. In the backlog a task's responsible person is its guardian
+  (they make it precise up to `DO-STARTU`); in the sprint it is whoever does it. The pool drives the
+  **OPIEKUNOWIE** tile group: one tile per guardian with the number of tasks they look after in the backlog, and
+  **Bez opiekuna** — backlog tasks whose responsible person is outside the pool (a technical or shared account,
+  someone outside IT). Backlog means the same as "Poza sprintem": open, not deferred, no `KONCEPCJA`, no folders.
+  The group is generated from the team, not saved with the tiles, and is hidden while the pool is empty.
 
 People are added by searching the whole company directory (IT first), so someone with no tasks yet can be added;
 the "Nieprzypisane" placeholder account is not offered. While the window is open the list's shortcuts are off and
@@ -211,8 +217,9 @@ Besides the usual dimensions, the filter bar (and so every tile) has:
 - **Odpowiedź w czacie** — someone outside IT answered after our questions / not; read from the task chats;
 - **Rodzaj zadania** — parent with an open subtask (a *folder*) / subtask / plain;
 - **Gotowość do startu** — ready / not ready, by the rules in *What "ready" means* below;
-- **Brakuje** — what exactly is missing: pool, story points, category, payback (`ZWROT-…`), deadline
-  (`WYMOG`) or the `WARTOŚĆ` message (`RDZEN`). For example *DO-STARTU and missing only the payback*.
+- **Brakuje** — what exactly is missing: story points and/or the value (a `WARTOŚĆ` message, a deadline or
+  reconnaissance). For example *DO-STARTU and missing only the value*;
+- **Opiekun (backlog)** — the task's guardian from the pool, or *Bez opiekuna* (see *Team*).
 
 Tag filters match case-insensitively, as in Bitrix (`bug` = `BUG`). A **Status** filter that picks a closed
 status shows completed tasks; nothing else does (`Status ≠ Odłożone` does not).
@@ -228,8 +235,8 @@ exactly — each task outside the sprint is in one of them:
 | **Do wywiadu** | outside the sprint, neither `DO-STARTU` nor `OCZEKUJE-NA-ODPOWIEDZ` (new tasks, or tagged only `BUG`, `Wysoki`…) |
 | **Czeka na odpowiedź** | `OCZEKUJE-NA-ODPOWIEDZ` without `DO-STARTU`, nobody outside IT answered yet |
 | **Do analizy odpowiedzi** | the same tag, and someone outside IT answered with substance after our last questions |
-| **Do wyceny** | `DO-STARTU` without story points **or** without a matrix tag `A`–`D` |
-| **Gotowe do startu** | `DO-STARTU` with story points **and** a matrix tag `A`–`D` — can be pulled into a sprint |
+| **Do wyceny** | `DO-STARTU`, **not ready** (*Gotowość* = no) and not `D` |
+| **Gotowe do startu** | `DO-STARTU`, **ready** (*Gotowość* = yes) **or** `D` — can be pulled into a sprint |
 | **Sprint** | the active sprint's remaining work (without *Wdrożone*, *Pull Request* and *Do zatwierdzenia*) |
 | **Ważne** *(own group, no caption)* | open tasks with the **flame** **or** the `BUG` tag, in the sprint or outside it, deferred excluded |
 | **Odłożone** | deferred tasks (status 6) outside the sprint |
@@ -237,64 +244,51 @@ exactly — each task outside the sprint is in one of them:
 | **Foldery** | outside the sprint, with an open subtask — containers, the work sits in the subtasks |
 
 The two-tags case is in the filters too: a task with both `DO-STARTU` and `OCZEKUJE-NA-ODPOWIEDZ` counts as
-`DO-STARTU`. Checked against the old built-in counters on live data: every tile gives the same number, except
-**Sprint**, which used to count every task of the sprint, done ones included, and **Do wyceny** / **Gotowe do
-startu**, which now follow the Eisenhower matrix (`A`–`D`) instead of the pools.
+`DO-STARTU`. **Do wyceny** and **Gotowe do startu** count exactly like step 2 and the tile line of the task audit
+queue (`kolejka.mjs`): a `D` task is never "to be estimated" (the audit skips `D`), and the letter `A`–`D` is not
+part of the complete set — a ready task without a letter is "ready" and waits for its letter in the audit.
+Saved tiles keep their old filters: load the IT set again (*Wczytaj domyślne kafelki*) to get the new ones.
 
-**What "ready" means (the *Gotowość* and *Brakuje* filter fields).** The default tiles no longer use it, but
-the fields stay for your own tiles and views. A `DO-STARTU` task is ready to start when it has a **pool**, an
-**estimate**, and the value that its pool asks for:
+**What "ready" means (the *Gotowość* and *Brakuje* filter fields).** A `DO-STARTU` task is ready to start
+when it has an **estimate** (story points) **and a value** — any one of:
 
-- **a pool** — exactly one of `CIAGLOSC` (continuity), `RDZEN` (core) or `DZIAL` (department).
-  Mandatory: **without a pool a task is never ready** and sits on "Do wyceny", reconnaissance
-  included. If a task carries two, the first in that order counts;
-- **story points** (the estimate);
-- **`CIAGLOSC` and `DZIAL`** — a benefit category (one tag out of `BUG`, `OSZCZEDNOSC`,
-  `PRZYCHOD`, `RYZYKO`, `ANALITYKA`, `UTRZYMANIE`, `WYMOG`; a tag outside this list, e.g.
-  `Wysoki` or `STRATEGIA`, is not a category) and a payback period — one of `ZWROT-3` (up to 3
-  months), `ZWROT-6` (3–6), `ZWROT-12` (6–12) or `ZWROT-12+` (over 12, or "can't be counted"). The
-  tag is a copy of the band written into the task's `WARTOŚĆ` chat message by the value script. If a
-  task carries two of them, the worst one counts. `WYMOG` (law, contract, a counterparty) has no
-  payback period but **must have a deadline** (Bitrix's own `Termin` field);
-- **`RDZEN`** — a `WARTOŚĆ` message in the task chat (its first line can be `WARTOŚĆ: rdzeń`,
-  `WARTOŚĆ: zwrot …` or `WARTOŚĆ: wymóg`). Category and `ZWROT` are **not** required, and the tag
-  alone doesn't complete it — the chat does.
+- a **`WARTOŚĆ` message** in the task chat. The newest one counts. Its first line is one of
+  `WARTOŚĆ: oszczędność 1 000 zł / mies.` (savings per month; space as the thousands separator, `,` allowed),
+  `WARTOŚĆ: bez kwoty` (justification only) or `WARTOŚĆ: wymóg`. Older `WARTOŚĆ: zwrot …` messages (payback
+  period) still count as a value, just without an amount;
+- a **deadline** in Bitrix's own `Termin` field;
+- **reconnaissance** up to 4 h — the line `Rozpoznanie — bez okresu zwrotu` (or the older opening of the
+  justification: Rozpoznanie / Weryfikacja / Przegląd kodu / Sprawdzenie) in its `WYCENA` message, or a title
+  with "rozpoznanie" / "weryfikacja".
 
-The old `STRATEGIA` tag meant what `RDZEN` means now (value from the `WARTOŚĆ` message), so a task with
-`STRATEGIA` and **no pool tag** counts as `RDZEN` — it isn't pushed to "Do wyceny" and the bottom of planning
-just because nobody re-tagged it. With a real pool tag, `STRATEGIA` changes nothing. A task with **two pool tags**
-is never ready: *Brakuje* shows "Jedna pula (zadanie ma dwie)" until someone removes one.
+Pools (`CIAGLOSC`, `RDZEN`, `DZIAL`), benefit-category tags and the `ZWROT-…` payback tags are retired and
+mean nothing to binear any more.
 
-**Reconnaissance** (up to 4 h, `--rozpoznanie`: its result is the estimate and the value of the real
-task) is ready with just a pool and an estimate — no category, no payback tag, no `WARTOŚĆ`. It is
-recognised the way the audit does it: by the line in its `WYCENA` chat message (`Rozpoznanie — bez
-okresu zwrotu`, or the older opening of the justification: Rozpoznanie / Weryfikacja / Przegląd kodu
-/ Sprawdzenie), or — with no chat read at all — by a title with "rozpoznanie" or "weryfikacja" on an
-estimate of up to 4 h.
+**Savings.** The amount from the first line of the newest `WARTOŚĆ` message is the source of truth. It shows
+on the task row (the **Oszczędność** row element, next to story points; hover for the calculation) and in the
+task panel as **Wartość**, together with its `Wyliczenie: …` line when the message has one (for example
+`1 os. × 30 min dziennie × 21 dni = 10,5 h × 40 zł = 420 zł`). A saved row layout doesn't gain the new
+element by itself — add it in the row layout configurator.
 
-**Chats are read for two things only**, and only for open, non-deferred `DO-STARTU` tasks with a pool whose
-completeness a chat decides: tasks up to 4 h without a complete set of tags
-(reconnaissance) and `RDZEN` tasks (the `WARTOŚĆ` message). Everything else comes from the task list.
-Chats are read only while some filter or tile uses *Gotowość* or *Brakuje*. While they load, those tiles show
-`…` rather than a wrong number, and if chats can't be read at all (no `im` scope) they stay on `…`.
+**Chats** of open, non-deferred `DO-STARTU` tasks and of the active sprint's tasks are read once the list has
+loaded and again every 5 minutes. While they load, the readiness tiles show `…` rather than a wrong number,
+and if chats can't be read at all (no `im` scope) they stay on `…`.
 
-Missing any of the above (pool included) makes the task *not ready*.
+**`PRZENIESIONE`.** A task that moved unfinished from the previous sprint (the audit tags it) gets a
+highlighted pill on its row instead of a plain tag, with **N×** — how many times it was carried over, counted
+from its history like the audit does: a stage change to a column of the same name within 30 minutes after a
+sprint closed, without a `MOVE_TO_SPRINT` entry next to it. Only tasks with the tag have their history read.
 
-**Planning: sort order.** The default stack follows the Eisenhower matrix, in this order: the **Bitrix
-priority (flame)**, the **matrix tag** `A` → `B` → `C` → `D` (no tag last), **payback ascending**, and story points
-ascending (smaller first, no estimate last).
+**Planning: sort order.** The default stack: the **Bitrix priority (flame)**, **deadlines** (colour, then
+date), the **matrix tag** `A` → `B` → `C` → `D` (no tag last), **savings** (larger amount first, no amount
+last) and story points ascending (fewer hours first, no estimate last).
 
-- The flame means an outage (the company can't work), so nothing overtakes it.
-- Payback: `ZWROT-3`, `ZWROT-6`, `ZWROT-12`, `ZWROT-12+`, with `WYMOG` first (nearest deadline first) and tasks
-  without a payback tag last.
-
-Every level is a sort level (**Macierz (A–D)**, **Pula**, **Tag Wysoki**, **Okres zwrotu**…) you can reorder,
-reverse or drop from the sort menu. Sorting hides nothing: the register still shows every
-`DO-STARTU` task, also those with no pool or payback worked out yet.
+Every level is a sort level (**Macierz (A–D)**, **Tag Wysoki**, **Oszczędność**…) you can reorder, reverse or
+drop from the sort menu. Sorting hides nothing.
 
 The sort is saved in the browser as a whole stack, so someone who never touched it would keep the old
-default for good. A saved stack that is exactly one of the old defaults is replaced by the new one; a
-stack you arranged yourself is left alone.
+default for good. A saved stack that is exactly one of the old defaults is replaced by the new one; in a
+stack you arranged yourself, *Okres zwrotu* becomes *Oszczędność* in the same place and *Pula* is dropped.
 
 **Answers.** The anchor is the last comment by IT that looks like interview
 questions (a line starting with `[B]1.`). An answer is a later message from someone outside IT that has substance: numbered

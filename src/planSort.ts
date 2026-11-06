@@ -7,7 +7,6 @@
  * byl niewidoczny w kodzie, a widoczny dopiero w kolejnosci wierszy.
  */
 import type { Task } from './bitrix';
-import { pula, TAGS_PULA } from './counters';
 
 export type Cmp = (a: Task, b: Task) => number;
 
@@ -53,11 +52,19 @@ const deadlineTime = (t: Task): number => {
   return Number.isNaN(ms) ? Number.MAX_SAFE_INTEGER : ms;
 };
 
-/** Pula: CIAGLOSC, RDZEN, DZIAL (w tej kolejnosci), bez puli na koncu. */
-const pulaRank = (t: Task) => {
-  const p = pula(t);
-  return p === null ? TAGS_PULA.length : TAGS_PULA.indexOf(p);
-};
+/**
+ * Oszczednosc w zl / mies. — rosnaco znaczy „wieksza oszczednosc wyzej" (tak, jak sortuje sie kolejka w literze).
+ * Zadania bez kwoty (bez wiadomosci WARTOŚĆ albo „bez kwoty") zawsze na koncu, takze przy odwrotnym kierunku.
+ */
+const savingsComparator =
+  (dir: 'asc' | 'desc', savings: (t: Task) => number | null): Cmp =>
+  (a, b) => {
+    const x = savings(a);
+    const y = savings(b);
+    if ((x === null) !== (y === null)) return x === null ? 1 : -1;
+    const d = (y ?? 0) - (x ?? 0);
+    return dir === 'asc' ? d : -d;
+  };
 
 /**
  * Macierz Eisenhowera: tag A, B, C albo D (ranga 0–3), bez tagu na koncu. Przy kilku tagach liczy sie najwazniejszy.
@@ -78,11 +85,20 @@ const wysokiRank = (t: Task) => (t.tags.some((g) => g.toLowerCase() === 'wysoki'
  *   2. terminy: najpierw KOLOR (czerwony — musi wejsc w obecnym sprincie, zolty — w nastepnym),
  *      w obrebie koloru data terminu; zielone i bez terminu przechodza do kolejnego poziomu,
  *   3. macierz: tag A, B, C, D (bez tagu na koncu),
- *   4. okres zwrotu rosnaco (ZWROT-3 przed ZWROT-6 itd.; wymogi po terminie, zadania bez zwrotu na koncu),
+ *   4. oszczednosc w zl / mies. — wieksza wyzej, zadania bez kwoty na koncu,
  *   5. story pointy rosnaco — mniejsze pierwsze, bez wyceny na koncu.
- * Pula i tag „Wysoki" zostaja dostepne jako poziomy, tylko nie sa juz w domyslnym stosie.
+ * Tag „Wysoki" zostaje dostepny jako poziom, tylko nie jest w domyslnym stosie.
  */
 export const PLAN_SORT_DOMYSLNY: PlanSortLevel[] = [
+  { by: 'priority', dir: 'asc' },
+  { by: 'terminy', dir: 'asc' },
+  { by: 'macierz', dir: 'asc' },
+  { by: 'oszczednosc', dir: 'asc' },
+  { by: 'sp', dir: 'asc' },
+];
+
+/** Domyslny stos z okresem zwrotu (przed oszczednoscia w zl) — kto go nie ruszal, dostaje nowy. */
+const DOMYSLNY_ZE_ZWROTEM: PlanSortLevel[] = [
   { by: 'priority', dir: 'asc' },
   { by: 'terminy', dir: 'asc' },
   { by: 'macierz', dir: 'asc' },
@@ -109,6 +125,7 @@ const DOMYSLNY_Z_PULA: PlanSortLevel[] = [
 
 /** Dawne domyslne stosy — kto ich nie ruszal, dostaje nowy domyslny, a nie zamrozony stary. */
 const STARE_DOMYSLNE: PlanSortLevel[][] = [
+  DOMYSLNY_ZE_ZWROTEM,
   DOMYSLNY_BEZ_TERMINOW,
   DOMYSLNY_Z_PULA,
   [
@@ -148,12 +165,22 @@ const takSamo = (a: PlanSortLevel[], b: PlanSortLevel[]) =>
 export function migratePlanSort(saved: PlanSortLevel[] | undefined): PlanSortLevel[] | undefined {
   if (!saved) return undefined;
   if (STARE_DOMYSLNE.some((s) => takSamo(saved, s))) return PLAN_SORT_DOMYSLNY;
-  /* Wlasny stos: poziom „strategia" (tag STRATEGIA juz nic nie znaczy) zamieniamy na „pula" w tym samym miejscu. */
-  if (!saved.some((l) => l.by === 'strategia')) return saved;
-  // Bez dubla: stos, ktory ma juz „pula", traci tylko „strategia".
-  const hasPula = saved.some((l) => l.by === 'pula');
-  return saved.flatMap((l) => (l.by !== 'strategia' ? [l] : hasPula ? [] : [{ ...l, by: 'pula' as const }]));
+  /*
+   * Wlasny stos: osie wycofanych pojec znikaja. „Okres zwrotu" zamieniamy na „Oszczednosc" w tym samym miejscu
+   * (ta sama rola w kolejce), a „pula" i „strategia" wypadaja. Bez dubla, gdy oszczednosc juz jest w stosie.
+   */
+  if (!saved.some((l) => WYCOFANE_OSIE.has(l.by))) return saved;
+  const out: PlanSortLevel[] = [];
+  for (const l of saved) {
+    const by = l.by === 'zwrot' ? 'oszczednosc' : l.by;
+    if (WYCOFANE_OSIE.has(by) || out.some((x) => x.by === by)) continue;
+    out.push(by === l.by ? l : { by, dir: 'asc' });
+  }
+  return out;
 }
+
+/** Osie, ktorych juz nie ma: pule wycofane, okres zwrotu zastapila oszczednosc w zl / mies. */
+const WYCOFANE_OSIE = new Set(['pula', 'strategia', 'zwrot']);
 
 /**
  * Komparator planowania dla wybranego stosu.
@@ -161,8 +188,8 @@ export function migratePlanSort(saved: PlanSortLevel[] | undefined): PlanSortLev
  * `axis` to rosnace porownanie osi wspolnych z lista (priorytet, daty, tytul) —
  * podawane z zewnatrz, zeby „po priorytecie" znaczylo tu to samo co na liscie.
  * `stageRank` to pozycja etapu w procesie; zadanie bez etapu idzie na koniec.
- * `paybackRank` to miejsce w sortowaniu „po zwrocie" (patrz `paybackRank` w counters.ts);
- * bez niej ta os niczego nie rozstrzyga.
+ * `savings` to oszczednosc zadania w zl / mies. z wiadomosci WARTOŚĆ (`null` = bez kwoty); bez niej
+ * os „oszczednosc" niczego nie rozstrzyga.
  */
 export function planComparator(
   sort: PlanSortLevel[],
@@ -170,7 +197,7 @@ export function planComparator(
     axis: (by: string, a: Task, b: Task) => number;
     stageRank: (t: Task) => number;
     me: number | null;
-    paybackRank?: (t: Task) => number;
+    savings?: (t: Task) => number | null;
     /**
      * Ranga terminu zadania: 0 — musi wejsc w obecnym sprincie (czerwony), 1 — w nastepnym (zolty),
      * 2 — reszta (zielony albo bez terminu). Bez niej os „terminy" niczego nie rozstrzyga.
@@ -178,21 +205,11 @@ export function planComparator(
     deadlineRank?: (t: Task) => number;
   },
 ): Cmp {
-  /*
-   * „Po zwrocie": wymogi na poczatku, od najblizszego terminu (wymog ma date, nie
-   * ranking), potem przedzialy od najlepszego, na koncu zadania bez okresu zwrotu.
-   * Zadania w tym samym przedziale zostaja w remisie — rozstrzyga kolejny poziom stosu.
-   */
-  const rankOf = deps.paybackRank ?? (() => 0);
-  const byPayback: Cmp = (a, b) => {
-    const r = rankOf(a) - rankOf(b);
-    if (r !== 0 || rankOf(a) !== 0) return r;
-    return deadlineTime(a) - deadlineTime(b);
-  };
+  const savings = deps.savings ?? (() => null);
 
   /*
    * „Terminy": najpierw kolor, w obrebie koloru data. Zielone i bez terminu to jedna ranga bez daty —
-   * kolejnosc miedzy nimi rozstrzygaja dalsze poziomy stosu (macierz, zwrot, SP), a nie odlegly termin.
+   * kolejnosc miedzy nimi rozstrzygaja dalsze poziomy stosu (macierz, oszczednosc, SP), a nie odlegly termin.
    */
   const urgency = deps.deadlineRank ?? (() => 2);
   const byDeadlines: Cmp = (a, b) => {
@@ -206,21 +223,19 @@ export function planComparator(
     const f: Cmp =
       lvl.by === 'stage'
         ? (a, b) => deps.stageRank(a) - deps.stageRank(b)
-        : lvl.by === 'pula'
-          ? (a, b) => pulaRank(a) - pulaRank(b)
-          : lvl.by === 'wysoki'
+        : lvl.by === 'wysoki'
           ? (a, b) => wysokiRank(a) - wysokiRank(b)
           : lvl.by === 'sp'
             ? spComparator(lvl.dir)
-            : lvl.by === 'terminy'
-              ? byDeadlines
-              : lvl.by === 'macierz'
-              ? (a, b) => macierzRank(a) - macierzRank(b)
-              : lvl.by === 'zwrot'
-              ? byPayback
-              : (a, b) => deps.axis(lvl.by, a, b);
-    /* SP ma wlasny kierunek (zadania bez wyceny zawsze na koncu), wiec nie przechodzi przez odwrocenie. */
-    return lvl.by === 'sp' || lvl.dir === 'asc' ? f : (a, b) => -f(a, b);
+            : lvl.by === 'oszczednosc'
+              ? savingsComparator(lvl.dir, savings)
+              : lvl.by === 'terminy'
+                ? byDeadlines
+                : lvl.by === 'macierz'
+                  ? (a, b) => macierzRank(a) - macierzRank(b)
+                  : (a, b) => deps.axis(lvl.by, a, b);
+    /* SP i oszczednosc maja wlasny kierunek (braki zawsze na koncu), wiec nie przechodza przez odwrocenie. */
+    return lvl.by === 'sp' || lvl.by === 'oszczednosc' || lvl.dir === 'asc' ? f : (a, b) => -f(a, b);
   });
 
   /* Remis po CALYM stosie, tak samo jak w liscie: moje wyzej, potem po id malejaco. */

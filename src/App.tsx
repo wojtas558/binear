@@ -205,6 +205,7 @@ import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { SprintSummary } from './SprintSummary';
 import { TilesBar } from './TilesBar';
+import { guardianKey, guardianTiles, NO_GUARDIAN } from './guardianTiles';
 import { TilesPane } from './TilesPane';
 import { groupedKeys, matchGrouped, moveCondition, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
 import {
@@ -224,7 +225,7 @@ import {
 import { Planning, SORT_DOMYSLNY } from './Planning';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator, TAGS_MACIERZ } from './planSort';
 import { REACTIONS, REACTIONS_USED_KEY, emojiOf, najczesciej, toggleReaction } from './reactions';
-import { useAnsweredTasks, useChatFacts, useCounterHistory } from './CounterHistory';
+import { useAnsweredTasks, useCarryOver, useChatFacts, useCounterHistory } from './CounterHistory';
 import { CapacityChip, useNow } from './CapacityChip';
 import { deadlineBar, deadlineLevel, LEVEL_COLOR, type DeadlineLevel } from './deadlines';
 import { DEFAULT_ROW_LAYOUT, normalizeRowLayout, type RowElement, type RowLayout } from './rowLayout';
@@ -238,6 +239,8 @@ import { teamFirst } from './peopleOrder';
 import {
   budgetExcludedIds,
   fetchTeam,
+  guardianIds,
+  isGuardian,
   managerIds,
   isTeamUnsaved,
   loadTeam,
@@ -251,9 +254,13 @@ import { entersFromRegister, ownerOnEnteringSprint, type ItContext } from './pla
 import { sumaDoLimitu } from './planCapacity';
 import {
   foldersOf,
+  formatZl,
   MISSING_LABEL,
-  paybackRank,
   readiness,
+  savingsOf,
+  TAG_PRZENIESIONE,
+  valueLabel,
+  type TaskValue,
   type ChatFacts,
   type DaySnapshot,
   type Missing,
@@ -371,7 +378,8 @@ type FilterField =
   | 'answered'
   | 'kind'
   | 'ready'
-  | 'missing';
+  | 'missing'
+  | 'guardian';
 
 /**
  * Operatory jak w Linearze. Wymiary jednowartosciowe (osoba/priorytet/status/etap —
@@ -407,6 +415,7 @@ const FILTER_FIELDS: { field: FilterField; label: string; icon: ReactNode; divid
   { field: 'assignee', label: 'Osoba', icon: <PersonIcon /> },
   { field: 'creator', label: 'Autor', icon: <PenIcon /> },
   { field: 'observer', label: 'Obserwator', icon: <EyeIcon /> },
+  { field: 'guardian', label: 'Opiekun (backlog)', icon: <PersonIcon /> },
   // gdzie w procesie
   { field: 'stage', label: 'Etap', icon: <ColumnsIcon />, divider: true },
   { field: 'status', label: 'Status', icon: <RingIcon /> },
@@ -724,9 +733,8 @@ const DEFAULT_SETTINGS: Settings = {
   withUnassigned: false,
   planDone: false,
   planReview: true,
-  /* Domyslna kolejnosc waznosci: plomien (awaria) najpierw, potem pula (CIAGLOSC, RDZEN, DZIAL), tag „Wysoki",
-     okres zwrotu rosnaco, a story pointy malejaco, bo tu wiecej znaczy wazniej.
-     Zrodlo prawdy: PLAN_SORT_DOMYSLNY w planSort.ts (razem z migracja starego domyslnego). */
+  /* Domyslna kolejnosc waznosci: plomien (awaria), terminy, litera A–D, oszczednosc w zl / mies. malejaco,
+     a przy remisie mniej godzin. Zrodlo prawdy: PLAN_SORT_DOMYSLNY w planSort.ts (razem z migracja starego domyslnego). */
   planSort: PLAN_SORT_DOMYSLNY as { by: PlanSortBy; dir: 'asc' | 'desc' }[],
   // Kolor grup domyslnie WLACZONY — bez niego lista jest jednolita szara scianka.
   listTint: 'fade',
@@ -771,7 +779,7 @@ function loadSettings(): Settings {
       ...saved,
       sort: { ...DEFAULT_SETTINGS.sort, ...saved.sort },
       rowLayout: normalizeRowLayout(saved.rowLayout),
-      // Zapisany jest caly stos — stary domyslny zamieniamy na nowy (pula, Wysoki, zwrot).
+      // Zapisany jest caly stos — stary domyslny zamieniamy na nowy, a wycofane osie (pula, zwrot) znikaja.
       planSort: (migratePlanSort(saved.planSort) as Settings['planSort'] | undefined) ?? DEFAULT_SETTINGS.planSort,
     };
   } catch {
@@ -1986,7 +1994,7 @@ type Dir = 'asc' | 'desc';
  * wlasnoscia zadania. W planowaniu ma sens („najpierw to, co juz w toku"),
  * na liscie i tak grupuje sie po etapie.
  */
-type PlanSortBy = SortBy | 'stage' | 'macierz' | 'pula' | 'wysoki' | 'sp' | 'zwrot' | 'terminy';
+type PlanSortBy = SortBy | 'stage' | 'macierz' | 'wysoki' | 'sp' | 'oszczednosc' | 'terminy';
 
 const SORTS: { key: SortBy; label: string }[] = [
   /* Dynamicznie czyta aktualny stos sortowania z widoku planowania (domyslny albo ulozony przez uzytkownika). */
@@ -2009,10 +2017,9 @@ const PLAN_SORTS: { key: PlanSortBy; label: string }[] = [
   { key: 'terminy', label: 'Terminy (kolor, data)' },
   /* Macierz Eisenhowera: tagi A, B, C, D (A najwazniejsze). */
   { key: 'macierz', label: 'Macierz (A–D)' },
-  { key: 'pula', label: 'Pula' },
   { key: 'wysoki', label: 'Tag „Wysoki”' },
-  /* Okres zwrotu z tagow ZWROT-*: wymogi (po terminie), potem do 3 / 3–6 / 6–12 / ponad 12 mies. */
-  { key: 'zwrot', label: 'Okres zwrotu' },
+  /* Kwota z wiadomosci „WARTOŚĆ: oszczędność N zł / mies." — wieksza wyzej, bez kwoty na koncu. */
+  { key: 'oszczednosc', label: 'Oszczędność (zł / mies.)' },
   { key: 'sp', label: 'Story pointy' },
   { key: 'stage', label: 'Etap w sprincie' },
   ...SORTS.filter((s) => s.key !== 'planning'),
@@ -2206,8 +2213,10 @@ interface FilterCtx {
   folders: ReadonlySet<number>;
   /** Rozpoznania i wiadomosci WARTOŚĆ z czatow — do „Gotowość" i „Brakuje"; `null` = jeszcze czytamy. */
   chat: ChatFacts | null;
+  /** Pula opiekunow z konfiguracji zespolu — do filtra „Opiekun" (patrz guardianTiles.ts). */
+  guardians: ReadonlySet<number>;
 }
-const NO_FILTER_CTX: FilterCtx = { answered: null, folders: new Set<number>(), chat: null };
+const NO_FILTER_CTX: FilterCtx = { answered: null, folders: new Set<number>(), chat: null, guardians: new Set<number>() };
 
 function matchFilters(
   t: Task,
@@ -2220,6 +2229,11 @@ function matchFilters(
 
 function matchCondition(t: Task, c: Condition, stageNames: Map<number, string>, ctx: FilterCtx): boolean {
   if (!c.values.length) return true; // niedokonczony warunek nie zawezaja
+
+  if (c.field === 'guardian') {
+    const inSet = c.values.includes(guardianKey(t.responsibleId, ctx.guardians));
+    return c.op === 'isNot' ? !inSet : inSet;
+  }
 
   if (c.field === 'answered') {
     const key = ctx.answered?.has(t.id) ? 'yes' : 'no';
@@ -3544,6 +3558,31 @@ const DeadlineCouncilCtx = createContext<Date | null>(null);
 /** Uklad wiersza listy z konfiguratora karty (patrz rowLayout.ts). */
 const RowLayoutCtx = createContext<RowLayout>(DEFAULT_ROW_LAYOUT);
 
+/**
+ * Fakty o zadaniach spoza samej listy: wartosc z najnowszej wiadomosci WARTOŚĆ (kwota oszczednosci, wyliczenie)
+ * i liczba przeniesien z poprzednich sprintow. Pusty, dopoki czaty i dzienniki sie nie przeczytaja.
+ */
+interface TaskFacts {
+  values: ReadonlyMap<number, TaskValue>;
+  carry: ReadonlyMap<number, number>;
+}
+const TaskFactsCtx = createContext<TaskFacts>({ values: new Map(), carry: new Map() });
+
+/** Pole „Wartość" w panelu szczegolow: kwota (albo wariant bez kwoty) i linia „Wyliczenie" z wiadomosci. */
+function ValueField({ taskId }: { taskId: number }) {
+  const v = useContext(TaskFactsCtx).values.get(taskId);
+  if (!v) return null;
+  return (
+    <>
+      <dt title="Najnowsza wiadomość WARTOŚĆ w czacie zadania">Wartość</dt>
+      <dd className="dd-value">
+        <span>{valueLabel(v)}</span>
+        {v.wyliczenie && <span className="dd-value-calc">Wyliczenie: {v.wyliczenie}</span>}
+      </dd>
+    </>
+  );
+}
+
 /** Tag macierzy Eisenhowera — ta sama lista co w sortowaniu planowania (TAGS_MACIERZ). */
 const jestMacierz = (g: string) => (TAGS_MACIERZ as readonly string[]).includes(g.trim().toUpperCase());
 
@@ -3689,7 +3728,12 @@ function TaskRow({
   /* Tagi bez BUG (ten jest znakiem waznosci), podzielone na litere macierzy A–D i reszte. */
   const tagi = withoutBugTag(task.tags);
   const tagiMacierz = tagi.filter(jestMacierz);
-  const tagiReszta = tagi.filter((g) => !jestMacierz(g));
+  /* PRZENIESIONE ma wlasna, wyrozniona pigulke (z liczba przeniesien) zamiast zwyklego tagu. */
+  const przeniesione = tagi.some((g) => g.toUpperCase() === TAG_PRZENIESIONE);
+  const tagiReszta = tagi.filter((g) => !jestMacierz(g) && g.toUpperCase() !== TAG_PRZENIESIONE);
+  const facts = useContext(TaskFactsCtx);
+  const wartosc = facts.values.get(task.id);
+  const przeniesien = facts.carry.get(task.id);
   const el: Record<RowElement, ReactNode> = {
     parent: <>
       {parentRef && (
@@ -3738,7 +3782,29 @@ function TaskRow({
     </>,
     matrix: tagiMacierz.length > 0 && <TagStrip tags={tagiMacierz} limit={tagiMacierz.length} onPick={onTag} />,
     /* Liczba tagow w wierszu zalezy od szerokosci listy — reszta jako "+N". */
-    tags: tagiReszta.length > 0 && <TagStrip tags={tagiReszta} limit={tagLimit} onPick={onTag} />,
+    tags: (przeniesione || tagiReszta.length > 0) && (
+      <>
+        {przeniesione && (
+          <button
+            type="button"
+            className="row-carry"
+            title={`Przeszło niedokończone z poprzedniego sprintu${przeniesien ? ` (${przeniesien}×)` : ''} — kliknij, aby filtrować`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTag(TAG_PRZENIESIONE);
+            }}
+          >
+            PRZENIESIONE{przeniesien ? ` ${przeniesien}×` : ''}
+          </button>
+        )}
+        {tagiReszta.length > 0 && <TagStrip tags={tagiReszta} limit={tagLimit} onPick={onTag} />}
+      </>
+    ),
+    savings: wartosc?.kind === 'kwota' && (
+      <HoverNote label="Oszczędność / mies." value={wartosc.wyliczenie ?? formatZl(wartosc.zl)} className="row-savings">
+        {formatZl(wartosc.zl)}
+      </HoverNote>
+    ),
     subs: <>
       {(elsewhereSubCount > 0 || hiddenSubCount > 0) && (
         <span
@@ -6835,6 +6901,7 @@ function DetailPanel({
               </dd>
             </>
           )}
+          <ValueField taskId={task.id} />
           {/* Tagi jak epik: pole otwiera picker, tyle ze wielokrotny (zadanie ma ich kilka). */}
           <dt title={PICKER_HELP.tags}>Tagi</dt>
           <dd>
@@ -9910,15 +9977,25 @@ export default function App() {
   const toTileFilters = (f: Filters) =>
     f.map((c) => ({ field: c.field, op: c.op, values: c.values, ...(c.or ? { or: c.or } : {}) }));
   /*
-   * Czaty do „Gotowość"/„Brakuje" czytamy tylko wtedy, gdy ktorys warunek paska albo kafelka tych pol uzywa —
-   * to kilkadziesiat zapytan co odswiezenie, zbednych, gdy nikt o gotowosc nie pyta.
+   * Kwota oszczednosci z wiadomosci WARTOŚĆ sortuje planowanie i pokazuje sie przy zadaniu, wiec czaty zadan
+   * DO-STARTU i trwajacego sprintu czytamy zawsze, gdy lista jest gotowa — nie tylko pod filtry gotowosci.
    */
-  const usesReadiness = useMemo(
-    () => [...filters, ...tilesCfg.tiles.flatMap((t) => t.filters)].some((c) => c.field === 'ready' || c.field === 'missing'),
-    [filters, tilesCfg.tiles],
+  const { facts: chatFacts, complete: chatComplete } = useChatFacts(tasks, { closed: CLOSED_STATUSES, groupId, sprintId, enabled: metaReady });
+  const carryOver = useCarryOver(tasks, sprints, CLOSED_STATUSES);
+  const taskFacts = useMemo<TaskFacts>(
+    () => ({ values: chatFacts?.value ?? new Map(), carry: carryOver }),
+    [chatFacts, carryOver],
   );
-  const { facts: chatFacts, complete: chatComplete } = useChatFacts(tasks, { closed: CLOSED_STATUSES, groupId, enabled: metaReady && usesReadiness });
-  const filterCtx = useMemo<FilterCtx>(() => ({ answered, folders, chat: chatFacts }), [answered, folders, chatFacts]);
+  const guardianPool = useMemo(() => new Set(guardianIds(team)), [team]);
+  const filterCtx = useMemo<FilterCtx>(
+    () => ({ answered, folders, chat: chatFacts, guardians: guardianPool }),
+    [answered, folders, chatFacts, guardianPool],
+  );
+  /* Zapisany zestaw kafelkow + grupa opiekunow generowana z puli w konfiguracji zespolu (nie zapisuje sie). */
+  const allTiles = useMemo(() => {
+    const g = guardianTiles(team.members.filter(isGuardian));
+    return g ? { groups: [...tilesCfg.groups, g.group], tiles: [...tilesCfg.tiles, ...g.tiles] } : tilesCfg;
+  }, [tilesCfg, team]);
   /*
    * Kafelki, ktorych liczba jeszcze nie jest pewna: SP nie doszly (metaReady), odpowiedzi w czatach albo fakty
    * do gotowosci jeszcze sie czytaja. Pokazujemy je jako „…" i NIE zapisujemy do historii — inaczej liczba
@@ -9926,7 +10003,7 @@ export default function App() {
    */
   const pendingTiles = useMemo(() => {
     const out = new Set<string>();
-    for (const tile of tilesCfg.tiles) {
+    for (const tile of allTiles.tiles) {
       const f = tile.filters.map((c) => c.field);
       if (
         !metaReady ||
@@ -9936,11 +10013,11 @@ export default function App() {
         out.add(tile.id);
     }
     return out;
-  }, [tilesCfg.tiles, metaReady, answeredComplete, chatComplete]);
+  }, [allTiles.tiles, metaReady, answeredComplete, chatComplete]);
   const tileValues = useMemo(() => {
     const m = new Map<string, TileNumbers>();
     const childrenOf = groupChildren(tasks);
-    for (const tile of tilesCfg.tiles) {
+    for (const tile of allTiles.tiles) {
       const rows = tasks.filter((t) => {
         const mineOrFree = t.responsibleId === me || (withUnassigned && isUnassigned(t.responsibleId));
         if (tile.onlyMine && !mineOrFree) return false;
@@ -9971,12 +10048,12 @@ export default function App() {
       });
     }
     return m;
-  }, [tilesCfg.tiles, tasks, me, withUnassigned, sprintId, stageNames, filterCtx]);
+  }, [allTiles.tiles, tasks, me, withUnassigned, sprintId, stageNames, filterCtx]);
   /* Historia dzienna: wbudowane liczniki + wlasne kafelki (klucz "t:<id>") — stad strzalki wzgledem dnia poprzedniego. */
   const counterSnap = useMemo<DaySnapshot>(() => {
     const s: DaySnapshot = {};
     const byGroup = new Map<string, CustomTile[]>();
-    for (const t of tilesCfg.tiles) {
+    for (const t of allTiles.tiles) {
       const v = tileValues.get(t.id);
       if (v && !pendingTiles.has(t.id)) s[`t:${t.id}`] = shownValue(t, v);
       byGroup.set(t.group, [...(byGroup.get(t.group) ?? []), t]);
@@ -9988,11 +10065,11 @@ export default function App() {
       s[`gs:${gid}`] = total.points;
     }
     return s;
-  }, [tileValues, tilesCfg.tiles, pendingTiles]);
+  }, [tileValues, allTiles.tiles, pendingTiles]);
   const counterPrev = useCounterHistory(groupId, counterSnap);
   const activeTileId = useMemo(
     () =>
-      tilesCfg.tiles.find((t) =>
+      allTiles.tiles.find((t) =>
         sameView(t, {
           scope: scopePref,
           filters: toTileFilters(filters),
@@ -10000,7 +10077,7 @@ export default function App() {
           showDone,
         }),
       )?.id ?? null,
-    [tilesCfg.tiles, scopePref, filters, onlyMine, showDone],
+    [allTiles.tiles, scopePref, filters, onlyMine, showDone],
   );
   /* Zakres i „Tylko moje" sprzed klikniecia kafelka — ponowny klik wraca do nich, a nie zostaje w zakresie kafelka. */
   const beforeTileRef = useRef<{ scope: Scope; onlyMine: boolean } | null>(null);
@@ -10139,6 +10216,8 @@ export default function App() {
       if (field === 'status') return labels.status[value] ?? value;
       if (field === 'epic')
         return value === '0' ? 'Bez epika' : (epicNames.get(Number(value))?.name ?? `#${value}`);
+      if (field === 'guardian')
+        return value === NO_GUARDIAN ? 'Bez opiekuna' : (team.members.find((m) => m.id === Number(value))?.name ?? `#${value}`);
       if (field === 'answered') return value === 'yes' ? 'Tak — ktoś odpowiedział' : 'Nie';
       if (field === 'ready') return value === 'yes' ? 'Gotowe' : 'Niekompletne';
       if (field === 'missing') return MISSING_LABEL[value as Missing] ?? value;
@@ -10361,6 +10440,11 @@ export default function App() {
       }
       return opts;
     }
+    if (field === 'guardian')
+      return [
+        ...team.members.filter(isGuardian).map((m) => ({ value: String(m.id), label: m.name })),
+        { value: NO_GUARDIAN, label: 'Bez opiekuna (konto techniczne, wspólne albo spoza puli)' },
+      ];
     if (field === 'answered')
       return [
         { value: 'yes', label: 'Tak — ktoś odpowiedział po naszych pytaniach' },
@@ -10368,7 +10452,7 @@ export default function App() {
       ];
     if (field === 'ready')
       return [
-        { value: 'yes', label: 'Gotowe — pula, SP i wartość (albo rozpoznanie)' },
+        { value: 'yes', label: 'Gotowe — SP i wartość (WARTOŚĆ, termin albo rozpoznanie)' },
         { value: 'no', label: 'Niekompletne — czegoś brakuje' },
       ];
     if (field === 'missing') return (Object.keys(MISSING_LABEL) as Missing[]).map((k) => ({ value: k, label: MISSING_LABEL[k] }));
@@ -10504,7 +10588,7 @@ export default function App() {
       axis: (by, a, b) => compareBy(by as SortBy, a, b),
       stageRank,
       me,
-      paybackRank,
+      savings: (t) => savingsOf(chatFacts?.value.get(t.id)),
       /* Ten sam poziom co kolor paska: czerwony 0, zolty 1, reszta 2 (praca oddana nie ma pilnosci).
          Raz na zadanie, nie przy kazdym porownaniu — deadlineLevel liczy godziny robocze dzien po dniu,
          a sortowanie porownuje kazde zadanie wiele razy. Klucz to obiekt zadania: zmienione zadanie jest
@@ -10518,7 +10602,7 @@ export default function App() {
         return rank;
       },
     });
-  }, [planSort, me, stageNames, stageOrder, councilEnd]);
+  }, [planSort, me, stageNames, stageOrder, councilEnd, chatFacts]);
 
   const groups = useMemo(
     () => bucket(filtered, groupBy, stageNames, stageOrder, labels.status, me, sort, emptyKeysFor(groupBy), planCmp),
@@ -12423,6 +12507,7 @@ export default function App() {
     <UnreadWithoutActionsCtx.Provider value={unreadBezAkcji}>
     <ActionStagesCtx.Provider value={etapyAkcji}>
     <RowLayoutCtx.Provider value={rowLayout}>
+    <TaskFactsCtx.Provider value={taskFacts}>
     <div className="app">
       <main className="main">
         <header className="toolbar">
@@ -12573,7 +12658,7 @@ export default function App() {
         {showCounters && (viewMode === 'list' || viewMode === 'board') && tasks.length > 0 && (
           <>
             <TilesBar
-              groups={groupedTiles(tilesCfg)}
+              groups={groupedTiles(allTiles)}
               values={tileValues}
               prev={counterPrev}
               activeId={activeTileId}
@@ -13637,6 +13722,7 @@ export default function App() {
         ))}
       </div>
     </div>
+    </TaskFactsCtx.Provider>
     </RowLayoutCtx.Provider>
     </ActionStagesCtx.Provider>
     </UnreadWithoutActionsCtx.Provider>

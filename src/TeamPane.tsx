@@ -5,6 +5,7 @@ import {
   countsCapacity,
   FTE_OPTIONS,
   fmtFte,
+  isGuardian,
   isManager,
   isoDate,
   isPresent,
@@ -101,6 +102,9 @@ export function TeamPane({
               </th>
               <th title="Godziny osoby wchodzą do mocy zespołu (potencjał sprintu)">Moc</th>
               <th title="Zadania osoby zjadają budżet SP w planowaniu">Budżet</th>
+              <th title="Pula opiekunów: w backlogu precyzuje zadania do DO-STARTU. Zadanie w backlogu z kimś spoza puli jako odpowiedzialnym jest „bez opiekuna”">
+                Opiekun
+              </th>
               {days.map((d, i) => (
                 <th key={i} className="team-day" title={isoDate(d)}>
                   {DNI[i]}
@@ -167,6 +171,14 @@ export function TeamPane({
                     aria-label={`${m.name}: zadania zjadają budżet SP`}
                   />
                 </td>
+                <td className="team-day">
+                  <input
+                    type="checkbox"
+                    checked={isGuardian(m)}
+                    onChange={(e) => onChange(setMember(team, m.id, { guardian: e.target.checked }))}
+                    aria-label={`${m.name}: opiekun zadań w backlogu`}
+                  />
+                </td>
                 {days.map((d, i) => (
                   <td key={i} className="team-day">
                     <input
@@ -193,7 +205,7 @@ export function TeamPane({
           <tfoot>
             <tr>
               <td colSpan={5}>Moce tygodnia</td>
-              <td colSpan={7} className="team-total">
+              <td colSpan={8} className="team-total">
                 <b>{Math.round(hours * 10) / 10}</b> h (= SP)
               </td>
             </tr>

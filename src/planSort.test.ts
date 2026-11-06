@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from './bitrix';
-import { paybackRank } from './counters';
 import { migratePlanSort, PLAN_SORT_DOMYSLNY, planComparator, stackComparator, type Cmp } from './planSort';
 
 /** Zadanie z samymi polami, ktore czyta sortowanie planowania. */
@@ -107,146 +106,6 @@ describe('planComparator', () => {
   });
 });
 
-describe('sortowanie po zwrocie', () => {
-  const d = { ...deps, paybackRank };
-  const zwrot = [{ by: 'zwrot', dir: 'asc' as const }];
-
-  it('od najkrotszego zwrotu do najdluzszego, na koncu zadania bez okresu zwrotu', () => {
-    const tasks = [
-      task(3, { tags: ['ZWROT-12+'] }),
-      task(1, { tags: ['ZWROT-12'] }),
-      task(5),
-      task(2, { tags: ['ZWROT-3'] }),
-      task(4, { tags: ['ZWROT-6'] }),
-    ];
-    expect(ids(tasks, zwrot, d)).toEqual([2, 4, 1, 3, 5]);
-  });
-
-  it('wymogi na poczatku, od najblizszego terminu; wymog bez terminu za tymi z terminem', () => {
-    const tasks = [
-      task(2, { tags: ['ZWROT-3'] }),
-      task(10, { tags: ['WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
-      task(11, { tags: ['wymog'], deadline: '2026-10-05T00:00:00+02:00' }),
-      task(12, { tags: ['WYMOG'], deadline: null }),
-    ];
-    expect(ids(tasks, zwrot, d)).toEqual([11, 10, 12, 2]);
-  });
-
-  it('STRATEGIA to zwykly tag: sortowanie po zwrocie jej nie wyroznia', () => {
-    const tasks = [
-      task(2, { tags: ['ZWROT-3'] }),
-      task(20, { tags: ['STRATEGIA'] }),
-      task(10, { tags: ['WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
-      task(3, { tags: ['ZWROT-12+'] }),
-      task(5),
-    ];
-    expect(ids(tasks, zwrot, d)).toEqual([10, 2, 3, 20, 5]);
-  });
-
-  it('w tym samym przedziale rozstrzyga kolejny poziom stosu', () => {
-    const tasks = [task(2, { tags: ['ZWROT-3'], storyPoints: 2 }), task(7, { tags: ['ZWROT-3'], storyPoints: 9 })];
-    expect(
-      ids(tasks, [{ by: 'zwrot', dir: 'asc' }, { by: 'sp', dir: 'desc' }], d),
-    ).toEqual([7, 2]);
-  });
-
-  it('odwrocony kierunek daje najgorszy zwrot na gorze', () => {
-    const tasks = [task(2, { tags: ['ZWROT-3'] }), task(3, { tags: ['ZWROT-12+'] }), task(5)];
-    expect(ids(tasks, [{ by: 'zwrot', dir: 'desc' }], d)).toEqual([5, 3, 2]);
-  });
-});
-
-describe('stos z pulami: plomien, pula, Wysoki, zwrot, SP malejaco', () => {
-  const d = { ...deps, paybackRank };
-  const STOS_PULA = [
-    { by: 'priority', dir: 'asc' },
-    { by: 'pula', dir: 'asc' },
-    { by: 'wysoki', dir: 'asc' },
-    { by: 'zwrot', dir: 'asc' },
-    { by: 'sp', dir: 'desc' },
-  ] as const;
-
-  it('plomien (priorytet 2) jest nad wszystkim — takze nad pula', () => {
-    const tasks = [
-      task(1, { priority: '1', tags: ['CIAGLOSC'] }),
-      task(2, { priority: '2', tags: ['DZIAL', 'ZWROT-12+'] }),
-      task(3, { priority: '1', tags: ['RDZEN'] }),
-    ];
-    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1, 3]);
-  });
-
-  it('pule ida kolejno: CIAGLOSC, RDZEN, DZIAL, a zadania bez puli na koncu', () => {
-    const tasks = [
-      task(1, { tags: ['ZWROT-3'] }),
-      task(2, { tags: ['DZIAL', 'ZWROT-3'] }),
-      task(3, { tags: ['RDZEN'] }),
-      task(4, { tags: ['CIAGLOSC', 'ZWROT-12+'] }),
-    ];
-    expect(ids(tasks, [...STOS_PULA], d)).toEqual([4, 3, 2, 1]);
-  });
-
-  it('pula jest nad tagiem Wysoki i nad zwrotem', () => {
-    const tasks = [
-      task(1, { tags: ['DZIAL', 'Wysoki', 'ZWROT-3'] }),
-      task(2, { tags: ['RDZEN'] }),
-    ];
-    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1]);
-  });
-
-  it('w obrebie puli tag Wysoki rozstrzyga PRZED zwrotem', () => {
-    const tasks = [
-      task(1, { tags: ['DZIAL', 'ZWROT-3'] }),
-      task(2, { tags: ['DZIAL', 'Wysoki', 'ZWROT-12'] }),
-      task(3, { tags: ['DZIAL'] }),
-    ];
-    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1, 3]);
-  });
-
-  it('w RDZEN bez zwrotu po Wysoki decyduja story pointy malejaco', () => {
-    const tasks = [
-      task(1, { tags: ['RDZEN'], storyPoints: 4 }),
-      task(2, { tags: ['RDZEN'], storyPoints: 20 }),
-      task(3, { tags: ['RDZEN', 'Wysoki'], storyPoints: 2 }),
-    ];
-    expect(ids(tasks, [...STOS_PULA], d)).toEqual([3, 2, 1]);
-  });
-
-  it('w obrebie tej samej puli i Wysoki zwrot rosnaco: ZWROT-3, 6, 12, 12+, a bez zwrotu na koncu', () => {
-    const tasks = [
-      task(1, { tags: ['DZIAL', 'ZWROT-12+'] }),
-      task(2, { tags: ['DZIAL'] }),
-      task(3, { tags: ['DZIAL', 'ZWROT-3'] }),
-      task(4, { tags: ['DZIAL', 'ZWROT-12'] }),
-      task(5, { tags: ['DZIAL', 'ZWROT-6'] }),
-    ];
-    expect(ids(tasks, [...STOS_PULA], d)).toEqual([3, 5, 4, 1, 2]);
-  });
-
-  it('wymog (z terminem) idzie przed przedzialami zwrotu w tej samej puli', () => {
-    const tasks = [
-      task(1, { tags: ['DZIAL', 'ZWROT-3'] }),
-      task(2, { tags: ['DZIAL', 'WYMOG'], deadline: '2026-11-20T00:00:00+02:00' }),
-    ];
-    expect(ids(tasks, [...STOS_PULA], d)).toEqual([2, 1]);
-  });
-
-  it('sortowanie niczego nie ukrywa — zadania bez puli tez sa na liscie', () => {
-    const tasks = [task(1), task(2, { tags: ['ZWROT-6'] }), task(3, { tags: ['RDZEN'] })];
-    expect(ids(tasks, [...STOS_PULA], d)).toHaveLength(3);
-  });
-
-  it('dwie pule na jednym zadaniu: liczy sie pierwsza z listy', () => {
-    const tasks = [task(1, { tags: ['DZIAL', 'RDZEN'] }), task(2, { tags: ['CIAGLOSC', 'DZIAL'] })];
-    expect(ids(tasks, [{ by: 'pula', dir: 'asc' }], d)).toEqual([2, 1]);
-  });
-
-  it('poziom pula mozna odwrocic albo wyjac ze stosu', () => {
-    const tasks = [task(1, { tags: ['CIAGLOSC'] }), task(2)];
-    expect(ids(tasks, [{ by: 'pula', dir: 'desc' }], d)).toEqual([2, 1]);
-    expect(ids(tasks, [{ by: 'sp', dir: 'desc' }], d)).toEqual([2, 1]); // remis → id malejaco
-  });
-});
-
 describe('os „terminy"', () => {
   /* Ranga z mapy id → ranga: 0 czerwony, 1 zolty, reszta 2. */
   const rangi: Record<number, number> = { 1: 0, 2: 0, 3: 1, 4: 2, 5: 2 };
@@ -273,7 +132,7 @@ describe('os „terminy"', () => {
   });
 
   it('domyslny stos: plomien, potem terminy wg koloru i daty, potem macierz A–D', () => {
-    expect(PLAN_SORT_DOMYSLNY.map((l) => l.by)).toEqual(['priority', 'terminy', 'macierz', 'zwrot', 'sp']);
+    expect(PLAN_SORT_DOMYSLNY.map((l) => l.by)).toEqual(['priority', 'terminy', 'macierz', 'oszczednosc', 'sp']);
     const tasks = [
       dl(5, null, { tags: ['A'] }),
       dl(3, '2026-11-09', { tags: ['A'] }),
@@ -331,18 +190,6 @@ describe('migratePlanSort', () => {
     ).toEqual(PLAN_SORT_DOMYSLNY);
   });
 
-  it('wlasny stos z poziomem strategia dostaje pule w tym samym miejscu i kierunku', () => {
-    expect(
-      migratePlanSort([
-        { by: 'sp', dir: 'desc' as const },
-        { by: 'strategia', dir: 'desc' as const },
-      ]),
-    ).toEqual([
-      { by: 'sp', dir: 'desc' },
-      { by: 'pula', dir: 'desc' },
-    ]);
-  });
-
   it('obecny domyslny przechodzi bez zmian', () => {
     expect(migratePlanSort(PLAN_SORT_DOMYSLNY)).toEqual(PLAN_SORT_DOMYSLNY);
   });
@@ -359,15 +206,17 @@ describe('migratePlanSort', () => {
   });
 });
 
-describe('domyslna kolejnosc planowania: plomien, macierz A-D, zwrot, mniejsze SP', () => {
-  const d = { ...deps, paybackRank };
+describe('domyslna kolejnosc planowania: plomien, terminy, macierz A-D, oszczednosc, mniejsze SP', () => {
+  /* Oszczednosc w zl / mies. zapisana w zadaniu testowym jako pole pomocnicze (w aplikacji — z czatu). */
+  const ZL = new Map<number, number>();
+  const d = { ...deps, savings: (t: Task) => ZL.get(t.id) ?? null };
 
-  it('domyslny stos to priorytet, terminy, macierz, zwrot, SP rosnaco', () => {
+  it('domyslny stos to priorytet, terminy, macierz, oszczednosc, SP rosnaco', () => {
     expect(PLAN_SORT_DOMYSLNY).toEqual([
       { by: 'priority', dir: 'asc' },
       { by: 'terminy', dir: 'asc' },
       { by: 'macierz', dir: 'asc' },
-      { by: 'zwrot', dir: 'asc' },
+      { by: 'oszczednosc', dir: 'asc' },
       { by: 'sp', dir: 'asc' },
     ]);
   });
@@ -389,17 +238,43 @@ describe('domyslna kolejnosc planowania: plomien, macierz A-D, zwrot, mniejsze S
     expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([2, 1]);
   });
 
-  it('w obrebie litery najpierw zwrot, potem mniejsze SP, a bez wyceny na koncu', () => {
+  it('w obrebie litery najpierw wieksza oszczednosc, przy remisie mniej godzin, bez kwoty na koncu', () => {
+    ZL.clear();
+    ZL.set(1, 300).set(2, 1200).set(3, 1200).set(5, 1200);
     const tasks = [
-      task(1, { tags: ['B', 'ZWROT-6'], storyPoints: 2 }),
-      task(2, { tags: ['B', 'ZWROT-3'], storyPoints: 20 }),
-      task(3, { tags: ['B', 'ZWROT-3'], storyPoints: 4 }),
-      task(4, { tags: ['B', 'ZWROT-3'] }),
+      task(1, { tags: ['B'], storyPoints: 2 }),
+      task(2, { tags: ['B'], storyPoints: 20 }),
+      task(3, { tags: ['B'], storyPoints: 4 }),
+      task(4, { tags: ['B'], storyPoints: 1 }),
+      task(5, { tags: ['B'] }),
     ];
-    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 2, 4, 1]);
+    expect(ids(tasks, PLAN_SORT_DOMYSLNY, d)).toEqual([3, 2, 5, 1, 4]);
   });
 
-  it('stary domyslny stos z pulami jest zastepowany nowym', () => {
+  it('odwrocona oszczednosc daje najmniejsza kwote na gorze, ale bez kwoty dalej na koncu', () => {
+    ZL.clear();
+    ZL.set(1, 300).set(2, 1200);
+    const tasks = [task(1), task(2), task(3)];
+    expect(ids(tasks, [{ by: 'oszczednosc', dir: 'desc' }], d)).toEqual([1, 2, 3]);
+    expect(ids(tasks, [{ by: 'oszczednosc', dir: 'asc' }], d)).toEqual([2, 1, 3]);
+  });
+
+  it('bez zrodla kwot os oszczednosci niczego nie rozstrzyga', () => {
+    const tasks = [task(1), task(2)];
+    expect(ids(tasks, [{ by: 'oszczednosc', dir: 'asc' }])).toEqual([2, 1]);
+  });
+});
+
+describe('migratePlanSort — wycofane osie', () => {
+  it('stare domyslne z okresem zwrotu i z pulami zastepuje nowy', () => {
+    const zeZwrotem = [
+      { by: 'priority', dir: 'asc' as const },
+      { by: 'terminy', dir: 'asc' as const },
+      { by: 'macierz', dir: 'asc' as const },
+      { by: 'zwrot', dir: 'asc' as const },
+      { by: 'sp', dir: 'asc' as const },
+    ];
+    expect(migratePlanSort(zeZwrotem)).toEqual(PLAN_SORT_DOMYSLNY);
     expect(
       migratePlanSort([
         { by: 'priority', dir: 'asc' },
@@ -410,15 +285,27 @@ describe('domyslna kolejnosc planowania: plomien, macierz A-D, zwrot, mniejsze S
       ]),
     ).toEqual(PLAN_SORT_DOMYSLNY);
   });
-});
 
-describe('migratePlanSort — strategia przy istniejacej puli', () => {
-  it('wlasny stos z „pula" i „strategia" traci tylko „strategia" (bez dubla)', () => {
-    const wlasny = [
-      { by: 'pula', dir: 'asc' },
-      { by: 'strategia', dir: 'asc' },
+  it('wlasny stos: zwrot staje sie oszczednoscia w tym samym miejscu, pula i strategia znikaja', () => {
+    expect(
+      migratePlanSort([
+        { by: 'sp', dir: 'desc' },
+        { by: 'pula', dir: 'asc' },
+        { by: 'zwrot', dir: 'desc' },
+        { by: 'strategia', dir: 'asc' },
+      ]),
+    ).toEqual([
       { by: 'sp', dir: 'desc' },
-    ] as const;
-    expect(migratePlanSort([...wlasny])?.map((l) => l.by)).toEqual(['pula', 'sp']);
+      { by: 'oszczednosc', dir: 'asc' },
+    ]);
+  });
+
+  it('bez dubla, gdy oszczednosc juz jest w stosie', () => {
+    expect(
+      migratePlanSort([
+        { by: 'oszczednosc', dir: 'asc' },
+        { by: 'zwrot', dir: 'asc' },
+      ])?.map((l) => l.by),
+    ).toEqual(['oszczednosc']);
   });
 });

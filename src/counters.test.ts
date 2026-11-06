@@ -3,28 +3,29 @@ import {
   answerState,
   foldersOf,
   hasReconMarker,
-  hasValueMessage,
-  pula,
-  isCompleteByTags,
+  isCompleteByTask,
   isReconByTitle,
+  latestValue,
   needsChat,
-  paybackBand,
-  paybackRank,
+  parseAmount,
+  parseValueMessage,
   isSubstantiveAnswer,
   MIN_ANSWER_CHARS,
   plainBody,
   previousDay,
   readiness,
   recordDay,
+  savingsOf,
   type ChatMessage,
   type ChatFacts,
+  type TaskValue,
 } from './counters';
 
 const zadanie = (o: Partial<Parameters<typeof readiness>[0]> & { id: number }) => ({
   status: '2',
   sprintId: null,
-  tags: [],
-  storyPoints: null,
+  tags: ['DO-STARTU'],
+  storyPoints: null as number | null,
   epicId: 141,
   priority: '1',
   title: 'Zadanie',
@@ -32,271 +33,170 @@ const zadanie = (o: Partial<Parameters<typeof readiness>[0]> & { id: number }) =
   ...o,
 });
 
-/*
- * Gotowe albo do wyceny wg `readiness` — w tej samej postaci [do wyceny, gotowe] co dawniej kafelki. Gdy
- * rozstrzyga nieprzeczytany jeszcze czat (`ready: null`), zadanie nie jest gotowe — tak jak dawniej.
- */
-const BEZ_FAKTOW: ChatFacts = { recon: new Set(), value: new Set(), read: new Set([100, 200, 300, 1]) };
-const wg = (t: ReturnType<typeof zadanie>, chat: ChatFacts | null) => (readiness(t, chat).ready === true ? [0, 1] : [1, 0]);
+/** Fakty z czatu jednego zadania: przeczytany czat, opcjonalnie wartosc i dopisek rozpoznania. */
+const czat = (id: number, o: { value?: TaskValue; recon?: boolean } = {}): ChatFacts => ({
+  recon: new Set(o.recon ? [id] : []),
+  value: new Map(o.value ? [[id, o.value]] : []),
+  read: new Set([id]),
+});
+const KWOTA: TaskValue = { kind: 'kwota', zl: 840, wyliczenie: null };
+const msg = (id: number, text: string, authorId = 5): ChatMessage => ({ id, authorId, text });
 
-
-describe('gotowosc do startu', () => {
-  describe('komplet do startu: pula, wycena, kategoria i tag okresu zwrotu', () => {
-    const TERMIN = '2026-11-01T00:00:00+02:00';
-    const start = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
-      zadanie({ id: 100, tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC', 'ZWROT-6'], storyPoints: 6, ...o });
-    const stan = (t: ReturnType<typeof zadanie>) => wg(t, BEZ_FAKTOW);
-
-    it('wycena + kategoria + tag zwrotu → gotowe do startu', () => {
-      expect(stan(start())).toEqual([0, 1]);
+describe('wiadomosc WARTOŚĆ', () => {
+  describe('kwota oszczednosci w pierwszej linii', () => {
+    it('czyta kwote z pogrubionej pierwszej linii', () => {
+      const v = parseValueMessage('[B]WARTOŚĆ: oszczędność 840 zł / mies.[/B]\n\nKategoria: OSZCZEDNOSC');
+      expect(v).toEqual({ kind: 'kwota', zl: 840, wyliczenie: null });
     });
 
-    it('bez story pointow → do wyceny', () => {
-      expect(stan(start({ storyPoints: null }))).toEqual([1, 0]);
+    it('spacja, twarda spacja i waska twarda spacja dziela tysiace', () => {
+      expect(savingsOf(parseValueMessage('WARTOŚĆ: oszczędność 1 000 zł / mies.'))).toBe(1000);
+      expect(savingsOf(parseValueMessage('WARTOŚĆ: oszczędność 12 500 zł / mies.'))).toBe(12500);
+      expect(savingsOf(parseValueMessage('WARTOŚĆ: oszczędność 2 400 zł / mies.'))).toBe(2400);
     });
 
-    it('bez kategorii → do wyceny, choc ma wycene i tag zwrotu', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'ZWROT-6'] }))).toEqual([1, 0]);
+    it('przecinek dziesietny', () => {
+      expect(savingsOf(parseValueMessage('WARTOŚĆ: oszczędność 1 050,50 zł / mies.'))).toBe(1050.5);
+      expect(parseAmount('3 200,5')).toBe(3200.5);
     });
 
-    it('bez tagu zwrotu → do wyceny', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC'] }))).toEqual([1, 0]);
+    it('bez polskich znakow i bez dwukropka tez sie czyta', () => {
+      expect(savingsOf(parseValueMessage('WARTOSC oszczednosc 300 zl / mies.'))).toBe(300);
     });
 
-    it('kazdy z czterech tagow zwrotu wystarcza, takze bez wzgledu na wielkosc liter', () => {
-      for (const tag of ['ZWROT-3', 'zwrot-6', 'Zwrot-12', 'ZWROT-12+']) {
-        expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'RYZYKO', tag] }))).toEqual([0, 1]);
-      }
-    });
-
-    it('tag zwrotu spoza listy (ZWROT-24) zwrotu nie daje', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'RYZYKO', 'ZWROT-24'] }))).toEqual([1, 0]);
-    });
-
-    it('WYMOG nie potrzebuje okresu zwrotu, ale MUSI miec termin', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'WYMOG'], deadline: TERMIN }))).toEqual([0, 1]);
-      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'WYMOG'], deadline: null }))).toEqual([1, 0]);
-    });
-
-    it('WYMOG z terminem, ale bez wyceny → do wyceny', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'WYMOG'], storyPoints: null, deadline: TERMIN }))).toEqual([1, 0]);
-    });
-
-    it('termin nie zastepuje tagu zwrotu zwyklego zadania', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC'], deadline: TERMIN }))).toEqual([1, 0]);
-    });
-
-    it('kazda kategoria z listy liczy sie, takze BUG (bug tez ma okres zwrotu)', () => {
-      for (const kat of ['bug', 'Oszczednosc', 'PRZYCHOD', 'ryzyko', 'ANALITYKA', 'UTRZYMANIE']) {
-        expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', kat, 'ZWROT-3'] }))).toEqual([0, 1]);
-      }
-    });
-
-    it('tag spoza listy kategorii (Wysoki) kategorii nie zastepuje', () => {
-      expect(stan(start({ tags: ['DO-STARTU', 'DZIAL', 'Wysoki', 'ZWROT-6'] }))).toEqual([1, 0]);
-    });
-
-    it('kazde zadanie DO-STARTU jest albo do wyceny, albo gotowe', () => {
-      const lista = [
-        start({ id: 1 }),
-        start({ id: 2, storyPoints: null }),
-        start({ id: 3, tags: ['DO-STARTU'] }),
-        start({ id: 4, tags: ['DO-STARTU', 'DZIAL', 'WYMOG'], deadline: TERMIN }),
-      ];
-      const w = lista.map(stan);
-      expect(w.filter(([, g]) => g).length).toBe(2);
-      expect(w.filter(([d]) => d).length).toBe(2);
+    it('linia „Wyliczenie" trafia do wartosci; kwota z pierwszej linii jest zrodlem prawdy', () => {
+      const tekst = [
+        '[B]WARTOŚĆ: oszczędność 500 zł / mies.[/B]',
+        '',
+        'Kategoria: OSZCZEDNOSC',
+        'Wyliczenie: 1 os. × 30 min dziennie × 21 dni = 10,5 h × 40 zł = 420 zł + licencja 80 zł = 500 zł',
+        'Źródło: szacunek',
+      ].join('\n');
+      expect(parseValueMessage(tekst)).toEqual({
+        kind: 'kwota',
+        zl: 500,
+        wyliczenie: '1 os. × 30 min dziennie × 21 dni = 10,5 h × 40 zł = 420 zł + licencja 80 zł = 500 zł',
+      });
     });
   });
 
-  describe('rozpoznanie: gotowe do startu bez kategorii i zwrotu', () => {
-    const rozp = (o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
-      zadanie({ id: 200, tags: ['DO-STARTU', 'DZIAL'], storyPoints: 4, ...o });
-    const stan = (t: ReturnType<typeof zadanie>, recon: Set<number> | null) =>
-      wg(t, recon ? { recon, value: new Set(), read: new Set([t.id]) } : null);
-
-    it('zadanie oznaczone jako rozpoznanie jest gotowe bez kategorii i zwrotu', () => {
-      expect(stan(rozp(), new Set([200]))).toEqual([0, 1]);
+  describe('warianty bez kwoty — tez wartosc', () => {
+    it('bez kwoty, wymog i stary okres zwrotu', () => {
+      expect(parseValueMessage('[B]WARTOŚĆ: bez kwoty[/B]\n\nUzasadnienie: zdanie.')).toEqual({ kind: 'bez-kwoty' });
+      expect(parseValueMessage('[B]WARTOŚĆ: wymóg[/B]\n\nTermin: 2026-12-01')).toEqual({ kind: 'wymog' });
+      expect(parseValueMessage('WARTOŚĆ: zwrot 3–6 mies.\nKategoria: OSZCZEDNOSC')).toEqual({ kind: 'zwrot' });
+      expect(parseValueMessage('WARTOSC - zwrot do 3 mies.')).toEqual({ kind: 'zwrot' });
     });
 
-    it('takze analiza bledu (BUG) bez tagu zwrotu, jesli oznaczona jako rozpoznanie', () => {
-      expect(stan(rozp({ tags: ['DO-STARTU', 'DZIAL', 'BUG'] }), new Set([200]))).toEqual([0, 1]);
+    it('inny dawny wariant WARTOŚĆ liczy sie jako wartosc bez kwoty', () => {
+      expect(parseValueMessage('[B]WARTOŚĆ: rdzeń[/B]\n\nUzasadnienie: cel.')).toEqual({ kind: 'inna' });
+      expect(savingsOf({ kind: 'inna' })).toBeNull();
     });
 
-    it('bez oznaczenia to zwykle niekompletne zadanie → do wyceny', () => {
-      expect(stan(rozp(), new Set())).toEqual([1, 0]);
-    });
-
-    it('rozpoznanie wciaz potrzebuje wyceny', () => {
-      expect(stan(rozp({ storyPoints: null }), new Set([200]))).toEqual([1, 0]);
-    });
-
-    it('do 4 h — tylko takie zadania czyta sie z czatu, powyzej to nie rozpoznanie', () => {
-      expect(needsChat(rozp({ storyPoints: 4 }))).toBe(true);
-      expect(needsChat(rozp({ storyPoints: 6 }))).toBe(false);
-      expect(needsChat(rozp({ storyPoints: null }))).toBe(false);
-    });
-
-    it('zadanie z kompletem w tagach nie jest kandydatem — jego czatu nie czytamy', () => {
-      expect(needsChat(rozp({ tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(false);
-      expect(isCompleteByTags(rozp({ tags: ['DO-STARTU', 'DZIAL', 'OSZCZEDNOSC', 'ZWROT-3'] }))).toBe(true);
-    });
-
-    it('dopoki czaty sie czytaja (recon = null), zadanie z do 4 h nie jest jeszcze gotowe', () => {
-      expect(stan(rozp(), null)).toEqual([1, 0]);
-    });
-
-    it('rozpoznaje dopisek w wiadomosci WYCENA, takze z kursywa i roznymi myslnikami', () => {
-      const m = (text: string, authorId = 5): ChatMessage => ({ id: 1, authorId, text });
-      const wycena = '[B]WYCENA: 4 h[/B]\n\nOpis.\n\n[I]Rozpoznanie — bez okresu zwrotu.[/I]';
-      expect(hasReconMarker([m(wycena)])).toBe(true);
-      expect(hasReconMarker([m('WYCENA: 4 h. Rozpoznanie - bez okresu zwrotu')])).toBe(true);
-      expect(hasReconMarker([m('WYCENA: 4 h. rozpoznanie – bez okresu zwrotu')])).toBe(true);
-      expect(hasReconMarker([m('WYCENA: 4 h')])).toBe(false);
-      expect(hasReconMarker([m(wycena, 0)])).toBe(false);
-    });
-
-    it('rozpoznaje tez starsza postac: uzasadnienie zaczynajace sie od Rozpoznanie / Weryfikacja', () => {
-      const m = (text: string): ChatMessage => ({ id: 1, authorId: 5, text });
-      for (const slowo of ['Rozpoznanie', 'Weryfikacja', 'Przegląd kodu', 'Sprawdzenie']) {
-        expect(hasReconMarker([m(`[B]WYCENA: 3 h[/B]\n\n[B]Co obejmuje ta wycena[/B]\n${slowo} tematu.`)])).toBe(true);
-      }
-      expect(hasReconMarker([m('[B]Co obejmuje ta wycena[/B]\nNowy ekran listy.')])).toBe(false);
-    });
-
-    it('do 4 h z „rozpoznanie” albo „weryfikacja” w tytule to rozpoznanie bez czytania czatu', () => {
-      expect(isReconByTitle({ title: 'Rozpoznanie: sync stanów', storyPoints: 4, tags: ['DZIAL'] })).toBe(true);
-      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 3, tags: ['RDZEN'] })).toBe(true);
-      expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 8, tags: ['DZIAL'] })).toBe(false);
-      expect(isReconByTitle({ title: 'Nowy ekran', storyPoints: 2, tags: ['DZIAL'] })).toBe(false);
-      expect(needsChat(rozp({ title: 'Rozpoznanie: sync stanów' }))).toBe(false);
-      expect(stan(rozp({ title: 'Rozpoznanie: sync stanów' }), new Set())).toEqual([0, 1]);
+    it('to nie sa wiadomosci WARTOŚĆ', () => {
+      expect(parseValueMessage('WYCENA: 16 h')).toBeNull();
+      expect(parseValueMessage('Ta wartość jest niska')).toBeNull();
+      expect(parseValueMessage('Wartościowy pomysł')).toBeNull();
     });
   });
 
-  describe('pula: obowiazkowa, a RDZEN ma wartosc w wiadomosci WARTOSC zamiast kategorii i zwrotu', () => {
-    const TERMIN = '2026-11-01T00:00:00+02:00';
-    const z = (tags: string[], o: Partial<Parameters<typeof zadanie>[0]> = {}) =>
-      zadanie({ id: 300, tags: ['DO-STARTU', ...tags], storyPoints: 16, ...o });
-    const stan = (t: ReturnType<typeof zadanie>, value: Set<number> | null = new Set(), recon: Set<number> = new Set()) =>
-      wg(t, value ? { recon, value, read: new Set([t.id]) } : null);
-
-    it('pula to jeden z trzech tagow; przy dwoch liczy sie pierwszy z listy', () => {
-      expect(pula({ tags: ['dzial'] })).toBe('DZIAL');
-      expect(pula({ tags: ['Wysoki'] })).toBeNull();
-      expect(pula({ tags: ['DZIAL', 'CIAGLOSC', 'RDZEN'] })).toBe('CIAGLOSC');
-      expect(pula({ tags: ['DZIAL', 'RDZEN'] })).toBe('RDZEN');
+  describe('najnowsza wiadomosc wygrywa', () => {
+    it('poprawka kwoty nowa wiadomoscia zastepuje stara', () => {
+      const m = [msg(10, 'WARTOŚĆ: oszczędność 400 zł / mies.'), msg(20, 'WARTOŚĆ: oszczędność 1 200 zł / mies.')];
+      expect(savingsOf(latestValue(m))).toBe(1200);
     });
 
-    it('bez puli komplet nie istnieje: kategoria + zwrot → do wyceny', () => {
-      expect(stan(z(['OSZCZEDNOSC', 'ZWROT-3']))).toEqual([1, 0]);
-      expect(isCompleteByTags(z(['OSZCZEDNOSC', 'ZWROT-3']))).toBe(false);
+    it('liczy sie id wiadomosci, nie kolejnosc w tablicy', () => {
+      const m = [msg(20, 'WARTOŚĆ: oszczędność 1 200 zł / mies.'), msg(10, 'WARTOŚĆ: oszczędność 400 zł / mies.')];
+      expect(savingsOf(latestValue(m))).toBe(1200);
     });
 
-    it('RDZEN + story pointy + wiadomosc WARTOSC, bez kategorii i zwrotu → gotowe', () => {
-      expect(stan(z(['RDZEN']), new Set([300]))).toEqual([0, 1]);
+    it('nowsze „bez kwoty" kasuje starsza kwote', () => {
+      const m = [msg(1, 'WARTOŚĆ: oszczędność 900 zł / mies.'), msg(2, 'WARTOŚĆ: bez kwoty\nUzasadnienie: zdanie.')];
+      expect(latestValue(m)).toEqual({ kind: 'bez-kwoty' });
     });
 
-    it('RDZEN bez wiadomosci WARTOSC → do wyceny', () => {
-      expect(stan(z(['RDZEN']), new Set())).toEqual([1, 0]);
-      expect(isCompleteByTags(z(['RDZEN', 'OSZCZEDNOSC', 'ZWROT-3']))).toBe(false);
+    it('stary „zwrot" po kwocie nie wygrywa z nowsza kwota', () => {
+      const m = [msg(1, 'WARTOŚĆ: zwrot do 3 mies.'), msg(2, 'WARTOŚĆ: oszczędność 250 zł / mies.')];
+      expect(savingsOf(latestValue(m))).toBe(250);
     });
 
-    it('RDZEN z WARTOSC, ale bez wyceny → do wyceny', () => {
-      expect(stan(z(['RDZEN'], { storyPoints: null }), new Set([300]))).toEqual([1, 0]);
-    });
-
-    it('CIAGLOSC z kategoria, ale bez ZWROT → do wyceny; ze ZWROT → gotowe', () => {
-      expect(stan(z(['CIAGLOSC', 'UTRZYMANIE']))).toEqual([1, 0]);
-      expect(stan(z(['CIAGLOSC', 'UTRZYMANIE', 'ZWROT-6']))).toEqual([0, 1]);
-    });
-
-    it('CIAGLOSC i DZIAL: sama wiadomosc WARTOSC kategorii nie zastepuje', () => {
-      expect(stan(z(['CIAGLOSC']), new Set([300]))).toEqual([1, 0]);
-      expect(stan(z(['DZIAL']), new Set([300]))).toEqual([1, 0]);
-    });
-
-    it('DZIAL z WYMOG i terminem → gotowe; bez terminu → do wyceny', () => {
-      expect(stan(z(['DZIAL', 'WYMOG'], { deadline: TERMIN }))).toEqual([0, 1]);
-      expect(stan(z(['DZIAL', 'WYMOG']))).toEqual([1, 0]);
-    });
-
-    it('rozpoznanie do 4 h: bez puli → do wyceny, z pula → gotowe (takze RDZEN)', () => {
-      const r = (tags: string[]) => z(tags, { storyPoints: 4, title: 'Rozpoznanie: sync stanów' });
-      expect(stan(r([]))).toEqual([1, 0]);
-      expect(stan(r(['DZIAL']))).toEqual([0, 1]);
-      expect(stan(r(['RDZEN']))).toEqual([0, 1]);
-      // rozpoznane z czatu (dopisek w WYCENIE), nie z tytulu
-      const bezTytulu = (tags: string[]) => z(tags, { storyPoints: 4 });
-      expect(stan(bezTytulu([]), new Set(), new Set([300]))).toEqual([1, 0]);
-      expect(stan(bezTytulu(['CIAGLOSC']), new Set(), new Set([300]))).toEqual([0, 1]);
-    });
-
-    it('sam STRATEGIA (bez puli) liczy sie jak RDZEN; przy prawdziwej puli nic nie zmienia', () => {
-      expect(pula({ tags: ['STRATEGIA'] })).toBe('RDZEN');
-      expect(stan(z(['STRATEGIA']), new Set([300]))).toEqual([0, 1]); // z wiadomoscia WARTOSC — gotowe
-      expect(stan(z(['STRATEGIA']), new Set())).toEqual([1, 0]); // bez niej — do wyceny
-      expect(stan(z(['DZIAL', 'STRATEGIA', 'ZWROT-3']))).toEqual([1, 0]); // STRATEGIA nie jest kategoria
-      expect(stan(z(['RDZEN', 'STRATEGIA']), new Set())).toEqual([1, 0]);
-    });
-
-    it('dwie pule naraz: nie gotowe, w brakach „pule"', () => {
-      const r = readiness(z(['DZIAL', 'RDZEN', 'OSZCZEDNOSC', 'ZWROT-3']), BEZ_FAKTOW);
-      expect(r.ready).toBe(false);
-      expect(r.missing).toContain('pule');
-    });
-
-    it('czat czytamy dla RDZEN bez kompletu (takze powyzej 4 h), nie dla zadan bez puli', () => {
-      expect(needsChat(z(['RDZEN'], { storyPoints: 40 }))).toBe(true);
-      expect(needsChat(z(['DZIAL'], { storyPoints: 40 }))).toBe(false);
-      expect(needsChat(z(['DZIAL'], { storyPoints: 4 }))).toBe(true);
-      expect(needsChat(z([], { storyPoints: 4 }))).toBe(false);
-      expect(needsChat(z(['STRATEGIA'], { storyPoints: 4 }))).toBe(true); // STRATEGIA bez puli = RDZEN
-    });
-
-    it('dopoki czaty sie czytaja, RDZEN nie jest jeszcze gotowy', () => {
-      expect(stan(z(['RDZEN']), null)).toEqual([1, 0]);
-    });
-
-    it('czyta wiadomosc WARTOSC: z pogrubieniem, bez polskich znakow; nie myli z wyceną; system pomija', () => {
-      const m = (text: string, authorId = 5): ChatMessage => ({ id: 1, authorId, text });
-      expect(hasValueMessage([m('[B]WARTOŚĆ: rdzeń[/B]\n\nUzasadnienie: cel.')])).toBe(true);
-      expect(hasValueMessage([m('WARTOSC - zwrot 4 mies.')])).toBe(true);
-      expect(hasValueMessage([m('WARTOŚĆ: wymóg')])).toBe(true);
-      expect(hasValueMessage([m('WYCENA: 16 h'), m('Ta wartość jest niska')])).toBe(false);
-      expect(hasValueMessage([m('WARTOŚĆ: rdzeń', 0)])).toBe(false);
+    it('wpisy systemowe i zwykle komentarze pomija; bez wiadomosci → null', () => {
+      expect(latestValue([msg(1, 'WARTOŚĆ: oszczędność 900 zł / mies.', 0)])).toBeNull();
+      expect(latestValue([msg(1, 'WYCENA: 8 h'), msg(2, 'ok')])).toBeNull();
     });
   });
+});
 
-  describe('okres zwrotu z tagow', () => {
-    const tags = (...t: string[]) => ({ tags: t });
+describe('komplet DO-STARTU: wycena + wartosc (jak kolejka audytu)', () => {
+  const TERMIN = '2026-12-01T00:00:00+01:00';
+  const gotowe = (t: ReturnType<typeof zadanie>, c: ChatFacts | null) => readiness(t, c).ready;
 
-    it('czyta przedzial z tagu, bez wzgledu na wielkosc liter', () => {
-      expect(paybackBand(tags('ZWROT-3'))).toBe('do3');
-      expect(paybackBand(tags('zwrot-6'))).toBe('3-6');
-      expect(paybackBand(tags('Zwrot-12'))).toBe('6-12');
-      expect(paybackBand(tags('ZWROT-12+'))).toBe('ponad12');
-    });
+  it('wycena + wiadomosc WARTOŚĆ z kwota → gotowe', () => {
+    expect(gotowe(zadanie({ id: 1, storyPoints: 8 }), czat(1, { value: KWOTA }))).toBe(true);
+  });
 
-    it('brak tagu albo obcy tag → brak okresu zwrotu', () => {
-      expect(paybackBand(tags('OSZCZEDNOSC', 'Wysoki'))).toBeNull();
-      expect(paybackBand(tags('ZWROT-24', 'ZWROT'))).toBeNull();
-      expect(paybackBand(tags())).toBeNull();
-    });
+  it('kazdy wariant WARTOŚĆ wystarcza, takze stary „zwrot" bez kwoty', () => {
+    for (const kind of ['bez-kwoty', 'wymog', 'zwrot', 'inna'] as const) {
+      expect(gotowe(zadanie({ id: 1, storyPoints: 8 }), czat(1, { value: { kind } }))).toBe(true);
+    }
+  });
 
-    it('dwa tagi zwrotu: liczy sie najgorszy', () => {
-      expect(paybackBand(tags('ZWROT-3', 'ZWROT-12'))).toBe('6-12');
-    });
+  it('termin w polu „Termin" wystarcza bez czatu', () => {
+    const t = zadanie({ id: 1, storyPoints: 8, deadline: TERMIN });
+    expect(isCompleteByTask(t)).toBe(true);
+    expect(gotowe(t, null)).toBe(true);
+    expect(needsChat(t)).toBe(false);
+  });
 
-    it('wymog przed wszystkim, potem przedzialy, na koncu brak', () => {
-      expect(paybackRank(tags('WYMOG'))).toBe(0);
-      expect(paybackRank(tags('OSZCZEDNOSC', 'ZWROT-3'))).toBe(1);
-      expect(paybackRank(tags('ZWROT-6'))).toBe(2);
-      expect(paybackRank(tags('ZWROT-12'))).toBe(3);
-      expect(paybackRank(tags('ZWROT-12+'))).toBe(4);
-      expect(paybackRank(tags('OSZCZEDNOSC'))).toBe(5);
-      expect(paybackRank(tags('STRATEGIA'))).toBe(5); // zwykly tag, nie ma juz wlasnej rangi
-    });
+  it('rozpoznanie do 4 h z tytulu wystarcza bez czatu; powyzej 4 h nie', () => {
+    expect(isReconByTitle({ title: 'Rozpoznanie: synchronizacja stanów', storyPoints: 4 })).toBe(true);
+    expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 3 })).toBe(true);
+    expect(isReconByTitle({ title: 'Weryfikacja błędu dostawy', storyPoints: 8 })).toBe(false);
+    expect(isReconByTitle({ title: 'Nowy ekran', storyPoints: 2 })).toBe(false);
+    expect(gotowe(zadanie({ id: 1, storyPoints: 4, title: 'Rozpoznanie importu' }), czat(1))).toBe(true);
+  });
+
+  it('rozpoznanie z dopisku w wiadomosci WYCENA — tylko do 4 h', () => {
+    expect(gotowe(zadanie({ id: 1, storyPoints: 4 }), czat(1, { recon: true }))).toBe(true);
+    expect(gotowe(zadanie({ id: 1, storyPoints: 6 }), czat(1, { recon: true }))).toBe(false);
+  });
+
+  it('bez wartosci → niegotowe, w brakach „wartosc"', () => {
+    expect(readiness(zadanie({ id: 1, storyPoints: 8 }), czat(1))).toEqual({ ready: false, missing: ['wartosc'] });
+  });
+
+  it('bez wyceny → niegotowe nawet z wartoscia albo terminem', () => {
+    expect(readiness(zadanie({ id: 1 }), czat(1, { value: KWOTA }))).toEqual({ ready: false, missing: ['sp'] });
+    expect(readiness(zadanie({ id: 1, deadline: TERMIN }), null)).toEqual({ ready: false, missing: ['sp'] });
+    expect(readiness(zadanie({ id: 1 }), czat(1))).toEqual({ ready: false, missing: ['sp', 'wartosc'] });
+  });
+
+  it('pule, kategorie i tagi ZWROT nic juz nie znacza', () => {
+    const t = zadanie({ id: 1, storyPoints: 8, tags: ['DO-STARTU', 'RDZEN', 'OSZCZEDNOSC', 'ZWROT-3'] });
+    expect(gotowe(t, czat(1))).toBe(false);
+    expect(gotowe(t, czat(1, { value: KWOTA }))).toBe(true);
+  });
+
+  it('litera A–D do kompletu nie nalezy', () => {
+    expect(gotowe(zadanie({ id: 1, storyPoints: 8 }), czat(1, { value: KWOTA }))).toBe(true);
+    expect(gotowe(zadanie({ id: 1, storyPoints: 8, tags: ['DO-STARTU', 'A'] }), czat(1))).toBe(false);
+  });
+
+  it('nieprzeczytany czat: wynik nieznany (null), a czat innego zadania nie pomaga', () => {
+    const t = zadanie({ id: 7, storyPoints: 8 });
+    expect(readiness(t, null)).toEqual({ ready: null, missing: [] });
+    expect(readiness(t, czat(1, { value: KWOTA }))).toEqual({ ready: null, missing: [] });
+    expect(needsChat(t)).toBe(true);
+  });
+
+  it('rozpoznaje dopisek rozpoznania w wiadomosci WYCENA, takze starsza postac', () => {
+    const wycena = '[B]WYCENA: 4 h[/B]\n\nOpis.\n\n[I]Rozpoznanie — bez okresu zwrotu.[/I]';
+    expect(hasReconMarker([msg(1, wycena)])).toBe(true);
+    expect(hasReconMarker([msg(1, 'WYCENA: 4 h. rozpoznanie – bez okresu zwrotu')])).toBe(true);
+    expect(hasReconMarker([msg(1, '[B]WYCENA: 3 h[/B]\n\n[B]Co obejmuje ta wycena[/B]\nWeryfikacja tematu.')])).toBe(true);
+    expect(hasReconMarker([msg(1, 'WYCENA: 4 h')])).toBe(false);
+    expect(hasReconMarker([msg(1, wycena, 0)])).toBe(false);
   });
 });
 
@@ -401,46 +301,4 @@ describe('historia dzien po dniu', () => {
     expect(previousDay(h, '2026-09-20')).toBeNull();
   });
 });
-
-describe('readiness', () => {
-  const base = { id: 1, title: 'Zadanie', status: '2', sprintId: null, epicId: null, deadline: null, priority: '1' };
-  const chat = (o: Partial<{ recon: number[]; value: number[] }> = {}) => ({
-    recon: new Set(o.recon ?? []),
-    value: new Set(o.value ?? []),
-    read: new Set([1]),
-  });
-
-  it('nieprzeczytany czat: RDZEN nieznany zamiast „brak WARTOSC"; czat innego zadania nie przeszkadza', () => {
-    const rdzen = { ...base, id: 7, tags: ['RDZEN'], storyPoints: 16 };
-    const facts = { recon: new Set<number>(), value: new Set<number>(), read: new Set([1]) };
-    expect(readiness(rdzen, facts)).toEqual({ ready: null, missing: [] });
-    expect(readiness(rdzen, { ...facts, read: new Set([7]) })).toEqual({ ready: false, missing: ['wartosc'] });
-    expect(readiness(rdzen, { ...facts, value: new Set([7]), read: new Set([7]) }).ready).toBe(true);
-  });
-  it('bez puli i bez SP: oba braki, niegotowe', () => {
-    expect(readiness({ ...base, tags: ['DO-STARTU'], storyPoints: null }, chat())).toEqual({
-      ready: false,
-      missing: ['pula', 'sp'],
-    });
-  });
-
-  it('CIAGLOSC: kategoria i zwrot; WYMOG zamiast zwrotu potrzebuje terminu', () => {
-    expect(readiness({ ...base, tags: ['CIAGLOSC'], storyPoints: 8 }, chat()).missing).toEqual(['kategoria', 'zwrot']);
-    const wymog = { ...base, tags: ['DZIAL', 'WYMOG', 'OSZCZEDNOSC'], storyPoints: 8 };
-    expect(readiness(wymog, chat())).toEqual({ ready: false, missing: ['termin'] });
-    expect(readiness({ ...wymog, deadline: '2026-11-01' }, chat())).toEqual({ ready: true, missing: [] });
-  });
-
-  it('RDZEN: gotowe dopiero z wiadomoscia WARTOSC; przed odczytem czatow — nie wiadomo', () => {
-    const r = { ...base, tags: ['RDZEN'], storyPoints: 8 };
-    expect(readiness(r, null).ready).toBeNull();
-    expect(readiness(r, chat()).missing).toEqual(['wartosc']);
-    expect(readiness(r, chat({ value: [1] })).ready).toBe(true);
-  });
-
-  it('rozpoznanie po tytule albo z czatu: sama pula i wycena', () => {
-    expect(readiness({ ...base, title: 'Rozpoznanie importu', tags: ['DZIAL'], storyPoints: 3 }, chat()).ready).toBe(true);
-    expect(readiness({ ...base, tags: ['DZIAL'], storyPoints: 3 }, chat({ recon: [1] })).ready).toBe(true);
-    expect(readiness({ ...base, tags: ['DZIAL'], storyPoints: 3 }, null).ready).toBeNull();
-  });
-});
+

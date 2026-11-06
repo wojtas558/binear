@@ -10614,3 +10614,45 @@ a.mention:hover {
   font-size: var(--t-mini);
   color: var(--fg-muted);
 }
+
+/* Kwota oszczednosci z wiadomosci WARTOŚĆ — obok story pointow, zielonkawa, zeby nie mylila sie z godzinami. */
+.row-savings {
+  flex: 0 0 auto;
+  padding: 0 var(--s1);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: color-mix(in srgb, #2f9e6b 80%, var(--fg));
+  background: color-mix(in srgb, #2f9e6b 14%, transparent);
+  border-radius: var(--s1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+/* Zadanie przeniesione niedokonczone z poprzedniego sprintu — wyrozniona pigulka zamiast zwyklego tagu. */
+.row-carry {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 0 var(--s2);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  color: color-mix(in srgb, #d9822b 85%, var(--fg));
+  background: color-mix(in srgb, #d9822b 16%, transparent);
+  border: 1px solid color-mix(in srgb, #d9822b 45%, transparent);
+  border-radius: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Pole „Wartość" w panelu szczegolow: opis kwoty, pod nim linia wyliczenia. */
+.dd-value {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dd-value-calc {
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+}
