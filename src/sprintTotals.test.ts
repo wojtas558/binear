@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { barValues, efficiency, share, summarizeSprint, summaryState } from './sprintTotals';
+import {
+  barValues,
+  efficiency,
+  share,
+  stageSummaryState,
+  stageSummaryStates,
+  summarizeSprint,
+  summaryState,
+} from './sprintTotals';
 
-const WORK = new Set([4779]);
+/* Kolumny sprintu jak w Bitriksie: 4777 Nowe, 4779 W toku, 4781 Wstrzymane, 4783 Pull Request, 4785 Do zatwierdzenia, 4787 Wdrozone. */
+const KOLUMNY = [
+  { id: 4777, name: 'Nowe / Oczekujące', type: 'NEW' },
+  { id: 4779, name: 'W toku', type: 'WORK' },
+  { id: 4781, name: 'Wstrzymane', type: '' },
+  { id: 4783, name: 'Pull Request', type: '' },
+  { id: 4785, name: 'Do zatwierdzenia', type: '' },
+  { id: 4787, name: 'Wdrożone', type: 'FINISH' },
+];
+const WORK = stageSummaryStates(KOLUMNY);
 const nazwa = (id: number | null) => (id === 1 ? 'Magazyn' : id === 2 ? 'Handlowy' : 'Bez epika');
 
 const t = (id: number, o: Partial<Parameters<typeof summarizeSprint>[0][number]> = {}) => ({
@@ -28,6 +45,22 @@ describe('summaryState', () => {
     expect(summaryState({ status: '2', stageId: 4779 }, WORK)).toBe('wtoku');
     expect(summaryState({ status: '2', stageId: 4777 }, WORK)).toBe('czeka');
     expect(summaryState({ status: '2', stageId: null }, WORK)).toBe('czeka');
+  });
+
+  it('kolumna rozstrzyga, gdy status nie: Pull Request i Do zatwierdzenia to PR mimo statusu 2', () => {
+    expect(summaryState({ status: '2', stageId: 4783 }, WORK)).toBe('pr');
+    expect(summaryState({ status: '3', stageId: 4783 }, WORK)).toBe('pr');
+    expect(summaryState({ status: '2', stageId: 4785 }, WORK)).toBe('pr');
+    expect(summaryState({ status: '2', stageId: 4781 }, WORK)).toBe('wstrzymane');
+    expect(summaryState({ status: '2', stageId: 4787 }, WORK)).toBe('wdrozone');
+  });
+
+  it('kolumny rozpoznaje po typie i nazwie; „Nowe" niczego nie rozstrzyga', () => {
+    expect(stageSummaryState({ name: 'Nowe / Oczekujące', type: 'NEW' })).toBeNull();
+    expect(stageSummaryState({ name: 'Do zatwierdzenia / PR', type: '' })).toBe('pr');
+    expect(stageSummaryState({ name: 'PR', type: '' })).toBe('pr');
+    expect(stageSummaryState({ name: 'Wdrożone', type: 'FINISH' })).toBe('wdrozone');
+    expect(stageSummaryState({ name: 'Cokolwiek', type: 'WORK' })).toBe('wtoku');
   });
 });
 

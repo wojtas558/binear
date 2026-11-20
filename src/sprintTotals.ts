@@ -9,8 +9,8 @@
  *  - liczymy LISCIE: zadanie nadrzedne z podzadaniami w sprincie jest folderem (punkty siedza na
  *    dzieciach), wiec samo nie wchodzi do sum — inaczej liczylibysmy je dwa razy,
  *  - dzial i temat bierzemy z KORZENIA: dziecko moze nie miec epika, a temat to zadanie nadrzedne,
- *  - stan ze statusu Bitriksa i etapu: 5 wdrozone, 4 czeka na wdrozenie (PR), 6 wstrzymane,
- *    3 albo etap „W toku" — w toku, reszta czeka.
+ *  - stan ze statusu Bitriksa i kolumny: 5 wdrozone, 4 czeka na wdrozenie (PR), 6 wstrzymane, potem kolumna
+ *    („Pull Request", „Do zatwierdzenia", „Wstrzymane", „W toku", „Wdrozone"), status 3 — w toku, reszta czeka.
  */
 
 export type SummaryState = 'wdrozone' | 'pr' | 'wtoku' | 'czeka' | 'wstrzymane';
@@ -72,12 +72,49 @@ type SummaryTask = {
 const zero = (): StateSums => ({ wdrozone: 0, pr: 0, wtoku: 0, czeka: 0, wstrzymane: 0 });
 export const emptyTotals = (): Totals => ({ points: 0, count: 0, by: zero(), counts: zero(), unestimated: 0 });
 
-/** Stan zadania: status Bitriksa ma pierwszenstwo, potem etap „W toku". */
-export function summaryState(t: Pick<SummaryTask, 'status' | 'stageId'>, workStageIds: ReadonlySet<number>): SummaryState {
+/**
+ * Stan, ktory niesie sama KOLUMNA sprintu; `null` = kolumna nic nie rozstrzyga (np. „Nowe / Oczekujace").
+ *
+ * Kolumny posrednie („Pull Request", „Do zatwierdzenia", „Wstrzymane") nie maja w Bitriksie typu i nie zawsze
+ * ustawiaja status — zadanie przesuniete recznie do „Pull Request" zostaje ze statusem 2. Bez tego podsumowanie
+ * pokazywalo je jako nierozpoczete, choc karta zadania mowila „Pull Request". Rozpoznajemy je po nazwie.
+ */
+export function stageSummaryState(s: { name: string; type: string }): SummaryState | null {
+  if (s.type === 'FINISH') return 'wdrozone';
+  if (s.type === 'WORK') return 'wtoku';
+  const n = s.name.toLowerCase();
+  if (/pull request|\bpr\b|zatwierdz/.test(n)) return 'pr';
+  if (/wstrzyma/.test(n)) return 'wstrzymane';
+  if (/w toku/.test(n)) return 'wtoku';
+  return null;
+}
+
+/** Mapa kolumna → stan dla kolumn, ktore stan rozstrzygaja (patrz `stageSummaryState`). */
+export function stageSummaryStates(
+  stages: readonly { id: number; name: string; type: string }[],
+): Map<number, SummaryState> {
+  const out = new Map<number, SummaryState>();
+  for (const s of stages) {
+    const state = stageSummaryState(s);
+    if (state) out.set(s.id, state);
+  }
+  return out;
+}
+
+/**
+ * Stan zadania: status Bitriksa 5 / 4 / 6 ma pierwszenstwo, potem kolumna sprintu (PR, wstrzymane, w toku,
+ * wdrozone), na koncu status 3 — reszta czeka.
+ */
+export function summaryState(
+  t: Pick<SummaryTask, 'status' | 'stageId'>,
+  stageStates: ReadonlyMap<number, SummaryState>,
+): SummaryState {
   if (t.status === '5') return 'wdrozone';
   if (t.status === '4') return 'pr';
   if (t.status === '6') return 'wstrzymane';
-  if (t.status === '3' || (t.stageId !== null && workStageIds.has(t.stageId))) return 'wtoku';
+  const byStage = t.stageId !== null ? stageStates.get(t.stageId) : undefined;
+  if (byStage) return byStage;
+  if (t.status === '3') return 'wtoku';
   return 'czeka';
 }
 
@@ -107,7 +144,7 @@ function rootOf(id: number, byId: Map<number, SummaryTask>): SummaryTask | undef
 export function summarizeSprint(
   tasks: readonly SummaryTask[],
   sprintId: number,
-  workStageIds: ReadonlySet<number>,
+  stageStates: ReadonlyMap<number, SummaryState>,
   epicName: (epicId: number | null) => string,
 ): SprintSummaryData {
   const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -130,7 +167,7 @@ export function summarizeSprint(
 
   for (const t of inSprint) {
     if (hasChild.has(t.id)) continue; // folder: punkty maja dzieci
-    const state = summaryState(t, workStageIds);
+    const state = summaryState(t, stageStates);
     const root = rootOf(t.id, byId) ?? t;
     const epicId = root.epicId ?? t.epicId;
     const key = String(epicId ?? 0);

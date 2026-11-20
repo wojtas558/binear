@@ -163,8 +163,11 @@ undelivered tasks to the next sprint and the picture is gone):
   **topics** (parent tasks), each with its own bar — a click opens the task;
 - only leaf tasks are counted (a parent with subtasks in the sprint is a folder, its points sit on the
   subtasks), a topic and a department come from the root task; tasks without SP are counted but add no
-  points. State comes from the Bitrix status (5 delivered, 4 PR, 6 on hold, 3 or the "In progress" stage in
-  progress, the rest waiting). Scope, filters and search do not apply here.
+  points. State comes from the Bitrix status first (5 delivered, 4 PR, 6 on hold), then from the sprint
+  column — *Pull Request* and *Do zatwierdzenia* count as PR, *Wstrzymane* as on hold, the WORK column as in
+  progress, the FINISH column as delivered — then status 3 (in progress); the rest is waiting. The column
+  matters because a task moved by hand into *Pull Request* can keep status 2. Scope, filters and search do
+  not apply here.
 
 ## Tiles
 

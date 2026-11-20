@@ -110,7 +110,7 @@ function DeptBlock({
 export function SprintSummary({
   sprint,
   tasks,
-  workStageIds,
+  stageStates,
   epicName,
   now,
   teamCapacity,
@@ -120,8 +120,8 @@ export function SprintSummary({
 }: {
   sprint: Sprint | null;
   tasks: Task[];
-  /** Etapy typu WORK („W toku") sprintu. */
-  workStageIds: ReadonlySet<number>;
+  /** Kolumny sprintu, ktore rozstrzygaja stan zadania (patrz `stageSummaryStates`). */
+  stageStates: ReadonlyMap<number, SummaryState>;
   epicName: (epicId: number | null) => string;
   now: Date;
   /** Moce z grafiku zespolu do konca sprintu; `null`, gdy zespol nie jest wpisany. */
@@ -136,8 +136,8 @@ export function SprintSummary({
   const [saving, setSaving] = useState<string | null>(null);
   const data = useMemo(
     () =>
-      sprint ? summarizeSprint(tasks, sprint.id, workStageIds, epicName) : null,
-    [tasks, sprint, workStageIds, epicName],
+      sprint ? summarizeSprint(tasks, sprint.id, stageStates, epicName) : null,
+    [tasks, sprint, stageStates, epicName],
   );
 
   if (!sprint || !data) {

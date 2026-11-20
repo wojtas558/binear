@@ -204,6 +204,7 @@ import { groupChildren, parentProgress, type ParentProgress } from './parentProg
 import { Board } from './Board';
 import { Dashboard } from './Dashboard';
 import { SprintSummary } from './SprintSummary';
+import { stageSummaryStates } from './sprintTotals';
 import { TilesBar } from './TilesBar';
 import { TilesPane } from './TilesPane';
 import { groupedKeys, matchGrouped, moveCondition, normalizeGroups, refreshGroups, toggleJoin } from './filterLogic';
@@ -9718,6 +9719,8 @@ export default function App() {
   );
   /* Etapy „W toku" (wszystkich sprintow) — do podsumowania sprintu i do planowania (praca w toku nie zjada mocy). */
   const workStageIds = useMemo(() => new Set(stages.filter((s) => s.type === 'WORK').map((s) => s.id)), [stages]);
+  /* Stan zadania w podsumowaniu sprintu z kolumny, gdy status go nie rozstrzyga (np. „Pull Request" przy statusie 2). */
+  const stageStates = useMemo(() => stageSummaryStates(stages), [stages]);
   const waitingStageIds = useMemo(() => new Set(waitingStages.map((s) => s.id)), [waitingStages]);
   const waitingStageNames = useMemo(() => new Set(waitingStages.map((s) => s.name)), [waitingStages]);
   /*
@@ -12829,7 +12832,7 @@ export default function App() {
           <SprintSummary
             sprint={activeSprint}
             tasks={tasks}
-            workStageIds={workStageIds}
+            stageStates={stageStates}
             epicName={(id) => (id === null ? 'Bez epika' : (epicNames.get(id)?.name ?? `#${id}`))}
             now={now}
             teamCapacity={teamCapacity}
